@@ -1,0 +1,368 @@
+{"level":"info","msg":"Starting WiseInvest Server...","time":"2025-11-04 16:33:30"}
+{"level":"info","msg":"Database connected successfully","time":"2025-11-04 16:33:30"}
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[5.649ms] [34;1m[rows:1][0m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND table_type = 'BASE TABLE'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.376ms] [34;1m[rows:1][0m SELECT CURRENT_DATABASE()
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[11.192ms] [34;1m[rows:-][0m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'wiseinvest' AND table_schema = CURRENT_SCHEMA() AND table_name = 'users'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.677ms] [34;1m[rows:-][0m SELECT * FROM "users" LIMIT 1
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[16.388ms] [34;1m[rows:-][0m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'wiseinvest' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'users' AND constraint_type = 'UNIQUE'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[5.856ms] [34;1m[rows:-][0m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'wiseinvest' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'users'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.583ms] [34;1m[rows:-][0m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'users'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[1.271ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.633ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'created_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.563ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'updated_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.565ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'deleted_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m
+[0m[33m[0.087ms] [34;1m[rows:1][0m SELECT CURRENT_DATABASE()
+
+2025/11/04 16:33:30 [32m
+[0m[33m[1.963ms] [34;1m[rows:-][0m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'wiseinvest' AND table_schema = CURRENT_SCHEMA() AND table_name = 'users'
+
+2025/11/04 16:33:30 [32m
+[0m[33m[0.226ms] [34;1m[rows:-][0m SELECT * FROM "users" LIMIT 1
+
+2025/11/04 16:33:30 [32m
+[0m[33m[2.731ms] [34;1m[rows:-][0m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'wiseinvest' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'users' AND constraint_type = 'UNIQUE'
+
+2025/11/04 16:33:30 [32m
+[0m[33m[2.433ms] [34;1m[rows:-][0m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'wiseinvest' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'users'
+
+2025/11/04 16:33:30 [32m
+[0m[33m[0.210ms] [34;1m[rows:-][0m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'users'
+
+2025/11/04 16:33:30 [32m
+[0m[33m[1.056ms] [34;1m[rows:1][0m SELECT count(*) FROM pg_indexes WHERE tablename = 'users' AND indexname = 'idx_users_username' AND schemaname = CURRENT_SCHEMA()
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.747ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'username') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m
+[0m[33m[0.103ms] [34;1m[rows:1][0m SELECT CURRENT_DATABASE()
+
+2025/11/04 16:33:30 [32m
+[0m[33m[1.887ms] [34;1m[rows:-][0m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'wiseinvest' AND table_schema = CURRENT_SCHEMA() AND table_name = 'users'
+
+2025/11/04 16:33:30 [32m
+[0m[33m[0.164ms] [34;1m[rows:-][0m SELECT * FROM "users" LIMIT 1
+
+2025/11/04 16:33:30 [32m
+[0m[33m[2.700ms] [34;1m[rows:-][0m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'wiseinvest' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'users' AND constraint_type = 'UNIQUE'
+
+2025/11/04 16:33:30 [32m
+[0m[33m[2.350ms] [34;1m[rows:-][0m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'wiseinvest' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'users'
+
+2025/11/04 16:33:30 [32m
+[0m[33m[0.162ms] [34;1m[rows:-][0m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'users'
+
+2025/11/04 16:33:30 [32m
+[0m[33m[0.266ms] [34;1m[rows:1][0m SELECT count(*) FROM pg_indexes WHERE tablename = 'users' AND indexname = 'idx_users_email' AND schemaname = CURRENT_SCHEMA()
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.661ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'email') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.435ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'password_hash') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.159ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'display_name') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.145ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'avatar') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.113ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'users' AND column_name = 'preferences') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'users' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.323ms] [34;1m[rows:1][0m SELECT count(*) FROM pg_indexes WHERE tablename = 'users' AND indexname = 'idx_users_deleted_at' AND schemaname = CURRENT_SCHEMA()
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.288ms] [34;1m[rows:1][0m SELECT count(*) FROM pg_indexes WHERE tablename = 'users' AND indexname = 'idx_users_username' AND schemaname = CURRENT_SCHEMA()
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.270ms] [34;1m[rows:1][0m SELECT count(*) FROM pg_indexes WHERE tablename = 'users' AND indexname = 'idx_users_email' AND schemaname = CURRENT_SCHEMA()
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.243ms] [34;1m[rows:1][0m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'conversations' AND table_type = 'BASE TABLE'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.090ms] [34;1m[rows:1][0m SELECT CURRENT_DATABASE()
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[1.777ms] [34;1m[rows:-][0m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'wiseinvest' AND table_schema = CURRENT_SCHEMA() AND table_name = 'conversations'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.309ms] [34;1m[rows:-][0m SELECT * FROM "conversations" LIMIT 1
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[2.359ms] [34;1m[rows:-][0m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'wiseinvest' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'conversations' AND constraint_type = 'UNIQUE'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[2.425ms] [34;1m[rows:-][0m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'wiseinvest' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'conversations'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.355ms] [34;1m[rows:-][0m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'conversations'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.184ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'conversations' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'conversations' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.135ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'conversations' AND column_name = 'created_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'conversations' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.140ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'conversations' AND column_name = 'updated_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'conversations' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.133ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'conversations' AND column_name = 'deleted_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'conversations' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.163ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'conversations' AND column_name = 'user_id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'conversations' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.160ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'conversations' AND column_name = 'title') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'conversations' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.161ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'conversations' AND column_name = 'agent_type') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'conversations' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.144ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'conversations' AND column_name = 'metadata') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'conversations' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.141ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'conversations' AND column_name = 'status') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'conversations' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.644ms] [34;1m[rows:1][0m SELECT count(*) FROM INFORMATION_SCHEMA.table_constraints WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'conversations' AND constraint_name = 'fk_users_conversations'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.272ms] [34;1m[rows:1][0m SELECT count(*) FROM pg_indexes WHERE tablename = 'conversations' AND indexname = 'idx_conversations_deleted_at' AND schemaname = CURRENT_SCHEMA()
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.126ms] [34;1m[rows:1][0m SELECT count(*) FROM pg_indexes WHERE tablename = 'conversations' AND indexname = 'idx_conversations_user_id' AND schemaname = CURRENT_SCHEMA()
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.403ms] [34;1m[rows:1][0m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'messages' AND table_type = 'BASE TABLE'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.095ms] [34;1m[rows:1][0m SELECT CURRENT_DATABASE()
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[1.724ms] [34;1m[rows:-][0m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'wiseinvest' AND table_schema = CURRENT_SCHEMA() AND table_name = 'messages'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.343ms] [34;1m[rows:-][0m SELECT * FROM "messages" LIMIT 1
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[2.695ms] [34;1m[rows:-][0m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'wiseinvest' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'messages' AND constraint_type = 'UNIQUE'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[2.547ms] [34;1m[rows:-][0m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'wiseinvest' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'messages'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.219ms] [34;1m[rows:-][0m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'messages'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.145ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'messages' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'messages' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.148ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'messages' AND column_name = 'created_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'messages' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.130ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'messages' AND column_name = 'updated_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'messages' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.130ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'messages' AND column_name = 'deleted_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'messages' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.142ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'messages' AND column_name = 'conversation_id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'messages' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.143ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'messages' AND column_name = 'role') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'messages' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.178ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'messages' AND column_name = 'content') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'messages' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.135ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'messages' AND column_name = 'metadata') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'messages' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.137ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'messages' AND column_name = 'prompt_tokens') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'messages' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.128ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'messages' AND column_name = 'completion_tokens') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'messages' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.133ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'messages' AND column_name = 'total_tokens') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'messages' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.389ms] [34;1m[rows:1][0m SELECT count(*) FROM INFORMATION_SCHEMA.table_constraints WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'messages' AND constraint_name = 'fk_conversations_messages'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.154ms] [34;1m[rows:1][0m SELECT count(*) FROM pg_indexes WHERE tablename = 'messages' AND indexname = 'idx_messages_conversation_id' AND schemaname = CURRENT_SCHEMA()
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.120ms] [34;1m[rows:1][0m SELECT count(*) FROM pg_indexes WHERE tablename = 'messages' AND indexname = 'idx_messages_deleted_at' AND schemaname = CURRENT_SCHEMA()
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.252ms] [34;1m[rows:1][0m SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'agent_sessions' AND table_type = 'BASE TABLE'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.085ms] [34;1m[rows:1][0m SELECT CURRENT_DATABASE()
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[1.769ms] [34;1m[rows:-][0m SELECT c.column_name, c.is_nullable = 'YES', c.udt_name, c.character_maximum_length, c.numeric_precision, c.numeric_precision_radix, c.numeric_scale, c.datetime_precision, 8 * typlen, c.column_default, pd.description, c.identity_increment FROM information_schema.columns AS c JOIN pg_type AS pgt ON c.udt_name = pgt.typname LEFT JOIN pg_catalog.pg_description as pd ON pd.objsubid = c.ordinal_position AND pd.objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = c.table_name AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = c.table_schema)) where table_catalog = 'wiseinvest' AND table_schema = CURRENT_SCHEMA() AND table_name = 'agent_sessions'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.314ms] [34;1m[rows:-][0m SELECT * FROM "agent_sessions" LIMIT 1
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[2.479ms] [34;1m[rows:-][0m SELECT constraint_name FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'wiseinvest' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'agent_sessions' AND constraint_type = 'UNIQUE'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[2.483ms] [34;1m[rows:-][0m SELECT c.column_name, constraint_name, constraint_type FROM information_schema.table_constraints tc JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_catalog, table_name, constraint_name) JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema AND tc.table_name = c.table_name AND ccu.column_name = c.column_name WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE') AND c.table_catalog = 'wiseinvest' AND c.table_schema = CURRENT_SCHEMA() AND c.table_name = 'agent_sessions'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.163ms] [34;1m[rows:-][0m SELECT a.attname as column_name, format_type(a.atttypid, a.atttypmod) AS data_type
+		FROM pg_attribute a JOIN pg_class b ON a.attrelid = b.oid AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA())
+		WHERE a.attnum > 0 -- hide internal columns
+		AND NOT a.attisdropped -- hide deleted columns
+		AND b.relname = 'agent_sessions'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.133ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'agent_sessions' AND column_name = 'id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'agent_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.119ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'agent_sessions' AND column_name = 'created_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'agent_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.101ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'agent_sessions' AND column_name = 'updated_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'agent_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.113ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'agent_sessions' AND column_name = 'deleted_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'agent_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.113ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'agent_sessions' AND column_name = 'conversation_id') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'agent_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.109ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'agent_sessions' AND column_name = 'agent_type') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'agent_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.103ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'agent_sessions' AND column_name = 'state') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'agent_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.105ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'agent_sessions' AND column_name = 'status') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'agent_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.107ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'agent_sessions' AND column_name = 'started_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'agent_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.111ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'agent_sessions' AND column_name = 'completed_at') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'agent_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.100ms] [34;1m[rows:0][0m SELECT description FROM pg_catalog.pg_description WHERE objsubid = (SELECT ordinal_position FROM information_schema.columns WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'agent_sessions' AND column_name = 'error') AND objoid = (SELECT oid FROM pg_catalog.pg_class WHERE relname = 'agent_sessions' AND relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = CURRENT_SCHEMA()))
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.380ms] [34;1m[rows:1][0m SELECT count(*) FROM INFORMATION_SCHEMA.table_constraints WHERE table_schema = CURRENT_SCHEMA() AND table_name = 'agent_sessions' AND constraint_name = 'fk_agent_sessions_conversation'
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.100ms] [34;1m[rows:1][0m SELECT count(*) FROM pg_indexes WHERE tablename = 'agent_sessions' AND indexname = 'idx_agent_sessions_deleted_at' AND schemaname = CURRENT_SCHEMA()
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:39
+[0m[33m[0.111ms] [34;1m[rows:1][0m SELECT count(*) FROM pg_indexes WHERE tablename = 'agent_sessions' AND indexname = 'idx_agent_sessions_conversation_id' AND schemaname = CURRENT_SCHEMA()
+{"level":"info","msg":"Database migration completed","time":"2025-11-04 16:33:30"}
+
+2025/11/04 16:33:30 [32m/Users/songhanxu/WiseInvest/backend/internal/infrastructure/database/postgres.go:51
+[0m[33m[0.305ms] [34;1m[rows:1][0m SELECT count(*) FROM "users" WHERE id = 1 AND "users"."deleted_at" IS NULL
+{"level":"info","msg":"Default data seeded successfully","time":"2025-11-04 16:33:30"}
+{"level":"info","msg":"Redis connected successfully","time":"2025-11-04 16:33:30"}
+{"level":"info","msg":"LLM client initialized","time":"2025-11-04 16:33:30"}
+{"level":"info","msg":"Server starting on port 8080","time":"2025-11-04 16:33:30"}
+
+2025/11/04 16:36:44 [32m/Users/songhanxu/WiseInvest/backend/internal/adapter/repository/conversation_repository.go:23
+[0m[33m[9.578ms] [34;1m[rows:1][0m INSERT INTO "conversations" ("created_at","updated_at","deleted_at","user_id","title","agent_type","metadata","status") VALUES ('2025-11-04 16:36:44.02','2025-11-04 16:36:44.02',NULL,1,'Investment Advisor Conversation','investment_advisor','{}','active') RETURNING "id"
+{"conversation_id":5,"level":"info","msg":"Conversation created","time":"2025-11-04 16:36:44"}
+{"errors":"","ip":"::1","latency":10304042,"level":"info","method":"POST","msg":"Request processed","path":"/api/v1/conversations","query":"","status":201,"time":"2025-11-04 16:36:44","user-agent":"WiseInvest/1 CFNetwork/3826.500.131 Darwin/25.0.0"}
+
+2025/11/04 16:36:48 [32m/Users/songhanxu/WiseInvest/backend/internal/adapter/repository/conversation_repository.go:32
+[0m[33m[2.448ms] [34;1m[rows:1][0m SELECT * FROM "conversations" WHERE "conversations"."id" = 5 AND "conversations"."deleted_at" IS NULL ORDER BY "conversations"."id" LIMIT 1
+
+2025/11/04 16:36:48 [32m/Users/songhanxu/WiseInvest/backend/internal/adapter/repository/message_repository.go:23
+[0m[33m[1.610ms] [34;1m[rows:1][0m INSERT INTO "messages" ("created_at","updated_at","deleted_at","conversation_id","role","content","metadata","prompt_tokens","completion_tokens","total_tokens") VALUES ('2025-11-04 16:36:48.286','2025-11-04 16:36:48.286',NULL,5,'user','Test',NULL,0,0,0) RETURNING "id"
+
+2025/11/04 16:36:48 [32m/Users/songhanxu/WiseInvest/backend/internal/adapter/repository/message_repository.go:53
+[0m[33m[0.753ms] [34;1m[rows:1][0m SELECT * FROM "messages" WHERE conversation_id = 5 AND "messages"."deleted_at" IS NULL ORDER BY created_at DESC LIMIT 20
+
+2025/11/04 16:36:59 [32m/Users/songhanxu/WiseInvest/backend/internal/adapter/repository/message_repository.go:23
+[0m[33m[5.580ms] [34;1m[rows:1][0m INSERT INTO "messages" ("created_at","updated_at","deleted_at","conversation_id","role","content","metadata","prompt_tokens","completion_tokens","total_tokens") VALUES ('2025-11-04 16:36:59.263','2025-11-04 16:36:59.263',NULL,5,'assistant','Hello! I\'m WiseInvest, your professional investment advisor AI assistant. I\'m here and ready to assist you with any questions or analyses related to cryptocurrency investments.
+
+Whether you\'re interested in market trends, risk assessment, portfolio strategies, or need help managing your investment emotions, feel free to ask. I provide data-driven insights and emphasize rational decision-making in this highly volatile space.
+
+Remember: All information and suggestions are for educational purposes only and do not constitute financial advice. Cryptocurrency investments carry significant risks, and past performance is not indicative of future results.
+
+How can I assist you today?','{"agent_type":"investment_advisor","streamed":true}',0,0,0) RETURNING "id"
+
+2025/11/04 16:36:59 [32m/Users/songhanxu/WiseInvest/backend/internal/adapter/repository/conversation_repository.go:52
+[0m[33m[4.793ms] [34;1m[rows:1][0m UPDATE "conversations" SET "created_at"='2025-11-04 16:36:44.02',"updated_at"='2025-11-04 16:36:59.269',"deleted_at"=NULL,"user_id"=1,"title"='Investment Advisor Conversation',"agent_type"='investment_advisor',"metadata"='{}',"status"='active' WHERE "conversations"."deleted_at" IS NULL AND "id" = 5
+{"errors":"","ip":"::1","latency":10989170250,"level":"info","method":"POST","msg":"Request processed","path":"/api/v1/messages/stream","query":"","status":200,"time":"2025-11-04 16:36:59","user-agent":"WiseInvest/1 CFNetwork/3826.500.131 Darwin/25.0.0"}
+
+2025/11/04 16:42:29 [32m/Users/songhanxu/WiseInvest/backend/internal/adapter/repository/conversation_repository.go:32
+[0m[33m[2.099ms] [34;1m[rows:1][0m SELECT * FROM "conversations" WHERE "conversations"."id" = 5 AND "conversations"."deleted_at" IS NULL ORDER BY "conversations"."id" LIMIT 1
+
+2025/11/04 16:42:29 [32m/Users/songhanxu/WiseInvest/backend/internal/adapter/repository/message_repository.go:23
+[0m[33m[3.201ms] [34;1m[rows:1][0m INSERT INTO "messages" ("created_at","updated_at","deleted_at","conversation_id","role","content","metadata","prompt_tokens","completion_tokens","total_tokens") VALUES ('2025-11-04 16:42:29.666','2025-11-04 16:42:29.666',NULL,5,'user','查询比特币当前价格，并以15分钟线分析做空和做多的时机',NULL,0,0,0) RETURNING "id"
+
+2025/11/04 16:42:29 [32m/Users/songhanxu/WiseInvest/backend/internal/adapter/repository/message_repository.go:53
+[0m[33m[0.348ms] [34;1m[rows:3][0m SELECT * FROM "messages" WHERE conversation_id = 5 AND "messages"."deleted_at" IS NULL ORDER BY created_at DESC LIMIT 20
+{"error":"failed to process stream: stream error: context canceled","level":"error","msg":"Failed to stream message","time":"2025-11-04 16:42:44"}
+{"errors":"","ip":"::1","latency":15009037042,"level":"info","method":"POST","msg":"Request processed","path":"/api/v1/messages/stream","query":"","status":200,"time":"2025-11-04 16:42:44","user-agent":"WiseInvest/1 CFNetwork/3826.500.131 Darwin/25.0.0"}
+
+2025/11/04 16:43:57 [32m/Users/songhanxu/WiseInvest/backend/internal/adapter/repository/conversation_repository.go:32
+[0m[33m[1.707ms] [34;1m[rows:1][0m SELECT * FROM "conversations" WHERE "conversations"."id" = 5 AND "conversations"."deleted_at" IS NULL ORDER BY "conversations"."id" LIMIT 1
+
+2025/11/04 16:43:57 [32m/Users/songhanxu/WiseInvest/backend/internal/adapter/repository/message_repository.go:23
+[0m[33m[2.368ms] [34;1m[rows:1][0m INSERT INTO "messages" ("created_at","updated_at","deleted_at","conversation_id","role","content","metadata","prompt_tokens","completion_tokens","total_tokens") VALUES ('2025-11-04 16:43:57.432','2025-11-04 16:43:57.432',NULL,5,'user','给我的合约建议呢',NULL,0,0,0) RETURNING "id"
+
+2025/11/04 16:43:57 [32m/Users/songhanxu/WiseInvest/backend/internal/adapter/repository/message_repository.go:53
+[0m[33m[0.431ms] [34;1m[rows:4][0m SELECT * FROM "messages" WHERE conversation_id = 5 AND "messages"."deleted_at" IS NULL ORDER BY created_at DESC LIMIT 20
+{"error":"failed to process stream: stream error: context canceled","level":"error","msg":"Failed to stream message","time":"2025-11-04 16:44:12"}
+{"errors":"","ip":"::1","latency":15013773500,"level":"info","method":"POST","msg":"Request processed","path":"/api/v1/messages/stream","query":"","status":200,"time":"2025-11-04 16:44:12","user-agent":"WiseInvest/1 CFNetwork/3826.500.131 Darwin/25.0.0"}
