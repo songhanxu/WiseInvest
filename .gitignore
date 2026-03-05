@@ -1,0 +1,30 @@
+# ── Logs ────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── Go ──────────────────────────────────────────────────────────
+backend/server
+backend/*.exe
+backend/*.test
+backend/vendor/
+
+# ── Environment / Secrets ────────────────────────────────────────
+.env
+*.env.local
+
+# ── macOS ───────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ── Xcode / iOS ─────────────────────────────────────────────────
+ios/WiseInvest/WiseInvest.xcodeproj/xcuserdata/
+ios/WiseInvest/WiseInvest.xcodeproj/project.xcworkspace/xcuserdata/
+ios/WiseInvest/DerivedData/
+*.xcuserstate
+*.xccheckout
+
+# ── Editor ──────────────────────────────────────────────────────
+.idea/
+*.swp
+*.swo

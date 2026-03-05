@@ -366,3 +366,6 @@ How can I assist you today?','{"agent_type":"investment_advisor","streamed":true
 [0m[33m[0.431ms] [34;1m[rows:4][0m SELECT * FROM "messages" WHERE conversation_id = 5 AND "messages"."deleted_at" IS NULL ORDER BY created_at DESC LIMIT 20
 {"error":"failed to process stream: stream error: context canceled","level":"error","msg":"Failed to stream message","time":"2025-11-04 16:44:12"}
 {"errors":"","ip":"::1","latency":15013773500,"level":"info","method":"POST","msg":"Request processed","path":"/api/v1/messages/stream","query":"","status":200,"time":"2025-11-04 16:44:12","user-agent":"WiseInvest/1 CFNetwork/3826.500.131 Darwin/25.0.0"}
+{"errors":"","ip":"::1","latency":126667,"level":"info","method":"GET","msg":"Request processed","path":"/health","query":"","status":200,"time":"2025-11-06 21:09:09","user-agent":"curl/8.7.1"}
+{"level":"info","msg":"Shutting down server...","time":"2025-11-06 21:24:06"}
+{"level":"info","msg":"Server exited","time":"2025-11-06 21:24:06"}
