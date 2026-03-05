@@ -46,27 +46,29 @@ func AutoMigrate(db *gorm.DB) error {
 
 // SeedDefaultData creates default data if not exists
 func SeedDefaultData(db *gorm.DB) error {
-	// Check if default user exists
+	// Check if demo user already exists by username
 	var count int64
-	if err := db.Model(&model.User{}).Where("id = ?", 1).Count(&count).Error; err != nil {
+	if err := db.Model(&model.User{}).Where("username = ?", "demo_user").Count(&count).Error; err != nil {
 		return fmt.Errorf("failed to check default user: %w", err)
 	}
 
-	// Create default user if not exists
 	if count == 0 {
 		defaultUser := &model.User{
-			ID:           1,
 			Username:     "demo_user",
 			Email:        "demo@wiseinvest.com",
-			PasswordHash: "$2a$10$dummy.hash.for.demo.user.only", // Dummy hash for demo
+			PasswordHash: "$2a$10$dummy.hash.for.demo.user.only",
 			DisplayName:  "Demo User",
-			Avatar:       "",
 			Preferences:  model.JSONB{},
 		}
-
 		if err := db.Create(defaultUser).Error; err != nil {
 			return fmt.Errorf("failed to create default user: %w", err)
 		}
+	}
+
+	// Ensure the users_id_seq is at least at the current max ID so new inserts won't collide
+	if err := db.Exec("SELECT setval('users_id_seq', GREATEST((SELECT MAX(id) FROM users), 1))").Error; err != nil {
+		// Non-fatal: sequence may have a different name on older installs
+		fmt.Printf("Warning: could not reset users_id_seq: %v\n", err)
 	}
 
 	return nil

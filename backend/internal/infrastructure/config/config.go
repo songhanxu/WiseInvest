@@ -17,6 +17,13 @@ type Config struct {
 	Search   SearchConfig
 	JWT      JWTConfig
 	CORS     CORSConfig
+	WeChat   WeChatConfig
+}
+
+// WeChatConfig holds WeChat OAuth configuration
+type WeChatConfig struct {
+	AppID     string
+	AppSecret string
 }
 
 // SearchConfig holds web search configuration.
@@ -122,6 +129,10 @@ func Load() (*Config, error) {
 			AllowedOrigins: []string{
 				getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000"),
 			},
+		},
+		WeChat: WeChatConfig{
+			AppID:     getEnv("WECHAT_APP_ID", ""),
+			AppSecret: getEnv("WECHAT_APP_SECRET", ""),
 		},
 	}, nil
 }

@@ -12,9 +12,11 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/sirupsen/logrus"
 	"github.com/songhanxu/wiseinvest/internal/adapter/api"
+	"github.com/songhanxu/wiseinvest/internal/adapter/api/handler"
 	"github.com/songhanxu/wiseinvest/internal/adapter/repository"
 	"github.com/songhanxu/wiseinvest/internal/application/service"
 	"github.com/songhanxu/wiseinvest/internal/domain/agent"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/auth"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/cache"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/config"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/database"
@@ -118,8 +120,15 @@ func main() {
 		log,
 	)
 
+	// ── Auth Services ──────────────────────────────────────────────────────────
+	jwtSvc := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.Expiration)
+	wechatSvc := auth.NewWeChatService(cfg.WeChat.AppID, cfg.WeChat.AppSecret)
+	smsSvc := auth.NewSMSService(redisClient)
+	authHandler := handler.NewAuthHandler(db, jwtSvc, wechatSvc, smsSvc, log)
+	log.Info("Auth services initialized")
+
 	// Initialize HTTP server
-	router := api.NewRouter(conversationService, log)
+	router := api.NewRouter(conversationService, authHandler, jwtSvc, log)
 	
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.Server.Port),

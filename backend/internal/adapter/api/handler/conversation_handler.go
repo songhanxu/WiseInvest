@@ -12,6 +12,7 @@ import (
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/logger"
 )
 
+
 // ConversationHandler handles conversation-related HTTP requests
 type ConversationHandler struct {
 	service *service.ConversationService
@@ -28,13 +29,14 @@ func NewConversationHandler(service *service.ConversationService, logger *logger
 
 // CreateConversationRequest represents a request to create a conversation
 type CreateConversationRequest struct {
-	UserID    uint   `json:"user_id" binding:"required"`
 	AgentType string `json:"agent_type" binding:"required"`
 	Title     string `json:"title"`
 }
 
 // CreateConversation handles POST /api/v1/conversations
 func (h *ConversationHandler) CreateConversation(c *gin.Context) {
+	userID := c.GetUint("userID")
+
 	var req CreateConversationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -46,7 +48,7 @@ func (h *ConversationHandler) CreateConversation(c *gin.Context) {
 	}
 
 	conversation, err := h.service.CreateConversation(c.Request.Context(), service.CreateConversationRequest{
-		UserID:    req.UserID,
+		UserID:    userID,
 		AgentType: req.AgentType,
 		Title:     req.Title,
 	})
@@ -78,14 +80,11 @@ func (h *ConversationHandler) GetConversation(c *gin.Context) {
 }
 
 // GetUserConversations handles GET /api/v1/conversations/user/:userId
+// The :userId path parameter is ignored; the authenticated user's ID is used from JWT.
 func (h *ConversationHandler) GetUserConversations(c *gin.Context) {
-	userID, err := strconv.ParseUint(c.Param("userId"), 10, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
-		return
-	}
+	userID := c.GetUint("userID")
 
-	conversations, err := h.service.GetUserConversations(c.Request.Context(), uint(userID))
+	conversations, err := h.service.GetUserConversations(c.Request.Context(), userID)
 	if err != nil {
 		h.logger.WithField("error", err).Error("Failed to get user conversations")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get conversations"})

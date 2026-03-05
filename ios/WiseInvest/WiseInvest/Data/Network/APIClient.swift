@@ -60,24 +60,28 @@ class APIClient {
         self.session = URLSession(configuration: config)
     }
     
+    /// Adds the JWT Bearer token to a request if the user is authenticated
+    private func addAuthHeader(to request: inout URLRequest) {
+        if let token = AuthState.shared.token {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+    }
+
     /// Create or get conversation ID
     func getOrCreateConversation(agentType: AgentType) -> AnyPublisher<UInt, Error> {
         let subject = PassthroughSubject<UInt, Error>()
-        
-        // For now, use a fixed user ID (in production, this should come from auth)
-        let userId: UInt = 1
-        
+
         guard let url = URL(string: "\(baseURL)/api/v1/conversations") else {
             subject.send(completion: .failure(APIError.invalidURL))
             return subject.eraseToAnyPublisher()
         }
-        
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
+        addAuthHeader(to: &request)
+
         let requestBody: [String: Any] = [
-            "user_id": userId,
             "agent_type": agentType.rawValue,
             "title": "\(agentType.displayName) Conversation"
         ]
@@ -136,7 +140,8 @@ class APIClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 300 // 5 minutes for streaming
+        request.timeoutInterval = 300
+        addAuthHeader(to: &request)
         
         // Prepare request body
         let requestBody: [String: Any] = [

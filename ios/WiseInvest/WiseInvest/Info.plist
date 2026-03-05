@@ -9,5 +9,25 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<!-- WeChat SDK: allows app to query if WeChat is installed -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>weixin</string>
+		<string>weixinULAPI</string>
+		<string>weixinURLParamsAPI</string>
+	</array>
+	<!-- WeChat SDK: URL Scheme for receiving callbacks from WeChat app -->
+	<!-- Replace wx_YOUR_APP_ID with your actual WeChat AppID, e.g. wx1234567890abcdef -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>weixin</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>wx_YOUR_APP_ID</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
