@@ -20,10 +20,13 @@ import (
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/cache"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/config"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/database"
+	infraapns "github.com/songhanxu/wiseinvest/internal/infrastructure/apns"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/llm"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/logger"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/scheduler"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/search"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/skill"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/wxwork"
 )
 
 func main() {
@@ -75,6 +78,7 @@ func main() {
 	// Initialize repositories
 	conversationRepo := repository.NewConversationRepository(db)
 	messageRepo := repository.NewMessageRepository(db)
+	deviceTokenRepo := repository.NewDeviceTokenRepository(db)
 
 	// Initialize web searcher (enabled when SEARCH_API_KEY is set in .env)
 	searcher := search.New(cfg.Search.Provider, cfg.Search.APIKey)
@@ -127,8 +131,39 @@ func main() {
 	authHandler := handler.NewAuthHandler(db, jwtSvc, wechatSvc, smsSvc, log)
 	log.Info("Auth services initialized")
 
+	// ── Notification Services ───────────────────────────────────────────────
+	wxClient := wxwork.NewClient(cfg.Notification.WxWorkWebhookURL)
+	if wxClient.IsConfigured() {
+		log.Info("WeChat Work webhook configured")
+	} else {
+		log.Warn("WXWORK_WEBHOOK_URL not set — WeChat Work push disabled")
+	}
+
+	apnsClient, err := infraapns.NewClient(infraapns.Config{
+		KeyID:      cfg.Notification.APNSKeyID,
+		TeamID:     cfg.Notification.APNSTeamID,
+		BundleID:   cfg.Notification.APNSBundleID,
+		KeyFile:    cfg.Notification.APNSKeyFile,
+		Production: cfg.Notification.APNSProduction,
+	})
+	if err != nil {
+		log.Warnf("APNs client init failed (push disabled): %v", err)
+	} else if apnsClient != nil {
+		log.Info("APNs client initialized")
+	} else {
+		log.Warn("APNS_KEY_ID not set — APNs push disabled")
+	}
+
+	deviceHandler := handler.NewDeviceHandler(deviceTokenRepo, log)
+
+	// ── Scheduler ────────────────────────────────────────────────────────────
+	dailyTask := scheduler.NewDailyReportTask(agentFactory, wxClient, apnsClient, deviceTokenRepo, log)
+	sched := scheduler.NewScheduler(dailyTask, log)
+	sched.Start()
+	defer sched.Stop()
+
 	// Initialize HTTP server
-	router := api.NewRouter(conversationService, authHandler, jwtSvc, log)
+	router := api.NewRouter(conversationService, authHandler, deviceHandler, jwtSvc, log)
 	
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.Server.Port),

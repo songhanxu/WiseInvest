@@ -9,15 +9,28 @@ import (
 
 // Config holds all configuration for the application
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	Redis    RedisConfig
-	OpenAI   OpenAIConfig
-	Binance  BinanceConfig
-	Search   SearchConfig
-	JWT      JWTConfig
-	CORS     CORSConfig
-	WeChat   WeChatConfig
+	Server       ServerConfig
+	Database     DatabaseConfig
+	Redis        RedisConfig
+	OpenAI       OpenAIConfig
+	Binance      BinanceConfig
+	Search       SearchConfig
+	JWT          JWTConfig
+	CORS         CORSConfig
+	WeChat       WeChatConfig
+	Notification NotificationConfig
+}
+
+// NotificationConfig holds push notification configuration
+type NotificationConfig struct {
+	// 企业微信机器人 Webhook URL
+	WxWorkWebhookURL string
+	// APNs (.p8 token-based auth)
+	APNSKeyID      string
+	APNSTeamID     string
+	APNSBundleID   string
+	APNSKeyFile    string // path to .p8 file
+	APNSProduction bool
 }
 
 // WeChatConfig holds WeChat OAuth configuration
@@ -133,6 +146,14 @@ func Load() (*Config, error) {
 		WeChat: WeChatConfig{
 			AppID:     getEnv("WECHAT_APP_ID", ""),
 			AppSecret: getEnv("WECHAT_APP_SECRET", ""),
+		},
+		Notification: NotificationConfig{
+			WxWorkWebhookURL: getEnv("WXWORK_WEBHOOK_URL", ""),
+			APNSKeyID:        getEnv("APNS_KEY_ID", ""),
+			APNSTeamID:       getEnv("APNS_TEAM_ID", ""),
+			APNSBundleID:     getEnv("APNS_BUNDLE_ID", ""),
+			APNSKeyFile:      getEnv("APNS_KEY_FILE", "apns_key.p8"),
+			APNSProduction:   getEnv("APNS_PRODUCTION", "false") == "true",
 		},
 	}, nil
 }

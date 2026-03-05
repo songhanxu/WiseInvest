@@ -41,6 +41,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.Conversation{},
 		&model.Message{},
 		&model.AgentSession{},
+		&model.DeviceToken{},
 	)
 }
 
