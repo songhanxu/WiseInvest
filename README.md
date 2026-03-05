@@ -167,7 +167,58 @@ WiseInvest/
 | `SERVER_PORT` | 后端端口 | `8080` |
 | `DB_*` | PostgreSQL 连接配置 | `localhost:5432` |
 | `REDIS_*` | Redis 连接配置 | `localhost:6379` |
+| `WECHAT_APP_ID` | 微信开放平台 AppID | — |
+| `WECHAT_APP_SECRET` | 微信开放平台 AppSecret | — |
 | `BINANCE_API_KEY` | 币安 API（交易功能，可选） | — |
+
+## 接入真实微信登录
+
+> 未配置微信 AppID 时，系统自动进入开发模式（Mock 登录），不影响其他功能调试。
+
+### 第一步：注册微信开放平台
+
+1. 前往 [open.weixin.qq.com](https://open.weixin.qq.com) 注册并创建**移动应用**
+2. 填写 iOS Bundle ID（与 Xcode 项目一致）
+3. 等待审核通过后，获取 **AppID** 和 **AppSecret**
+
+### 第二步：后端配置
+
+在 `backend/.env` 中填入：
+
+```bash
+WECHAT_APP_ID=wx1234567890abcdef
+WECHAT_APP_SECRET=your_32_char_secret
+```
+
+### 第三步：iOS 集成 WechatOpenSDK
+
+**1. 下载 SDK**
+
+前往 [微信 iOS SDK 下载页](https://developers.weixin.qq.com/doc/oplatform/Downloads/iOS.html)，下载最新版 SDK，将 `WechatOpenSDK.xcframework` 拖入 Xcode 项目，设置为 **Embed & Sign**。
+
+**2. 修改 `Info.plist`**
+
+将 `wx_YOUR_APP_ID` 替换为真实 AppID：
+
+```xml
+<string>wx1234567890abcdef</string>
+```
+
+**3. 修改 `WeChatManager.swift`**
+
+填入真实值并解注释 SDK 代码段：
+
+```swift
+let wechatAppID   = "wx1234567890abcdef"
+let universalLink = "https://your-domain.com/wechat/"
+```
+
+然后解注释 `/* SDK: ... */` 包裹的全部代码段，并让 `WeChatManager` 遵循 `WXApiDelegate`。
+
+**4. 配置 Universal Link（必须）**
+
+- 在服务器根目录部署 `.well-known/apple-app-site-association` 文件
+- 在 Xcode → Signing & Capabilities → Associated Domains 中添加 `applinks:your-domain.com`
 
 ## 免责声明
 

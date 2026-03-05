@@ -1,9 +1,12 @@
 import SwiftUI
+import Combine
 
 struct HomeView: View {
     @ObservedObject var coordinator: AppCoordinator
+    @EnvironmentObject var authState: AuthState
     @StateObject private var viewModel = HomeViewModel()
     @State private var sheetItem: ConversationSheetItem?
+    @State private var showAccountMenu = false
 
     var body: some View {
         NavigationView {
@@ -47,19 +50,69 @@ struct HomeView: View {
                     .foregroundColor(.textSecondary)
             }
             Spacer()
-            // Avatar / settings placeholder
-            Circle()
-                .fill(Color.accentBlue.opacity(0.2))
-                .frame(width: 44, height: 44)
-                .overlay(
-                    Image(systemName: "person.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(.accentBlue)
-                )
+            avatarButton
         }
         .padding(.horizontal, 20)
         .padding(.top, 20)
         .padding(.bottom, 28)
+    }
+
+    // MARK: - Avatar Button
+
+    @ViewBuilder
+    private var avatarButton: some View {
+        Button(action: { showAccountMenu.toggle() }) {
+            Group {
+                if let user = authState.currentUser, !user.effectiveAvatar.isEmpty,
+                   let url = URL(string: user.effectiveAvatar) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        default:
+                            defaultAvatarView
+                        }
+                    }
+                } else {
+                    defaultAvatarView
+                }
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(Color.accentBlue.opacity(0.5), lineWidth: 1.5))
+        }
+        .confirmationDialog(
+            accountMenuTitle,
+            isPresented: $showAccountMenu,
+            titleVisibility: .visible
+        ) {
+            Button("切换账号") {
+                authState.signOut()
+            }
+            Button("退出登录", role: .destructive) {
+                authState.signOut()
+            }
+            Button("取消", role: .cancel) {}
+        }
+    }
+
+    private var defaultAvatarView: some View {
+        Circle()
+            .fill(Color.accentBlue.opacity(0.2))
+            .overlay(
+                Image(systemName: "person.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(.accentBlue)
+            )
+    }
+
+    private var accountMenuTitle: String {
+        if let user = authState.currentUser {
+            let name = user.effectiveName
+            let phone = user.phone.map { "手机：\($0)" } ?? "未绑定手机"
+            return "\(name)\n\(phone)"
+        }
+        return "账号管理"
     }
 
     // MARK: - Market Cards

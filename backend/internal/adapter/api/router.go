@@ -5,58 +5,66 @@ import (
 	"github.com/songhanxu/wiseinvest/internal/adapter/api/handler"
 	"github.com/songhanxu/wiseinvest/internal/adapter/api/middleware"
 	"github.com/songhanxu/wiseinvest/internal/application/service"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/auth"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/logger"
 )
 
 // NewRouter creates a new HTTP router
 func NewRouter(
 	conversationService *service.ConversationService,
+	authHandler *handler.AuthHandler,
+	jwtSvc *auth.JWTService,
 	logger *logger.Logger,
 ) *gin.Engine {
-	// Set Gin mode
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
-
-	// Middleware
 	router.Use(middleware.Logger(logger))
 	router.Use(middleware.Recovery(logger))
 	router.Use(middleware.CORS())
 
-	// Health check
 	router.GET("/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"status": "ok",
-			"service": "wiseinvest-api",
-		})
+		c.JSON(200, gin.H{"status": "ok", "service": "wiseinvest-api"})
 	})
 
-	// API v1
 	v1 := router.Group("/api/v1")
 	{
-		// Conversation handler
+		// ── Auth (public) ─────────────────────────────────────────────────
+		authGroup := v1.Group("/auth")
+		{
+			authGroup.POST("/wechat/login", authHandler.WeChatLogin)
+			authGroup.POST("/phone/send-code", authHandler.SendPhoneCode)
+		}
+
+		// ── Auth (requires token) ─────────────────────────────────────────
+		authProtected := v1.Group("/auth")
+		authProtected.Use(middleware.Auth(jwtSvc))
+		{
+			authProtected.POST("/phone/bind", authHandler.BindPhone)
+			authProtected.GET("/me", authHandler.GetMe)
+		}
+
+		// ── Agents (public) ───────────────────────────────────────────────
 		conversationHandler := handler.NewConversationHandler(conversationService, logger)
+		v1.GET("/agents", conversationHandler.GetAvailableAgents)
 
-		// Agents
-		agents := v1.Group("/agents")
+		// ── Protected API ─────────────────────────────────────────────────
+		protected := v1.Group("")
+		protected.Use(middleware.Auth(jwtSvc))
 		{
-			agents.GET("", conversationHandler.GetAvailableAgents)
-		}
+			conversations := protected.Group("/conversations")
+			{
+				conversations.POST("", conversationHandler.CreateConversation)
+				conversations.GET("/:id", conversationHandler.GetConversation)
+				conversations.GET("/user/:userId", conversationHandler.GetUserConversations)
+				conversations.DELETE("/:id", conversationHandler.DeleteConversation)
+			}
 
-		// Conversations
-		conversations := v1.Group("/conversations")
-		{
-			conversations.POST("", conversationHandler.CreateConversation)
-			conversations.GET("/:id", conversationHandler.GetConversation)
-			conversations.GET("/user/:userId", conversationHandler.GetUserConversations)
-			conversations.DELETE("/:id", conversationHandler.DeleteConversation)
-		}
-
-		// Messages
-		messages := v1.Group("/messages")
-		{
-			messages.POST("", conversationHandler.SendMessage)
-			messages.POST("/stream", conversationHandler.SendMessageStream)
+			messages := protected.Group("/messages")
+			{
+				messages.POST("", conversationHandler.SendMessage)
+				messages.POST("/stream", conversationHandler.SendMessageStream)
+			}
 		}
 	}
 
