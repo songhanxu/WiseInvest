@@ -20,6 +20,8 @@ import (
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/database"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/llm"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/logger"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/search"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/skill"
 )
 
 func main() {
@@ -72,8 +74,40 @@ func main() {
 	conversationRepo := repository.NewConversationRepository(db)
 	messageRepo := repository.NewMessageRepository(db)
 
-	// Initialize Agent Factory
-	agentFactory := agent.NewAgentFactory(llmClient, log)
+	// Initialize web searcher (enabled when SEARCH_API_KEY is set in .env)
+	searcher := search.New(cfg.Search.Provider, cfg.Search.APIKey)
+	if cfg.Search.APIKey != "" {
+		log.Infof("Web search enabled (provider: %s)", cfg.Search.Provider)
+	} else {
+		log.Info("Web search disabled (set SEARCH_PROVIDER + SEARCH_API_KEY in .env to enable)")
+	}
+
+	// ── Skill Registries ──────────────────────────────────────────────────────
+	// Each market agent gets its own registry with market-appropriate tools.
+
+	// A-share: web search + real-time price + sector rankings + stock fundamentals
+	aShareRegistry := skill.NewRegistry()
+	aShareRegistry.Register(skill.NewWebSearchSkill(searcher, "A股"))
+	aShareRegistry.Register(skill.NewASharePriceSkill())
+	aShareRegistry.Register(skill.NewAShareSectorSkill())
+	aShareRegistry.Register(skill.NewAShareStockDetailSkill())
+	aShareRegistry.Register(skill.NewLookupAShareCodeSkill())
+	log.Infof("A-share skill registry: %d skills registered", aShareRegistry.Count())
+
+	// US-stock: web search + real-time US stock quote
+	usStockRegistry := skill.NewRegistry()
+	usStockRegistry.Register(skill.NewWebSearchSkill(searcher, ""))
+	usStockRegistry.Register(skill.NewUSStockPriceSkill())
+	log.Infof("US-stock skill registry: %d skills registered", usStockRegistry.Count())
+
+	// Crypto: web search (crypto prefix) + real-time crypto price
+	cryptoRegistry := skill.NewRegistry()
+	cryptoRegistry.Register(skill.NewWebSearchSkill(searcher, "crypto"))
+	cryptoRegistry.Register(skill.NewCryptoPriceSkill())
+	log.Infof("Crypto skill registry: %d skills registered", cryptoRegistry.Count())
+
+	// ── Agent Factory ──────────────────────────────────────────────────────────
+	agentFactory := agent.NewAgentFactory(llmClient, searcher, log, aShareRegistry, usStockRegistry, cryptoRegistry)
 
 	// Initialize services
 	conversationService := service.NewConversationService(
@@ -91,7 +125,7 @@ func main() {
 		Addr:         fmt.Sprintf(":%s", cfg.Server.Port),
 		Handler:      router,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 300 * time.Second, // 5 minutes for streaming responses
 		IdleTimeout:  60 * time.Second,
 	}
 

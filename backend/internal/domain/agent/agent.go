@@ -45,6 +45,15 @@ type HistoryMessage struct {
 
 // AgentType constants
 const (
-	TypeInvestmentAdvisor = "investment_advisor"
+	// Legacy agent types (kept for backward compatibility)
+	TypeOrchestrator      = "orchestrator"
+	TypeConversation      = "conversation"
+	TypeInvestmentAdvisor = "investment_advisor" // Deprecated: use TypeAShare
 	TypeTradingAgent      = "trading_agent"
+	TypeTrading           = "trading"
+
+	// Market-based agent types
+	TypeAShare  = "a_share"  // A股：沪深北交所
+	TypeUSStock = "us_stock" // 美股：纽交所/纳斯达克
+	TypeCrypto  = "crypto"   // 币圈：加密货币
 )

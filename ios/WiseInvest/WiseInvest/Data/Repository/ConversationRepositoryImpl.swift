@@ -39,6 +39,12 @@ class ConversationRepositoryImpl: ConversationRepository {
     }
     
     func getConversations() -> [Conversation] {
+        // Always read fresh from UserDefaults so changes made by other repository
+        // instances (e.g. ConversationView's own repo) are visible immediately.
+        if let data = UserDefaults.standard.data(forKey: "conversations"),
+           let decoded = try? JSONDecoder().decode([Conversation].self, from: data) {
+            conversations = decoded
+        }
         return conversations.sorted { $0.updatedAt > $1.updatedAt }
     }
     

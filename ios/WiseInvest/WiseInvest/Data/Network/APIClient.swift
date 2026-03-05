@@ -52,9 +52,8 @@ class APIClient {
     private let session: URLSession
     
     private init() {
-        // Use localhost for simulator, or your Mac's IP for physical device
-        self.baseURL = "http://localhost:8080"
-        
+        self.baseURL = APIConfig.baseURL
+
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 60
         config.timeoutIntervalForResource = 300
@@ -97,11 +96,20 @@ class APIClient {
             }
             
             guard let data = data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let id = json["id"] as? UInt else {
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 subject.send(completion: .failure(APIError.decodingError))
                 return
             }
+
+            // JSONSerialization 返回 NSNumber，兼容 Int / UInt 两种情况
+            guard let idNumber = json["id"] as? NSNumber else {
+                // 打印原始响应方便调试
+                let raw = String(data: data, encoding: .utf8) ?? "nil"
+                print("[APIClient] getOrCreateConversation decode failed, raw: \(raw)")
+                subject.send(completion: .failure(APIError.decodingError))
+                return
+            }
+            let id = idNumber.uintValue
             
             subject.send(id)
             subject.send(completion: .finished)

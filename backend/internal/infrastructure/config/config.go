@@ -13,8 +13,17 @@ type Config struct {
 	Database DatabaseConfig
 	Redis    RedisConfig
 	OpenAI   OpenAIConfig
+	Binance  BinanceConfig
+	Search   SearchConfig
 	JWT      JWTConfig
 	CORS     CORSConfig
+}
+
+// SearchConfig holds web search configuration.
+// Set SEARCH_PROVIDER (serper|brave) and SEARCH_API_KEY to enable real-time search.
+type SearchConfig struct {
+	Provider string // "serper" | "brave" | "" (disabled)
+	APIKey   string
 }
 
 // ServerConfig holds server configuration
@@ -94,6 +103,16 @@ func Load() (*Config, error) {
 			APIKey:  getEnv("OPENAI_API_KEY", ""),
 			Model:   getEnv("OPENAI_MODEL", "gpt-4-turbo-preview"),
 			BaseURL: getEnv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+		},
+		Search: SearchConfig{
+			Provider: getEnv("SEARCH_PROVIDER", ""),
+			APIKey:   getEnv("SEARCH_API_KEY", ""),
+		},
+		Binance: BinanceConfig{
+			APIKey:    getEnv("BINANCE_API_KEY", ""),
+			APISecret: getEnv("BINANCE_API_SECRET", ""),
+			BaseURL:   getEnv("BINANCE_BASE_URL", "https://api.binance.com"),
+			Testnet:   getEnv("BINANCE_TESTNET", "false") == "true",
 		},
 		JWT: JWTConfig{
 			Secret:     getEnv("JWT_SECRET", "change-me-in-production"),

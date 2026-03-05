@@ -1,18 +1,28 @@
 import SwiftUI
 
-/// Conversation screen for chatting with an agent
+/// Conversation screen for chatting with a market agent
 struct ConversationView: View {
     let agentType: AgentType
+    let market: Market?
     @ObservedObject var coordinator: AppCoordinator
     @StateObject private var viewModel: ConversationViewModel
     @Environment(\.dismiss) private var dismiss
-    
-    init(agentType: AgentType, coordinator: AppCoordinator) {
+    @FocusState private var isInputFocused: Bool
+
+    init(
+        agentType: AgentType,
+        market: Market? = nil,
+        coordinator: AppCoordinator,
+        existingConversation: Conversation? = nil
+    ) {
         self.agentType = agentType
+        self.market = market
         self.coordinator = coordinator
         _viewModel = StateObject(wrappedValue: ConversationViewModel(
             agentType: agentType,
-            conversationRepository: ConversationRepositoryImpl(apiClient: .shared)
+            market: market,
+            conversationRepository: ConversationRepositoryImpl(apiClient: .shared),
+            existingConversation: existingConversation
         ))
     }
     
@@ -29,18 +39,35 @@ struct ConversationView: View {
                     ScrollView {
                         LazyVStack(spacing: 16) {
                             ForEach(viewModel.messages) { message in
-                                MessageBubble(message: message)
-                                    .id(message.id)
+                                MessageBubble(
+                                    message: message,
+                                    onRegenerate: isLastAssistantMessage(message)
+                                        ? { viewModel.regenerateLastMessage() }
+                                        : nil
+                                )
+                                .id(message.id)
                             }
+                            // Invisible anchor for scroll-to-bottom
+                            Color.clear.frame(height: 1).id("__bottom__")
                         }
                         .padding()
                     }
+                    // 下拉时键盘随手指移动收起
+                    .scrollDismissesKeyboard(.interactively)
+                    // 点击消息区域收起键盘
+                    .onTapGesture {
+                        isInputFocused = false
+                    }
+                    // Scroll when a new message is added
                     .onChange(of: viewModel.messages.count) { _ in
-                        if let lastMessage = viewModel.messages.last {
-                            withAnimation {
-                                proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                            }
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo("__bottom__", anchor: .bottom)
                         }
+                    }
+                    // Scroll while streaming content grows
+                    .onChange(of: viewModel.messages.last?.content) { _ in
+                        guard viewModel.isLoading else { return }
+                        proxy.scrollTo("__bottom__", anchor: .bottom)
                     }
                 }
                 
@@ -56,32 +83,42 @@ struct ConversationView: View {
     }
     
     private var headerSection: some View {
-        HStack {
+        HStack(spacing: 12) {
             Button(action: { dismiss() }) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundColor(.textPrimary)
             }
-            
-            Image(systemName: agentType.icon)
-                .font(.system(size: 24))
-                .foregroundColor(.accentBlue)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(agentType.displayName)
-                    .font(.system(size: 18, weight: .semibold))
+
+            // Market icon with gradient background
+            ZStack {
+                LinearGradient(
+                    colors: market?.gradientColors ?? [.accentBlue, .accentBlue],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .frame(width: 38, height: 38)
+                .cornerRadius(10)
+
+                Image(systemName: market?.icon ?? agentType.icon)
+                    .font(.system(size: 18))
+                    .foregroundColor(.white)
+            }
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(market?.displayName ?? agentType.displayName)
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(.textPrimary)
-                
-                Text(agentType.description)
+                Text(market?.subtitle ?? agentType.description)
                     .font(.system(size: 12))
                     .foregroundColor(.textSecondary)
             }
-            
+
             Spacer()
-            
+
             Menu {
                 Button(action: viewModel.clearConversation) {
-                    Label("Clear Conversation", systemImage: "trash")
+                    Label("清空对话", systemImage: "trash")
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -89,7 +126,8 @@ struct ConversationView: View {
                     .foregroundColor(.textPrimary)
             }
         }
-        .padding()
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .background(Color.secondaryBackground)
     }
     
@@ -103,8 +141,13 @@ struct ConversationView: View {
                 .foregroundColor(.textPrimary)
                 .lineLimit(1...5)
                 .disabled(viewModel.isLoading)
+                .focused($isInputFocused)
             
-            Button(action: viewModel.sendMessage) {
+            Button(action: {
+                viewModel.sendMessage()
+                // 发送后收起键盘
+                isInputFocused = false
+            }) {
                 if viewModel.isLoading {
                     ProgressView()
                         .progressViewStyle(CircularProgressViewStyle(tint: .white))
@@ -121,6 +164,12 @@ struct ConversationView: View {
         .background(Color.primaryBackground)
     }
     
+    /// 判断是否是最后一条完整的 assistant 消息（用于显示重新生成按钮）
+    private func isLastAssistantMessage(_ message: Message) -> Bool {
+        guard message.role == .assistant, !message.isStreaming else { return false }
+        return viewModel.messages.last(where: { $0.role == .assistant && !$0.isStreaming })?.id == message.id
+    }
+
     private func errorBanner(_ message: String) -> some View {
         HStack {
             Image(systemName: "exclamationmark.triangle.fill")

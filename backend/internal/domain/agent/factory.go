@@ -5,50 +5,89 @@ import (
 
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/llm"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/logger"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/search"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/skill"
 )
 
 // Factory creates agents
 type Factory struct {
-	llmClient *llm.OpenAIClient
-	logger    *logger.Logger
+	llmClient      *llm.OpenAIClient
+	searcher       search.Searcher
+	logger         *logger.Logger
+	aShareRegistry *skill.Registry // skills for the A-share agent
+	usStockRegistry *skill.Registry // skills for the US-stock agent
+	cryptoRegistry  *skill.Registry // skills for the crypto agent
 }
 
-// NewAgentFactory creates a new agent factory
-func NewAgentFactory(llmClient *llm.OpenAIClient, logger *logger.Logger) *Factory {
+// NewAgentFactory creates a new agent factory.
+// Each market gets its own skill registry so tools can be tailored per agent type.
+func NewAgentFactory(
+	llmClient *llm.OpenAIClient,
+	searcher search.Searcher,
+	logger *logger.Logger,
+	aShareRegistry *skill.Registry,
+	usStockRegistry *skill.Registry,
+	cryptoRegistry *skill.Registry,
+) *Factory {
 	return &Factory{
-		llmClient: llmClient,
-		logger:    logger,
+		llmClient:       llmClient,
+		searcher:        searcher,
+		logger:          logger,
+		aShareRegistry:  aShareRegistry,
+		usStockRegistry: usStockRegistry,
+		cryptoRegistry:  cryptoRegistry,
 	}
 }
 
 // CreateAgent creates an agent by type
 func (f *Factory) CreateAgent(agentType string) (Agent, error) {
 	switch agentType {
+	// Market agents (primary)
+	case TypeAShare:
+		return NewAShareAgent(f.llmClient, f.searcher, f.aShareRegistry, f.logger), nil
+	case TypeUSStock:
+		return NewUSStockAgent(f.llmClient, f.searcher, f.usStockRegistry, f.logger), nil
+	case TypeCrypto:
+		return NewCryptoAgent(f.llmClient, f.searcher, f.cryptoRegistry, f.logger), nil
+
+	// Legacy agents (kept for backward compatibility)
+	case TypeOrchestrator:
+		return NewOrchestratorAgent(f.llmClient, f.logger), nil
+	case TypeConversation:
+		return NewConversationAgent(f.llmClient, f.logger), nil
 	case TypeInvestmentAdvisor:
-		return NewInvestmentAdvisorAgent(f.llmClient, f.logger), nil
-	case TypeTradingAgent:
-		return NewTradingAgent(f.llmClient, f.logger), nil
+		return NewAShareAgent(f.llmClient, f.searcher, f.aShareRegistry, f.logger), nil
+	case TypeTradingAgent, TypeTrading:
+		return NewCryptoAgent(f.llmClient, f.searcher, f.cryptoRegistry, f.logger), nil
+
 	default:
 		return nil, fmt.Errorf("unknown agent type: %s", agentType)
 	}
 }
 
-// GetAvailableAgents returns a list of available agent types
+// GetAvailableAgents returns the three market modules available to users
 func (f *Factory) GetAvailableAgents() []AgentInfo {
 	return []AgentInfo{
 		{
-			Type:        TypeInvestmentAdvisor,
-			Name:        "Investment Advisor",
-			Description: "专业的投资分析顾问，提供市场分析、风险评估和投资建议",
-			Icon:        "chart.line.uptrend.xyaxis",
-			Color:       "#4CAF50",
+			Type:        TypeAShare,
+			Name:        "A 股",
+			Description: "沪深北交所 · A股个股分析、行业研究、政策解读",
+			Icon:        "chart.bar.xaxis",
+			Color:       "#C62828",
 		},
 		{
-			Type:        TypeTradingAgent,
-			Name:        "Trading Agent",
-			Description: "自动化交易助手，连接币安API执行交易操作",
-			Icon:        "arrow.left.arrow.right",
-			Color:       "#2196F3",
+			Type:        TypeUSStock,
+			Name:        "美 股",
+			Description: "NYSE/NASDAQ · 美股研究、财报分析、宏观经济",
+			Icon:        "dollarsign.circle",
+			Color:       "#1565C0",
+		},
+		{
+			Type:        TypeCrypto,
+			Name:        "币 圈",
+			Description: "加密货币 · 现货合约分析、链上数据、DeFi研究",
+			Icon:        "bitcoinsign.circle",
+			Color:       "#E65100",
 		},
 	}
 }

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -169,9 +170,13 @@ func (h *ConversationHandler) SendMessageStream(c *gin.Context) {
 
 	// Stream callback
 	callback := func(content string) error {
-		// Write SSE format with JSON payload
-		jsonData := fmt.Sprintf(`{"content":"%s"}`, content)
-		_, err := fmt.Fprintf(writer, "data: %s\n\n", jsonData)
+		// Use json.Marshal to properly escape special characters (newlines, quotes, etc.)
+		// Manual fmt.Sprintf would produce invalid JSON when content contains \n or "
+		jsonBytes, err := json.Marshal(map[string]string{"content": content})
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(writer, "data: %s\n\n", jsonBytes)
 		if err != nil {
 			return err
 		}
