@@ -165,6 +165,31 @@ class APIClient {
         
         return subject.eraseToAnyPublisher()
     }
+
+    // MARK: - Push Notifications
+
+    /// Registers (or updates) the device's APNs push token with the backend.
+    /// Requires the user to be authenticated; silently skips if no JWT is available.
+    func registerDeviceToken(_ token: String) async throws {
+        guard AuthState.shared.token != nil else { return }
+
+        guard let url = URL(string: "\(baseURL)/api/v1/devices/token") else {
+            throw APIError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        addAuthHeader(to: &request)
+
+        let body: [String: String] = ["token": token, "platform": "ios"]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            throw APIError.httpError(http.statusCode)
+        }
+    }
 }
 
 /// API errors

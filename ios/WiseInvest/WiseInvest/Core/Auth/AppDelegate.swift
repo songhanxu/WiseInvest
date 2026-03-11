@@ -1,6 +1,8 @@
 import UIKit
+import UserNotifications
 
-/// AppDelegate is required to intercept URL-scheme and Universal Link callbacks from WeChat.
+/// AppDelegate is required to intercept URL-scheme and Universal Link callbacks from WeChat,
+/// and to handle remote push notification registration.
 class AppDelegate: NSObject, UIApplicationDelegate {
 
     // MARK: - App Lifecycle
@@ -11,7 +13,46 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     ) -> Bool {
         // Register WeChat SDK on launch
         WeChatManager.shared.registerApp()
+
+        // Request push notification permission and register with APNs
+        registerForPushNotifications()
+
         return true
+    }
+
+    // MARK: - Push Notifications
+
+    private func registerForPushNotifications() {
+        UNUserNotificationCenter.current().requestAuthorization(
+            options: [.alert, .badge, .sound]
+        ) { granted, error in
+            guard granted else { return }
+            DispatchQueue.main.async {
+                UIApplication.shared.registerForRemoteNotifications()
+            }
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        let tokenStr = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
+        Task {
+            do {
+                try await APIClient.shared.registerDeviceToken(tokenStr)
+            } catch {
+                // Non-fatal: push will still work next launch
+                print("[AppDelegate] device token registration failed: \(error)")
+            }
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        print("[AppDelegate] failed to register for remote notifications: \(error)")
     }
 
     // MARK: - URL Scheme callback (WeChat calls back via wx{AppID}://...)

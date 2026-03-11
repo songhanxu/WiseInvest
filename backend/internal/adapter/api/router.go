@@ -13,6 +13,7 @@ import (
 func NewRouter(
 	conversationService *service.ConversationService,
 	authHandler *handler.AuthHandler,
+	deviceHandler *handler.DeviceHandler,
 	jwtSvc *auth.JWTService,
 	logger *logger.Logger,
 ) *gin.Engine {
@@ -52,6 +53,12 @@ func NewRouter(
 		protected := v1.Group("")
 		protected.Use(middleware.Auth(jwtSvc))
 		{
+			// Device token registration for push notifications
+			devices := protected.Group("/devices")
+			{
+				devices.POST("/token", deviceHandler.RegisterToken)
+			}
+
 			conversations := protected.Group("/conversations")
 			{
 				conversations.POST("", conversationHandler.CreateConversation)
