@@ -24,13 +24,17 @@ class StockDataService: ObservableObject {
         if let token = AuthState.shared.token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
+        // Skip ngrok browser warning page for free-tier tunnels
+        request.setValue("true", forHTTPHeaderField: "ngrok-skip-browser-warning")
     }
 
     // MARK: - Market Indices
 
     func getIndices(for market: Market, completion: @escaping ([MarketIndex]) -> Void) {
         let urlString = "\(baseURL)/api/v1/stocks/indices?market=\(market.rawValue)"
+        print("[StockDataService] getIndices URL: \(urlString)")
         guard let url = URL(string: urlString) else {
+            print("[StockDataService] ERROR: Invalid URL")
             completion([])
             return
         }
@@ -39,10 +43,25 @@ class StockDataService: ObservableObject {
         addAuthHeader(to: &request)
 
         session.dataTask(with: request) { data, response, error in
-            guard let data = data, error == nil else {
+            if let error = error {
+                print("[StockDataService] getIndices NETWORK ERROR: \(error.localizedDescription)")
                 DispatchQueue.main.async { completion([]) }
                 return
             }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("[StockDataService] getIndices HTTP status: \(httpResponse.statusCode)")
+            }
+            
+            guard let data = data else {
+                print("[StockDataService] getIndices ERROR: No data")
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+            
+            // Print raw response for debugging
+            let rawString = String(data: data, encoding: .utf8) ?? "nil"
+            print("[StockDataService] getIndices raw response (\(data.count) bytes): \(String(rawString.prefix(500)))")
 
             do {
                 let items = try JSONDecoder().decode([IndexAPIResponse].self, from: data)
@@ -57,6 +76,7 @@ class StockDataService: ObservableObject {
                         sparklineData: item.sparklineData
                     )
                 }
+                print("[StockDataService] getIndices decoded \(indices.count) indices OK")
                 DispatchQueue.main.async { completion(indices) }
             } catch {
                 print("[StockDataService] Failed to decode indices: \(error)")

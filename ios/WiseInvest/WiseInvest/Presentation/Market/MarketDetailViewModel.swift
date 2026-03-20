@@ -40,7 +40,9 @@ class MarketDetailViewModel: ObservableObject {
 
     private func loadIndices() {
         isLoadingIndices = true
+        print("[MarketDetailVM] Loading indices for \(market.rawValue), baseURL: \(APIConfig.baseURL)")
         stockService.getIndices(for: market) { [weak self] indices in
+            print("[MarketDetailVM] Indices loaded: \(indices.count) items")
             self?.indices = indices
             self?.isLoadingIndices = false
         }
@@ -48,7 +50,9 @@ class MarketDetailViewModel: ObservableObject {
 
     func loadWatchlist() {
         isLoadingWatchlist = true
+        print("[MarketDetailVM] Loading watchlist for \(market.rawValue)")
         stockService.getWatchlist(for: market) { [weak self] stocks in
+            print("[MarketDetailVM] Watchlist loaded: \(stocks.count) items")
             self?.watchlist = stocks
             self?.watchlistIDs = Set(stocks.map { $0.id })
             self?.isLoadingWatchlist = false

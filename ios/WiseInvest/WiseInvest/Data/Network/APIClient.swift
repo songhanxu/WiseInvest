@@ -72,6 +72,8 @@ class APIClient {
         if let token = AuthState.shared.token {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
+        // Skip ngrok browser warning page for free-tier tunnels
+        request.setValue("true", forHTTPHeaderField: "ngrok-skip-browser-warning")
     }
 
     /// Create or get conversation ID
