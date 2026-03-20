@@ -3,10 +3,10 @@ import Combine
 
 /// Streaming delegate for SSE
 private class StreamingDelegate: NSObject, URLSessionDataDelegate {
-    let subject: PassthroughSubject<String, Error>
+    let subject: PassthroughSubject<StreamChunk, Error>
     var buffer = ""
     
-    init(subject: PassthroughSubject<String, Error>) {
+    init(subject: PassthroughSubject<StreamChunk, Error>) {
         self.subject = subject
     }
     
@@ -27,9 +27,16 @@ private class StreamingDelegate: NSObject, URLSessionDataDelegate {
                 }
                 
                 if let data = jsonString.data(using: .utf8),
-                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let content = json["content"] as? String {
-                    subject.send(content)
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if let errorText = json["error"] as? String {
+                        subject.send(completion: .failure(NSError(domain: "SSE", code: -1, userInfo: [NSLocalizedDescriptionKey: errorText])))
+                        return
+                    }
+
+                    guard let content = json["content"] as? String else { continue }
+                    let typeRaw = (json["type"] as? String) ?? StreamChunkType.content.rawValue
+                    let type = StreamChunkType(rawValue: typeRaw) ?? .content
+                    subject.send(StreamChunk(type: type, content: content))
                 }
             }
         }
@@ -127,8 +134,8 @@ class APIClient {
     func sendChatMessage(
         conversationId: UInt,
         message: String
-    ) -> AnyPublisher<String, Error> {
-        let subject = PassthroughSubject<String, Error>()
+    ) -> AnyPublisher<StreamChunk, Error> {
+        let subject = PassthroughSubject<StreamChunk, Error>()
         
         // Prepare request
         guard let url = URL(string: "\(baseURL)/api/v1/messages/stream") else {

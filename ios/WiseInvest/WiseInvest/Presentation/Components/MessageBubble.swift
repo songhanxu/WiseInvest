@@ -80,7 +80,19 @@ struct MessageBubble: View {
     @ViewBuilder
     private var messageContent: some View {
         if message.role == .assistant {
-            MarkdownContentView(content: message.content.isEmpty ? " " : message.content)
+            VStack(alignment: .leading, spacing: 8) {
+                if !message.thinkingLines.isEmpty {
+                    ThinkingBox(lines: message.thinkingLines)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.black.opacity(0.14))
+                        .cornerRadius(8)
+                }
+
+                if !message.content.isEmpty {
+                    MarkdownContentView(content: message.content)
+                }
+            }
         } else {
             Text(message.content)
                 .font(.system(size: 16))
@@ -349,6 +361,24 @@ struct CodeBlockView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             withAnimation { copied = false }
         }
+    }
+}
+
+// MARK: - ThinkingBox
+
+private struct ThinkingBox: View {
+    let lines: [String]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(lines.prefix(4).enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .font(.system(size: 13))
+                    .foregroundColor(.textSecondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

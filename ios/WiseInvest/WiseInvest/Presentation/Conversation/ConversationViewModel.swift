@@ -129,9 +129,23 @@ class ConversationViewModel: ObservableObject {
                       let index = self.messages.firstIndex(where: { $0.id == assistantMessageId }) else {
                     return
                 }
-                
+
                 var updatedMessage = self.messages[index]
-                updatedMessage.content += chunk
+                switch chunk.type {
+                case .content:
+                    updatedMessage.content += chunk.content
+                case .thought:
+                    let incomingLines = chunk.content
+                        .components(separatedBy: .newlines)
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
+
+                    for line in incomingLines where updatedMessage.thinkingLines.count < 4 {
+                        if updatedMessage.thinkingLines.last != line {
+                            updatedMessage.thinkingLines.append(line)
+                        }
+                    }
+                }
                 self.messages[index] = updatedMessage
             }
         )
@@ -182,7 +196,20 @@ class ConversationViewModel: ObservableObject {
                     guard let self = self,
                           let index = self.messages.firstIndex(where: { $0.id == assistantMessageId }) else { return }
                     var updatedMessage = self.messages[index]
-                    updatedMessage.content += chunk
+                    switch chunk.type {
+                    case .content:
+                        updatedMessage.content += chunk.content
+                    case .thought:
+                        let incomingLines = chunk.content
+                            .components(separatedBy: .newlines)
+                            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                            .filter { !$0.isEmpty }
+                        for line in incomingLines where updatedMessage.thinkingLines.count < 4 {
+                            if updatedMessage.thinkingLines.last != line {
+                                updatedMessage.thinkingLines.append(line)
+                            }
+                        }
+                    }
                     self.messages[index] = updatedMessage
                 }
             )
@@ -234,9 +261,9 @@ class ConversationViewModel: ObservableObject {
             msg = "分析" + msg.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        // Truncate to at most 10 characters
-        if msg.count > 10 {
-            msg = String(msg.prefix(10))
+        // Truncate to at most 13 characters (enough for "查询恒瑞医药的股票走势" = 11 chars)
+        if msg.count > 13 {
+            msg = String(msg.prefix(13))
         }
 
         // Strip trailing punctuation

@@ -1,6 +1,17 @@
 import Foundation
 import Combine
 
+/// Streaming chunk type from backend SSE
+struct StreamChunk {
+    let type: StreamChunkType
+    let content: String
+}
+
+enum StreamChunkType: String {
+    case content
+    case thought
+}
+
 /// Protocol defining conversation repository operations
 protocol ConversationRepository {
     /// Get or create conversation ID for an agent
@@ -10,7 +21,7 @@ protocol ConversationRepository {
     func sendMessage(
         conversationId: UInt,
         message: String
-    ) -> AnyPublisher<String, Error>
+    ) -> AnyPublisher<StreamChunk, Error>
     
     /// Get conversation history
     func getConversations() -> [Conversation]
