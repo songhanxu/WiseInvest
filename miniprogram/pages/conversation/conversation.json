@@ -1,0 +1,9 @@
+{
+  "navigationStyle": "custom",
+  "backgroundColor": "#081227",
+  "backgroundTextStyle": "light",
+  "disableScroll": true,
+  "usingComponents": {
+    "message-bubble": "/components/message-bubble/message-bubble"
+  }
+}

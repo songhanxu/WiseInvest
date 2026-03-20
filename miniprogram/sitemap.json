@@ -1,0 +1,9 @@
+{
+  "desc": "WiseInvest mini program sitemap",
+  "rules": [
+    {
+      "action": "allow",
+      "page": "*"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "pages": [
+    "pages/login/login",
+    "pages/home/home",
+    "pages/conversation/conversation",
+    "pages/phone-binding/phone-binding"
+  ],
+  "window": {
+    "navigationBarTitleText": "慧投",
+    "navigationBarBackgroundColor": "#0A0E27",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#081227",
+    "backgroundColorTop": "#081227",
+    "backgroundColorBottom": "#081227",
+    "backgroundTextStyle": "light"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

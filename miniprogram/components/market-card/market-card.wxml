@@ -1,0 +1,8 @@
+<view class="market-card" style="background: linear-gradient(135deg, {{market.gradientStart}}, {{market.gradientEnd}});" bindtap="handleTap">
+  <view class="market-icon">{{market.icon}}</view>
+  <view class="market-content">
+    <view class="market-name">{{market.displayName}}</view>
+    <view class="market-subtitle">{{market.subtitle}}</view>
+    <view class="market-desc">{{market.description}}</view>
+  </view>
+</view>

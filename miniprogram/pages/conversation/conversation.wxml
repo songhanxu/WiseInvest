@@ -1,0 +1,58 @@
+<view class="conversation-page">
+  <view class="header" style="padding-top: {{statusBarHeight}}px;">
+    <view class="header-inner">
+      <view class="back" bindtap="goBack">‹</view>
+      <view class="market-icon">{{market.icon}}</view>
+      <view class="market-meta">
+        <view class="market-name">{{market.displayName}}</view>
+        <view class="market-subtitle">{{market.subtitle}}</view>
+      </view>
+      <view class="menu" bindtap="openMenu">⋯</view>
+    </view>
+  </view>
+
+  <scroll-view
+    id="msg-scroll"
+    scroll-y
+    class="message-scroll"
+    scroll-with-animation
+    scroll-into-view="{{scrollIntoView}}"
+    enhanced
+    show-scrollbar="false"
+  >
+    <view class="messages">
+      <message-bubble
+        wx:for="{{messages}}"
+        wx:key="id"
+        id="msg-{{item.id}}"
+        message="{{item}}"
+        showRegenerate="{{item.id === lastRegeneratableAssistantId}}"
+        bindregenerate="onRegenerate"
+      ></message-bubble>
+      <view id="msg-bottom" class="bottom-anchor"></view>
+    </view>
+  </scroll-view>
+
+  <view wx:if="{{errorMessage}}" class="error-banner">{{errorMessage}}</view>
+
+  <view class="input-wrap">
+    <view class="input-box">
+      <textarea
+        class="input"
+        value="{{inputText}}"
+        placeholder="输入问题，开始和 AI 对话..."
+        placeholder-style="color: rgba(170, 188, 228, 0.65);"
+        maxlength="-1"
+        auto-height
+        show-confirm-bar="false"
+        adjust-position="false"
+        cursor-spacing="16"
+        disabled="{{isLoading}}"
+        bindinput="onInput"
+      />
+    </view>
+    <button class="send" disabled="{{!inputText || isLoading}}" bindtap="sendMessage">
+      {{isLoading ? '发送中' : '发送'}}
+    </button>
+  </view>
+</view>
