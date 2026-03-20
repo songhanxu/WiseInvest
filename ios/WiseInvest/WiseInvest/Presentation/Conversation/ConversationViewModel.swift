@@ -16,15 +16,20 @@ class ConversationViewModel: ObservableObject {
     private var streamingMessageId: String?
     private var conversationId: UInt?
 
+    /// Optional stock context to prepend to each user message for stock-specific conversations
+    private var stockContext: String?
+
     init(
         agentType: AgentType,
         market: Market? = nil,
         conversationRepository: ConversationRepository,
-        existingConversation: Conversation? = nil
+        existingConversation: Conversation? = nil,
+        stockContext: String? = nil
     ) {
         self.agentType = agentType
         self.market = market
         self.conversationRepository = conversationRepository
+        self.stockContext = stockContext
 
         if let existing = existingConversation, !existing.messages.isEmpty {
             // Restore saved conversation messages
@@ -33,9 +38,18 @@ class ConversationViewModel: ObservableObject {
         } else {
             // New conversation: show welcome message
             self.conversation = existingConversation ?? Conversation(agentType: agentType)
+
+            let welcomeContent: String
+            if stockContext != nil {
+                // Stock-specific welcome message
+                welcomeContent = "你好！我已获取到当前标的的实时数据和K线走势，可以为你进行深度分析。\n\n你可以问我关于技术面、基本面、买卖时机等任何问题。"
+            } else {
+                welcomeContent = market?.welcomeMessage ?? Self.welcomeMessage(for: agentType)
+            }
+
             let welcomeMessage = Message(
                 role: .assistant,
-                content: market?.welcomeMessage ?? Self.welcomeMessage(for: agentType)
+                content: welcomeContent
             )
             messages.append(welcomeMessage)
             conversation.messages.append(welcomeMessage)
@@ -47,6 +61,11 @@ class ConversationViewModel: ObservableObject {
             .sink(
                 receiveCompletion: { [weak self] completion in
                     if case .failure(let error) = completion {
+                        // Auto sign-out on 401 (expired/invalid token)
+                        if case APIError.httpError(401, _) = error {
+                            AuthState.shared.signOut()
+                            return
+                        }
                         self?.errorMessage = "Failed to initialize conversation: \(error.localizedDescription)"
                     }
                 },
@@ -71,7 +90,13 @@ class ConversationViewModel: ObservableObject {
         messages.append(userMessage)
         conversation.messages.append(userMessage)
         
-        let messageText = inputText
+        // Prepend stock context to user message for backend (not displayed in UI)
+        let messageText: String
+        if let ctx = stockContext {
+            messageText = "\(ctx)\n\n用户提问: \(inputText)"
+        } else {
+            messageText = inputText
+        }
         inputText = ""
         isLoading = true
         errorMessage = nil
@@ -157,7 +182,12 @@ class ConversationViewModel: ObservableObject {
         guard let conversationId = conversationId else { return }
 
         guard let lastUserIndex = messages.lastIndex(where: { $0.role == .user }) else { return }
-        let lastUserContent = messages[lastUserIndex].content
+        let lastUserContent: String
+        if let ctx = stockContext {
+            lastUserContent = "\(ctx)\n\n用户提问: \(messages[lastUserIndex].content)"
+        } else {
+            lastUserContent = messages[lastUserIndex].content
+        }
 
         if let lastAssistantIndex = messages.lastIndex(where: { $0.role == .assistant }),
            lastAssistantIndex > lastUserIndex {

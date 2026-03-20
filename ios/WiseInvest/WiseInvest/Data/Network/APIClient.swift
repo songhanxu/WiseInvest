@@ -106,6 +106,22 @@ class APIClient {
                 return
             }
             
+            // Check HTTP status code first
+            if let httpResponse = response as? HTTPURLResponse,
+               !(200...299).contains(httpResponse.statusCode) {
+                let raw = data.flatMap { String(data: $0, encoding: .utf8) } ?? "nil"
+                print("[APIClient] getOrCreateConversation HTTP \(httpResponse.statusCode), raw: \(raw)")
+                // Try to extract server error message
+                if let data = data,
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let errorMsg = json["error"] as? String {
+                    subject.send(completion: .failure(APIError.httpError(httpResponse.statusCode, errorMsg)))
+                } else {
+                    subject.send(completion: .failure(APIError.httpError(httpResponse.statusCode, nil)))
+                }
+                return
+            }
+            
             guard let data = data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 subject.send(completion: .failure(APIError.decodingError))
@@ -194,7 +210,7 @@ class APIClient {
 
         let (_, response) = try await URLSession.shared.data(for: request)
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-            throw APIError.httpError(http.statusCode)
+            throw APIError.httpError(http.statusCode, nil)
         }
     }
 }
@@ -204,7 +220,7 @@ enum APIError: LocalizedError {
     case invalidURL
     case invalidResponse
     case noData
-    case httpError(Int)
+    case httpError(Int, String?)
     case decodingError
     
     var errorDescription: String? {
@@ -215,7 +231,10 @@ enum APIError: LocalizedError {
             return "Invalid response from server"
         case .noData:
             return "No data received"
-        case .httpError(let code):
+        case .httpError(let code, let message):
+            if let message = message {
+                return "HTTP \(code): \(message)"
+            }
             return "HTTP error: \(code)"
         case .decodingError:
             return "Failed to decode response"

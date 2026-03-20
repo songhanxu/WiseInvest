@@ -14,6 +14,7 @@ func NewRouter(
 	conversationService *service.ConversationService,
 	authHandler *handler.AuthHandler,
 	deviceHandler *handler.DeviceHandler,
+	stockHandler *handler.StockHandler,
 	jwtSvc *auth.JWTService,
 	logger *logger.Logger,
 ) *gin.Engine {
@@ -49,6 +50,16 @@ func NewRouter(
 		conversationHandler := handler.NewConversationHandler(conversationService, logger)
 		v1.GET("/agents", conversationHandler.GetAvailableAgents)
 
+		// ── Stock Market Data (public — no auth needed) ─────────────────
+		stocks := v1.Group("/stocks")
+		{
+			stocks.GET("/indices", stockHandler.GetIndices)
+			stocks.GET("/search", stockHandler.SearchStocks)
+			stocks.GET("/quote", stockHandler.GetStockQuote)
+			stocks.GET("/kline", stockHandler.GetKLineData)
+			stocks.GET("/news", stockHandler.GetStockNews)
+		}
+
 		// ── Protected API ─────────────────────────────────────────────────
 		protected := v1.Group("")
 		protected.Use(middleware.Auth(jwtSvc))
@@ -71,6 +82,14 @@ func NewRouter(
 			{
 				messages.POST("", conversationHandler.SendMessage)
 				messages.POST("/stream", conversationHandler.SendMessageStream)
+			}
+
+			// ── Watchlist CRUD (requires auth, bound to UserID) ──────────
+			watchlist := protected.Group("/stocks")
+			{
+				watchlist.GET("/watchlist", stockHandler.GetWatchlist)
+				watchlist.POST("/watchlist", stockHandler.AddToWatchlist)
+				watchlist.DELETE("/watchlist", stockHandler.RemoveFromWatchlist)
 			}
 		}
 	}
