@@ -356,18 +356,9 @@ func fetchEastmoneyStockDetail(ctx context.Context, client *http.Client, code st
 
 	var out strings.Builder
 	out.WriteString(fmt.Sprintf("**%s（%s）** 基本面数据\n", d.Name, d.Code))
-
-	// Price & change.
-	// During pre-market or after-hours, f43 may be 0 or "-"; fall back to f60 (prev close).
-	price := toFloat(d.Price)
-	prevClose := toFloat(d.PrevClose)
-	if price > 0 {
-		chg := toFloat(d.ChangeAmt)
-		chgPct := toFloat(d.ChangePct)
-		out.WriteString(fmt.Sprintf("  当前价：%.2f 元 │ 涨跌：%+.2f 元（%+.2f%%）\n", price, chg, chgPct))
-	} else if prevClose > 0 {
-		out.WriteString(fmt.Sprintf("  最新收盘价：%.2f 元（当前未开市，昨日收盘价）\n", prevClose))
-	}
+	// Note: current price is intentionally omitted here — it is always provided
+	// by the get_ashare_price skill (real-time Tencent API) which is more reliable.
+	// Including price here creates conflicts when Eastmoney f43 is stale or zero.
 
 	// Valuation
 	if pe := toFloat(d.PE); pe != 0 {

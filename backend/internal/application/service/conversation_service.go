@@ -9,6 +9,7 @@ import (
 	"github.com/songhanxu/wiseinvest/internal/domain/agent"
 	"github.com/songhanxu/wiseinvest/internal/domain/model"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/cache"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/llm"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/logger"
 )
 
@@ -251,10 +252,13 @@ func (s *ConversationService) SendMessageStream(ctx context.Context, req SendMes
 	// Collect full response
 	fullResponse := ""
 	streamCallback := func(content string) error {
-		fullResponse += content
+		if _, isThought := llm.ParseThoughtChunk(content); !isThought {
+			fullResponse += content
+		}
 		return callback(content)
 	}
 
+	_ = callback(llm.ThoughtChunk("已接收问题，正在分析并准备数据"))
 	if err := agentInstance.ProcessStream(ctx, agentReq, streamCallback); err != nil {
 		return nil, fmt.Errorf("failed to process stream: %w", err)
 	}

@@ -16,6 +16,22 @@ type OpenAIClient struct {
 	model  string
 }
 
+const thoughtChunkPrefix = "__THOUGHT__:"
+
+// ThoughtChunk wraps a backend thought/status line so upper layers can route it
+// to the thinking panel instead of the final answer text.
+func ThoughtChunk(content string) string {
+	return thoughtChunkPrefix + content
+}
+
+// ParseThoughtChunk checks whether a stream chunk is a thought/status payload.
+func ParseThoughtChunk(chunk string) (content string, ok bool) {
+	if strings.HasPrefix(chunk, thoughtChunkPrefix) {
+		return strings.TrimPrefix(chunk, thoughtChunkPrefix), true
+	}
+	return "", false
+}
+
 // NewOpenAIClient creates a new OpenAI client
 func NewOpenAIClient(cfg config.OpenAIConfig) *OpenAIClient {
 	clientConfig := openai.DefaultConfig(cfg.APIKey)
@@ -403,25 +419,18 @@ func (c *OpenAIClient) StreamChatCompletionWithToolLoop(
 
 		choice := resp.Choices[0]
 
-		// No tool calls → final answer is already available; stream the final response
+		// No tool calls → final answer
 		if len(choice.Message.ToolCalls) == 0 {
 			if toolsInvoked {
-				// We have tool results in context; ask the model to stream its final analysis
-				finalReq := openai.ChatCompletionRequest{
-					Model:       c.model,
-					Messages:    messages,
-					Temperature: req.Temperature,
-					MaxTokens:   req.MaxTokens,
-					Stream:      true,
-				}
-				stream, sErr := c.client.CreateChatCompletionStream(ctx, finalReq)
-				if sErr != nil {
-					// Fall back to delivering the already-received content
-					return callback(choice.Message.Content)
-				}
-				return c.StreamResponse(stream, callback)
+				_ = callback(ThoughtChunk("工具数据已准备完成，正在生成最终回答"))
+				// Tool loop is done and we already have the final answer from the
+				// non-streaming call above. Deliver it directly — no need to make
+				// an extra streaming request (which could fail and leave the user
+				// with a blank response).
+				return callback(choice.Message.Content)
 			}
-			// No tools were invoked at all → just stream the response normally
+			// No tools were invoked at all → stream the response normally
+			_ = callback(ThoughtChunk("模型已接收请求，正在生成回答"))
 			stream, sErr := c.CreateChatCompletionStream(ctx, req)
 			if sErr != nil {
 				return sErr
@@ -429,8 +438,10 @@ func (c *OpenAIClient) StreamChatCompletionWithToolLoop(
 			return c.StreamResponse(stream, callback)
 		}
 
-		// LLM wants to call tools
 		toolsInvoked = true
+		for _, tc := range choice.Message.ToolCalls {
+			_ = callback(ThoughtChunk(fmt.Sprintf("正在调用工具：%s", tc.Function.Name)))
+		}
 		messages = append(messages, openai.ChatCompletionMessage{
 			Role:      openai.ChatMessageRoleAssistant,
 			Content:   choice.Message.Content,
@@ -438,16 +449,8 @@ func (c *OpenAIClient) StreamChatCompletionWithToolLoop(
 		})
 
 		calls := make([]ToolCall, len(choice.Message.ToolCalls))
-		toolNames := make([]string, len(choice.Message.ToolCalls))
 		for i, tc := range choice.Message.ToolCalls {
 			calls[i] = ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: tc.Function.Arguments}
-			toolNames[i] = tc.Function.Name
-		}
-
-		// Notify the user about tool execution
-		status := fmt.Sprintf("\n> 🔧 **正在调用工具**：%s...\n\n", strings.Join(toolNames, ", "))
-		if err := callback(status); err != nil {
-			return err
 		}
 
 		results, err := handler(ctx, calls)
@@ -455,7 +458,12 @@ func (c *OpenAIClient) StreamChatCompletionWithToolLoop(
 			return fmt.Errorf("tool execution failed (step %d): %w", step+1, err)
 		}
 
-		for _, r := range results {
+		for i, r := range results {
+			toolName := "unknown"
+			if i < len(calls) {
+				toolName = calls[i].Name
+			}
+			_ = callback(ThoughtChunk(fmt.Sprintf("工具执行完成：%s", toolName)))
 			messages = append(messages, openai.ChatCompletionMessage{
 				Role:       openai.ChatMessageRoleTool,
 				Content:    r.Content,

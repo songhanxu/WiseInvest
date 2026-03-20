@@ -33,9 +33,9 @@ func NewScheduler(report *DailyReportTask, log *logger.Logger) *Scheduler {
 
 // Start registers all tasks and starts the cron runner.
 func (s *Scheduler) Start() {
-	// Fire every day at 15:00:00 CST.
+	// Fire every day at 14:40:00 CST.
 	// Format: sec min hour day-of-month month day-of-week
-	if _, err := s.cron.AddFunc("0 0 15 * * *", func() {
+	if _, err := s.cron.AddFunc("0 40 14 * * *", func() {
 		s.log.Info("Scheduler: triggering daily market report...")
 		s.report.Run()
 	}); err != nil {
@@ -44,7 +44,7 @@ func (s *Scheduler) Start() {
 	}
 
 	s.cron.Start()
-	s.log.Info("Scheduler started — daily report fires at 15:00 CST")
+	s.log.Info("Scheduler started — daily report fires at 14:40 CST")
 }
 
 // Stop gracefully stops the scheduler, waiting for running jobs to finish.

@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/songhanxu/wiseinvest/internal/application/service"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/llm"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/logger"
 )
 
@@ -169,9 +171,17 @@ func (h *ConversationHandler) SendMessageStream(c *gin.Context) {
 
 	// Stream callback
 	callback := func(content string) error {
-		// Use json.Marshal to properly escape special characters (newlines, quotes, etc.)
-		// Manual fmt.Sprintf would produce invalid JSON when content contains \n or "
-		jsonBytes, err := json.Marshal(map[string]string{"content": content})
+		eventType := "content"
+		eventContent := content
+		if thought, ok := llm.ParseThoughtChunk(content); ok {
+			eventType = "thought"
+			eventContent = thought
+		}
+
+		jsonBytes, err := json.Marshal(map[string]string{
+			"type":    eventType,
+			"content": eventContent,
+		})
 		if err != nil {
 			return err
 		}
@@ -184,12 +194,35 @@ func (h *ConversationHandler) SendMessageStream(c *gin.Context) {
 		return nil
 	}
 
+	// Heartbeat goroutine: sends SSE comment lines every 5 s so the iOS URLSession
+	// does not cancel the request while the agent is pre-fetching context data.
+	// SSE comment lines (": ...") are ignored by the client-side parser.
+	heartbeatDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				fmt.Fprintf(writer, ": heartbeat\n\n")
+				writer.Flush()
+				flusher.Flush()
+			case <-heartbeatDone:
+				return
+			case <-c.Request.Context().Done():
+				return
+			}
+		}
+	}()
+
 	// Send message with streaming
 	_, err := h.service.SendMessageStream(c.Request.Context(), service.SendMessageRequest{
 		ConversationID: req.ConversationID,
 		Content:        req.Content,
 		Stream:         true,
 	}, callback)
+
+	close(heartbeatDone)
 
 	if err != nil {
 		h.logger.WithField("error", err).Error("Failed to stream message")

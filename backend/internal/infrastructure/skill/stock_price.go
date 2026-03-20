@@ -114,7 +114,10 @@ func normalizeAShareCodes(raw string) []string {
 // [31]=changeAmt, [32]=changePct(%)
 //
 // During pre-market (before 9:30) or after-hours, price may be "0.00".
-// In that case we fall back to prevClose so the context always contains a reference price.
+// In that case we use prevClose (Tencent's own last-close field) so the price source stays
+// consistent — Tencent prevClose is the unadjusted last trading day's close, same series as
+// the intraday price. External K-line sources use forward-adjusted (前复权) prices which can
+// differ materially and would confuse the model.
 func parseTencentStockResponse(raw string) string {
 	var sb strings.Builder
 	for _, line := range strings.Split(raw, "\n") {
@@ -143,10 +146,10 @@ func parseTencentStockResponse(raw string) string {
 		changeAmt := fields[31]
 		changePct := fields[32]
 
-		// During non-trading hours the API returns "0.00" for current price.
-		// Fall back to prevClose so the LLM always has a price reference.
-		preMarket := price == "" || price == "0.00"
-		if preMarket {
+		// During non-trading hours the Tencent API returns "0.00" for current price.
+		// Use prevClose (same source, unadjusted) as the reference price.
+		nonTrading := price == "" || price == "0.00"
+		if nonTrading {
 			if prevClose == "" || prevClose == "0.00" {
 				continue // truly no data
 			}
@@ -156,8 +159,9 @@ func parseTencentStockResponse(raw string) string {
 		}
 
 		sb.WriteString(fmt.Sprintf("**%s（%s）**\n", name, code))
-		if preMarket {
-			sb.WriteString(fmt.Sprintf("  最新收盘价：%s 元（当前未开市，昨日收盘价）\n", price))
+		if nonTrading {
+			sb.WriteString(fmt.Sprintf("  最新收盘价（非交易时段）：%s 元\n", price))
+			sb.WriteString(fmt.Sprintf("  （此为腾讯行情最近一个交易日收盘价，与今日盘中价同一数据来源）\n"))
 		} else {
 			sb.WriteString(fmt.Sprintf("  当前价：%s 元 │ 涨跌：%s 元（%s%%）\n", price, changeAmt, changePct))
 			sb.WriteString(fmt.Sprintf("  开盘：%s 元 │ 昨收：%s 元\n", open, prevClose))
@@ -292,3 +296,4 @@ func fetchYahooFinanceQuote(ctx context.Context, client *http.Client, symbol str
 	sb.WriteString("\n")
 	return sb.String(), nil
 }
+
