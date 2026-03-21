@@ -82,9 +82,28 @@ struct MarketDetailView: View {
                 viewModel.loadWatchlist()
             }
         }
+        .onAppear {
+            viewModel.onViewAppear()
+        }
+        .onDisappear {
+            viewModel.stopAutoRefresh()
+        }
     }
 
     // MARK: - Header
+
+    private var tradingStatusColor: Color {
+        switch viewModel.tradingStatus {
+        case .open:
+            return .accentGreen
+        case .preMarket, .afterHours:
+            return Color(hex: "FF9800")
+        case .lunchBreak:
+            return Color(hex: "FFD700")
+        case .closed:
+            return .textTertiary
+        }
+    }
 
     private var headerSection: some View {
         HStack(spacing: 12) {
@@ -112,9 +131,14 @@ struct MarketDetailView: View {
                 Text(market.displayName)
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(.textPrimary)
-                Text(market.subtitle)
-                    .font(.system(size: 12))
-                    .foregroundColor(.textSecondary)
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(tradingStatusColor)
+                        .frame(width: 6, height: 6)
+                    Text(viewModel.tradingStatus.label)
+                        .font(.system(size: 11))
+                        .foregroundColor(.textSecondary)
+                }
             }
 
             Spacer()
@@ -250,17 +274,21 @@ private struct IndexCard: View {
                         .foregroundColor(.textSecondary)
                         .lineLimit(1)
                     Spacer(minLength: 2)
-                    Text(index.changePercentText)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .foregroundColor(index.isUp ? .accentGreen : Color(hex: "E53935"))
-                        .lineLimit(1)
+                    RollingNumberText(
+                        text: index.changePercentText,
+                        font: .system(size: 11, weight: .semibold, design: .monospaced),
+                        color: index.isUp ? .accentGreen : Color(hex: "E53935")
+                    )
+                    .lineLimit(1)
                 }
 
-                Text(index.valueText)
-                    .font(.system(size: 16, weight: .bold, design: .monospaced))
-                    .foregroundColor(.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                RollingNumberText(
+                    text: index.valueText,
+                    font: .system(size: 16, weight: .bold, design: .monospaced),
+                    color: .textPrimary,
+                    minimumScaleFactor: 0.7
+                )
+                .lineLimit(1)
 
                 if !index.sparklineData.isEmpty {
                     SparklineView(data: index.sparklineData, isUp: index.isUp)
@@ -300,20 +328,24 @@ struct StockRow: View {
 
                 Spacer()
 
-                Text(stock.priceText)
-                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.textPrimary)
+                RollingNumberText(
+                    text: stock.priceText,
+                    font: .system(size: 16, weight: .semibold, design: .monospaced),
+                    color: .textPrimary
+                )
 
-                Text(stock.changePercentText)
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(stock.isUp ? Color.accentGreen : Color(hex: "E53935"))
-                    )
-                    .frame(width: 80)
+                RollingNumberText(
+                    text: stock.changePercentText,
+                    font: .system(size: 13, weight: .semibold, design: .monospaced),
+                    color: .white
+                )
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(stock.isUp ? Color.accentGreen : Color(hex: "E53935"))
+                )
+                .frame(width: 80)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)

@@ -14,6 +14,9 @@ class MarketDetailViewModel: ObservableObject {
     @Published var isLoadingIndices: Bool = false
     @Published var isLoadingWatchlist: Bool = false
 
+    /// Current trading status for UI display
+    @Published var tradingStatus: MarketTradingHours.TradingStatus = .closed("已收盘")
+
     /// Track which stock IDs are in the user's watchlist (for fast lookup)
     @Published var watchlistIDs: Set<String> = []
 
@@ -26,9 +29,29 @@ class MarketDetailViewModel: ObservableObject {
     /// loadWatchlist waits for pending mutations to finish before overwriting.
     private var pendingMutations = 0
 
+    /// Timer for auto-refreshing during trading hours
+    private var refreshTimer: Timer?
+    /// Timer to periodically check if trading hours changed (every 60s)
+    private var tradingCheckTimer: Timer?
+
+    /// Monotonically increasing counter — each new request gets the next value.
+    private var indicesCounter: UInt64 = 0
+    /// High-water mark: the highest sequence number whose response has been accepted.
+    /// Only responses with seq > highWaterMark are applied; others are stale and discarded.
+    private var indicesHighWaterMark: UInt64 = 0
+
+    /// Same pair for watchlist requests.
+    private var watchlistCounter: UInt64 = 0
+    private var watchlistHighWaterMark: UInt64 = 0
+
+    /// Whether the initial data has been loaded (set to true after first `onAppear`).
+    private var hasAppeared = false
+
     init(market: Market) {
         self.market = market
-        loadData()
+        // NOTE: Do NOT load data or start timers here.
+        // Data loading is deferred to `onViewAppear()` so that resources
+        // are only consumed when the user actually enters this screen.
 
         // Debounced search
         $searchText
@@ -43,7 +66,101 @@ class MarketDetailViewModel: ObservableObject {
     deinit {
         // Mark as invalidated so any in-flight callbacks are discarded
         isInvalidated = true
+        stopAutoRefresh()
         cancellables.removeAll()
+    }
+
+    // MARK: - Lifecycle (called by View)
+
+    /// Called from the View's `.onAppear`. Performs first load + starts auto-refresh.
+    func onViewAppear() {
+        tradingStatus = MarketTradingHours.tradingStatus(market: market)
+
+        if !hasAppeared {
+            hasAppeared = true
+            loadData()
+        }
+        startAutoRefresh()
+    }
+
+    // MARK: - Auto Refresh
+
+    /// Start or restart the auto-refresh timer based on trading hours.
+    func startAutoRefresh() {
+        stopAutoRefresh()
+
+        // Update trading status immediately
+        tradingStatus = MarketTradingHours.tradingStatus(market: market)
+
+        // Set up data refresh timer if market is open
+        if let interval = MarketTradingHours.refreshInterval(market: market) {
+            refreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+                guard let self = self, !self.isInvalidated else { return }
+                self.refreshLiveData()
+            }
+        }
+
+        // Check trading status every 60 seconds to start/stop refresh timer
+        tradingCheckTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            guard let self = self, !self.isInvalidated else { return }
+            let newStatus = MarketTradingHours.tradingStatus(market: self.market)
+            let wasActive = self.tradingStatus.isActive
+            let isActive = newStatus.isActive
+
+            self.tradingStatus = newStatus
+
+            // Trading session changed — restart or stop the refresh timer
+            if wasActive != isActive {
+                if isActive {
+                    self.startAutoRefresh()
+                } else {
+                    self.refreshTimer?.invalidate()
+                    self.refreshTimer = nil
+                }
+            }
+        }
+    }
+
+    func stopAutoRefresh() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+        tradingCheckTimer?.invalidate()
+        tradingCheckTimer = nil
+    }
+
+    /// Lightweight refresh: only update indices and watchlist quotes (no skeleton).
+    /// Uses high-water-mark: any response whose seq > current high-water mark is accepted
+    /// (it carries newer data), while responses with seq <= high-water mark are discarded.
+    /// Multiple requests can be in-flight simultaneously — whichever arrives with a higher
+    /// seq wins and advances the water mark.
+    private func refreshLiveData() {
+        // --- Indices ---
+        indicesCounter &+= 1
+        let idxSeq = indicesCounter
+        stockService.getIndices(for: market) { [weak self] indices in
+            guard let self = self, !self.isInvalidated else { return }
+            // Accept only if this response is newer than the last accepted one
+            guard idxSeq > self.indicesHighWaterMark else { return }
+            self.indicesHighWaterMark = idxSeq
+            if !indices.isEmpty {
+                self.indices = indices
+            }
+        }
+
+        // --- Watchlist ---
+        if !watchlist.isEmpty && pendingMutations == 0 {
+            watchlistCounter &+= 1
+            let wlSeq = watchlistCounter
+            stockService.getWatchlist(for: market) { [weak self] stocks in
+                guard let self = self, !self.isInvalidated else { return }
+                guard wlSeq > self.watchlistHighWaterMark else { return }
+                self.watchlistHighWaterMark = wlSeq
+                if !stocks.isEmpty || self.watchlist.isEmpty {
+                    self.watchlist = stocks
+                    self.watchlistIDs = Set(stocks.map { $0.id })
+                }
+            }
+        }
     }
 
     func loadData() {
@@ -53,8 +170,12 @@ class MarketDetailViewModel: ObservableObject {
 
     private func loadIndices() {
         isLoadingIndices = true
+        indicesCounter &+= 1
+        let capturedSeq = indicesCounter
         stockService.getIndices(for: market) { [weak self] indices in
             guard let self = self, !self.isInvalidated else { return }
+            guard capturedSeq > self.indicesHighWaterMark else { return }
+            self.indicesHighWaterMark = capturedSeq
             self.indices = indices
             self.isLoadingIndices = false
         }
@@ -78,8 +199,12 @@ class MarketDetailViewModel: ObservableObject {
 
     private func forceLoadWatchlist() {
         isLoadingWatchlist = true
+        watchlistCounter &+= 1
+        let capturedSeq = watchlistCounter
         stockService.getWatchlist(for: market) { [weak self] stocks in
             guard let self = self, !self.isInvalidated else { return }
+            guard capturedSeq > self.watchlistHighWaterMark else { return }
+            self.watchlistHighWaterMark = capturedSeq
             // If we had pending changes and the server returned empty but we have local data,
             // it likely means the server hasn't caught up yet — keep local state and retry.
             if stocks.isEmpty && !self.watchlist.isEmpty && self.hasPendingChanges {

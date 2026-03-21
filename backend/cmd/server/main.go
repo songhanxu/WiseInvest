@@ -156,7 +156,11 @@ func main() {
 	}
 
 	deviceHandler := handler.NewDeviceHandler(deviceTokenRepo, log)
-	stockHandler := handler.NewStockHandler(watchlistRepo, log)
+
+	// Initialize quote cache for high-frequency market data
+	quoteCache := cache.NewQuoteCache(redisClient, log)
+	stockHandler := handler.NewStockHandler(watchlistRepo, log, quoteCache)
+	defer stockHandler.Stop() // gracefully stop background tickers
 
 	// ── Scheduler ────────────────────────────────────────────────────────────
 	dailyTask := scheduler.NewDailyReportTask(agentFactory, wxClient, apnsClient, deviceTokenRepo, log)

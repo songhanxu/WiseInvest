@@ -15,6 +15,12 @@ struct StockDetailView: View {
     @State private var isLoadingKline = true
     @State private var isLoadingNews = true
     @State private var liveStock: Stock?
+    @State private var tradingStatus: MarketTradingHours.TradingStatus = .closed("已收盘")
+    @State private var refreshTimer: Timer?
+    /// Monotonically increasing counter — each new quote request gets the next value.
+    @State private var quoteCounter: UInt64 = 0
+    /// High-water mark: the highest seq whose response has been accepted.
+    @State private var quoteHighWaterMark: UInt64 = 0
 
     private let stockService = StockDataService.shared
 
@@ -64,6 +70,10 @@ struct StockDetailView: View {
         }
         .onAppear {
             loadData()
+            startAutoRefresh()
+        }
+        .onDisappear {
+            stopAutoRefresh()
         }
         .sheet(isPresented: $showConversation) {
             StockConversationView(
@@ -89,9 +99,17 @@ struct StockDetailView: View {
                 Text(displayStock.name)
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(.textPrimary)
-                Text(displayStock.symbol)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.textSecondary)
+                HStack(spacing: 4) {
+                    Text(displayStock.symbol)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.textSecondary)
+                    Circle()
+                        .fill(tradingStatusColor)
+                        .frame(width: 5, height: 5)
+                    Text(tradingStatus.label)
+                        .font(.system(size: 10))
+                        .foregroundColor(.textTertiary)
+                }
             }
 
             Spacer()
@@ -122,38 +140,46 @@ struct StockDetailView: View {
     private var priceSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .lastTextBaseline, spacing: 8) {
-                Text(displayStock.priceText)
-                    .font(.system(size: 36, weight: .bold, design: .monospaced))
-                    .foregroundColor(displayStock.isUp ? .accentGreen : Color(hex: "E53935"))
+                RollingNumberText(
+                    text: displayStock.priceText,
+                    font: .system(size: 36, weight: .bold, design: .monospaced),
+                    color: displayStock.isUp ? .accentGreen : Color(hex: "E53935")
+                )
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(displayStock.changeText)
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
-                        .foregroundColor(displayStock.isUp ? .accentGreen : Color(hex: "E53935"))
-                    Text(displayStock.changePercentText)
-                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
-                        .foregroundColor(displayStock.isUp ? .accentGreen : Color(hex: "E53935"))
+                    RollingNumberText(
+                        text: displayStock.changeText,
+                        font: .system(size: 14, weight: .medium, design: .monospaced),
+                        color: displayStock.isUp ? .accentGreen : Color(hex: "E53935")
+                    )
+                    RollingNumberText(
+                        text: displayStock.changePercentText,
+                        font: .system(size: 14, weight: .semibold, design: .monospaced),
+                        color: displayStock.isUp ? .accentGreen : Color(hex: "E53935")
+                    )
                 }
             }
 
             HStack(spacing: 24) {
-                priceTag("高", value: String(format: "%.2f", displayStock.high), color: .accentGreen)
-                priceTag("低", value: String(format: "%.2f", displayStock.low), color: Color(hex: "E53935"))
-                priceTag("量", value: String(format: "%.1f亿", displayStock.volume), color: .textSecondary)
+                rollingPriceTag("高", value: String(format: "%.2f", displayStock.high), color: .accentGreen)
+                rollingPriceTag("低", value: String(format: "%.2f", displayStock.low), color: Color(hex: "E53935"))
+                rollingPriceTag("量", value: String(format: "%.1f亿", displayStock.volume), color: .textSecondary)
             }
         }
         .padding(.horizontal, 20)
         .padding(.top, 12)
     }
 
-    private func priceTag(_ label: String, value: String, color: Color) -> some View {
+    private func rollingPriceTag(_ label: String, value: String, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
                 .font(.system(size: 11))
                 .foregroundColor(.textTertiary)
-            Text(value)
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .foregroundColor(color)
+            RollingNumberText(
+                text: value,
+                font: .system(size: 13, weight: .medium, design: .monospaced),
+                color: color
+            )
         }
     }
 
@@ -258,8 +284,12 @@ struct StockDetailView: View {
     // MARK: - Data Loading
 
     private func loadData() {
-        // Refresh real-time stock quote
+        // Refresh real-time stock quote (with high-water-mark protection)
+        quoteCounter &+= 1
+        let capturedSeq = quoteCounter
         stockService.getStockQuote(code: stock.id, market: market) { updated in
+            guard capturedSeq > self.quoteHighWaterMark else { return }
+            self.quoteHighWaterMark = capturedSeq
             if let updated = updated {
                 self.liveStock = updated
             }
@@ -283,6 +313,64 @@ struct StockDetailView: View {
 
         // Check watchlist status from the parent view's watchlist data
         isInWatchlist = watchlistIDs.contains(stock.id)
+    }
+
+    // MARK: - Auto Refresh
+
+    private func startAutoRefresh() {
+        tradingStatus = MarketTradingHours.tradingStatus(market: market)
+
+        guard let interval = MarketTradingHours.refreshInterval(market: market) else {
+            return
+        }
+
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+            refreshQuote()
+        }
+    }
+
+    private func stopAutoRefresh() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+    }
+
+    /// Lightweight refresh: only update the real-time stock quote (no loading skeleton).
+    /// Uses high-water-mark to discard stale responses — any response with seq > current
+    /// high-water mark is accepted, advancing the mark. Multiple requests can be in-flight;
+    /// whichever arrives with a higher seq wins.
+    private func refreshQuote() {
+        tradingStatus = MarketTradingHours.tradingStatus(market: market)
+
+        // If market just closed, stop the timer
+        if !tradingStatus.isActive && market != .crypto {
+            stopAutoRefresh()
+            return
+        }
+
+        quoteCounter &+= 1
+        let capturedSeq = quoteCounter
+
+        stockService.getStockQuote(code: stock.id, market: market) { updated in
+            // Discard stale response — a newer response has already been accepted
+            guard capturedSeq > self.quoteHighWaterMark else { return }
+            self.quoteHighWaterMark = capturedSeq
+            if let updated = updated {
+                self.liveStock = updated
+            }
+        }
+    }
+
+    private var tradingStatusColor: Color {
+        switch tradingStatus {
+        case .open:
+            return .accentGreen
+        case .preMarket, .afterHours:
+            return Color(hex: "FF9800")
+        case .lunchBreak:
+            return Color(hex: "FFD700")
+        case .closed:
+            return .textTertiary
+        }
     }
 
     /// Generate AI analysis items from real stock and K-line data

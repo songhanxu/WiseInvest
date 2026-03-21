@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/songhanxu/wiseinvest/internal/adapter/repository"
 	"github.com/songhanxu/wiseinvest/internal/domain/model"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/cache"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/logger"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
@@ -24,15 +25,86 @@ type StockHandler struct {
 	watchlistRepo *repository.WatchlistRepository
 	logger        *logger.Logger
 	httpClient    *http.Client
+	cache         *cache.QuoteCache // Redis-backed quote cache (may be nil if cache is disabled)
+	stopTicker    context.CancelFunc
 }
 
 // NewStockHandler creates a new StockHandler.
-func NewStockHandler(watchlistRepo *repository.WatchlistRepository, logger *logger.Logger) *StockHandler {
-	return &StockHandler{
+// If quoteCache is non-nil, background tickers will be started to pre-populate
+// Redis with fresh market data; HTTP handlers will read from the cache first.
+func NewStockHandler(watchlistRepo *repository.WatchlistRepository, logger *logger.Logger, quoteCache *cache.QuoteCache) *StockHandler {
+	h := &StockHandler{
 		watchlistRepo: watchlistRepo,
 		logger:        logger,
 		httpClient:    &http.Client{Timeout: 10 * time.Second},
+		cache:         quoteCache,
 	}
+	if quoteCache != nil {
+		ctx, cancel := context.WithCancel(context.Background())
+		h.stopTicker = cancel
+		go h.backgroundRefreshLoop(ctx)
+	}
+	return h
+}
+
+// Stop gracefully shuts down background tickers.
+func (h *StockHandler) Stop() {
+	if h.stopTicker != nil {
+		h.stopTicker()
+	}
+}
+
+// backgroundRefreshLoop runs parallel tickers that continuously fetch market
+// data from upstream APIs and write the results into Redis.
+// Tick intervals are chosen to match exchange update frequencies:
+//   - A-share indices:  ~1 s during trading hours
+//   - US-stock indices: ~2 s during trading hours
+//   - Crypto indices:   ~2 s (24/7)
+func (h *StockHandler) backgroundRefreshLoop(ctx context.Context) {
+	// Helper: run fn immediately then every interval until ctx is done.
+	tick := func(name string, interval time.Duration, fn func()) {
+		fn() // run once on startup
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				fn()
+			}
+		}
+	}
+
+	// A-share indices — 1 s
+	go tick("a_share_indices", 1*time.Second, func() {
+		data, err := h.fetchAShareIndices(ctx)
+		if err != nil || len(data) == 0 {
+			return
+		}
+		_ = h.cache.SetJSON(ctx, cache.IndicesKey("a_share"), data, 5*time.Second)
+	})
+
+	// US-stock indices — 2 s
+	go tick("us_stock_indices", 2*time.Second, func() {
+		data, err := h.fetchUSStockIndices(ctx)
+		if err != nil || len(data) == 0 {
+			return
+		}
+		_ = h.cache.SetJSON(ctx, cache.IndicesKey("us_stock"), data, 10*time.Second)
+	})
+
+	// Crypto indices — 2 s
+	go tick("crypto_indices", 2*time.Second, func() {
+		data, err := h.fetchCryptoIndices(ctx)
+		if err != nil || len(data) == 0 {
+			return
+		}
+		_ = h.cache.SetJSON(ctx, cache.IndicesKey("crypto"), data, 10*time.Second)
+	})
+
+	// Block until context cancelled
+	<-ctx.Done()
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -52,6 +124,17 @@ type IndexResponse struct {
 func (h *StockHandler) GetIndices(c *gin.Context) {
 	market := c.DefaultQuery("market", "a_share")
 
+	// ── Try cache first (populated by background ticker) ─────────────────
+	if h.cache != nil {
+		cacheKey := cache.IndicesKey(market)
+		var cached []IndexResponse
+		if hit, _ := h.cache.GetJSON(c.Request.Context(), cacheKey, &cached); hit && len(cached) > 0 {
+			c.JSON(http.StatusOK, cached)
+			return
+		}
+	}
+
+	// ── Cache miss — fall back to real-time fetch ─────────────────────────
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Second)
 	defer cancel()
 
@@ -76,6 +159,11 @@ func (h *StockHandler) GetIndices(c *gin.Context) {
 	// Ensure we never return null — always return [] for JSON
 	if indices == nil {
 		indices = []IndexResponse{}
+	}
+
+	// Write to cache for next request
+	if h.cache != nil && len(indices) > 0 {
+		_ = h.cache.SetJSON(c.Request.Context(), cache.IndicesKey(market), indices, 5*time.Second)
 	}
 
 	c.JSON(http.StatusOK, indices)
@@ -1268,6 +1356,17 @@ func (h *StockHandler) GetStockQuote(c *gin.Context) {
 		return
 	}
 
+	// ── Try cache first ──────────────────────────────────────────────────
+	if h.cache != nil {
+		cacheKey := cache.StockQuoteKey(market, code)
+		var cached StockResponse
+		if hit, _ := h.cache.GetJSON(c.Request.Context(), cacheKey, &cached); hit && cached.ID != "" {
+			c.JSON(http.StatusOK, cached)
+			return
+		}
+	}
+
+	// ── Cache miss — real-time fetch ─────────────────────────────────────
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Second)
 	defer cancel()
 
@@ -1305,6 +1404,11 @@ func (h *StockHandler) GetStockQuote(c *gin.Context) {
 	if err != nil || len(stocks) == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "stock not found"})
 		return
+	}
+
+	// Write to cache (short TTL — individual stock quote)
+	if h.cache != nil {
+		_ = h.cache.SetJSON(c.Request.Context(), cache.StockQuoteKey(market, code), stocks[0], 2*time.Second)
 	}
 
 	c.JSON(http.StatusOK, stocks[0])

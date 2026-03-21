@@ -13,8 +13,8 @@ class StockDataService: ObservableObject {
     private init() {
         self.baseURL = APIConfig.baseURL
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 15
-        config.timeoutIntervalForResource = 30
+        config.timeoutIntervalForRequest = 3
+        config.timeoutIntervalForResource = 6
         self.session = URLSession(configuration: config)
     }
 
