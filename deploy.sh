@@ -39,10 +39,10 @@ else
 fi
 
 # Docker Compose (V2 已内置于 Docker)
-if ! docker compose version &> /dev/null; then
+if ! sudo docker compose version &> /dev/null; then
     sudo apt install -y docker-compose-plugin
 fi
-echo -e "${GREEN}✓ Docker Compose $(docker compose version --short)${NC}"
+echo -e "${GREEN}✓ Docker Compose $(sudo docker compose version --short)${NC}"
 
 # ── Step 3: 防火墙 ──────────────────────────────────────
 echo -e "${YELLOW}[3/4] 配置防火墙...${NC}"
@@ -71,8 +71,8 @@ if grep -q "CHANGE_ME_TO_A_RANDOM_32_CHAR_STRING" backend/.env.production; then
     echo -e "${GREEN}✓ JWT_SECRET 已自动生成${NC}"
 fi
 
-# 构建 & 启动
-docker compose up -d --build
+# 构建 & 启动（使用 sudo 确保权限）
+sudo docker compose up -d --build
 
 # 等待服务就绪
 echo -e "${YELLOW}等待服务启动...${NC}"
