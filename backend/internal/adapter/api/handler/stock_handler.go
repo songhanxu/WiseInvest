@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -164,13 +165,19 @@ func (h *StockHandler) fetchTencentQuotes(ctx context.Context, codes string, sho
 		})
 	}
 
-	// Fetch sparkline data for each index (minute-level trend)
-	for i, idx := range results {
-		sparkline, err := h.fetchTencentMinuteData(ctx, idx.ID)
-		if err == nil && len(sparkline) > 0 {
-			results[i].SparklineData = sparkline
-		}
+	// Fetch sparkline data for each index in parallel (minute-level trend)
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			sparkline, err := h.fetchTencentMinuteData(ctx, results[idx].ID)
+			if err == nil && len(sparkline) > 0 {
+				results[idx].SparklineData = sparkline
+			}
+		}(i)
 	}
+	wg.Wait()
 
 	return results, nil
 }
@@ -284,6 +291,8 @@ func (h *StockHandler) fetchUSStockIndices(ctx context.Context) ([]IndexResponse
 	bodyStr := string(utf8Body)
 
 	var results []IndexResponse
+	// codeForSparkline tracks the Tencent code for each result index (for parallel sparkline fetch)
+	var sparklineCodes []string
 	for _, idx := range indices {
 		// Parse: v_us.DJI="200~道琼斯~.DJI~45577.47~46021.43~..."
 		prefix := fmt.Sprintf("v_%s=\"", idx.code)
@@ -311,9 +320,6 @@ func (h *StockHandler) fetchUSStockIndices(ctx context.Context) ([]IndexResponse
 		change := parseFloat(fields[31])
 		changePct := parseFloat(fields[32])
 
-		// Fetch sparkline from recent 5-day K-line data
-		sparkline := h.fetchUSIndexSparkline(ctx, idx.code)
-
 		results = append(results, IndexResponse{
 			ID:            idx.id,
 			Name:          idx.name,
@@ -321,10 +327,26 @@ func (h *StockHandler) fetchUSStockIndices(ctx context.Context) ([]IndexResponse
 			Value:         currentPrice,
 			Change:        change,
 			ChangePercent: changePct,
-			SparklineData: sparkline,
+			SparklineData: []float64{},
 		})
+		sparklineCodes = append(sparklineCodes, idx.code)
 		_ = previousClose
 	}
+
+	// Fetch sparkline data for all US indices in parallel
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			sparkline := h.fetchUSIndexSparkline(ctx, sparklineCodes[idx])
+			if len(sparkline) > 0 {
+				results[idx].SparklineData = sparkline
+			}
+		}(i)
+	}
+	wg.Wait()
+
 	return results, nil
 }
 
@@ -405,9 +427,26 @@ func (h *StockHandler) fetchCryptoIndices(ctx context.Context) ([]IndexResponse,
 	}
 	_ = ethPrice
 
-	// Fetch sparkline data for BTC and ETH (last 24 hourly candles)
-	btcSparkline := h.fetchCryptoSparkline(ctx, "BTCUSDT")
-	ethSparkline := h.fetchCryptoSparkline(ctx, "ETHUSDT")
+	// Fetch sparkline data and fear/greed index in parallel
+	var btcSparkline, ethSparkline []float64
+	var fgIdx IndexResponse
+	var fgErr error
+	var wg sync.WaitGroup
+
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		btcSparkline = h.fetchCryptoSparkline(ctx, "BTCUSDT")
+	}()
+	go func() {
+		defer wg.Done()
+		ethSparkline = h.fetchCryptoSparkline(ctx, "ETHUSDT")
+	}()
+	go func() {
+		defer wg.Done()
+		fgIdx, fgErr = h.fetchFearGreedIndex(ctx)
+	}()
+	wg.Wait()
 
 	indices := []IndexResponse{
 		{
@@ -434,8 +473,7 @@ func (h *StockHandler) fetchCryptoIndices(ctx context.Context) ([]IndexResponse,
 	}
 
 	// Fear & Greed index from alternative.me
-	fgIdx, err := h.fetchFearGreedIndex(ctx)
-	if err == nil {
+	if fgErr == nil {
 		indices = append(indices, fgIdx)
 	}
 

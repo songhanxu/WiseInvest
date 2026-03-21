@@ -140,9 +140,13 @@ struct MarketDetailView: View {
                 .padding(.horizontal, 20)
 
             if viewModel.isLoadingIndices && viewModel.indices.isEmpty {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
+                // Skeleton placeholders (3 cards) with shimmer animation
+                HStack(spacing: 8) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        IndexCardSkeleton()
+                    }
+                }
+                .padding(.horizontal, 16)
             } else {
                 HStack(spacing: 8) {
                     ForEach(viewModel.indices) { index in
@@ -185,9 +189,13 @@ struct MarketDetailView: View {
             .padding(.horizontal, 20)
 
             if viewModel.isLoadingWatchlist && viewModel.watchlist.isEmpty {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 30)
+                // Skeleton placeholders (3 rows) with shimmer animation
+                VStack(spacing: 2) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        StockRowSkeleton()
+                            .padding(.horizontal, 20)
+                    }
+                }
             } else if viewModel.watchlist.isEmpty {
                 emptyWatchlistView
             } else {

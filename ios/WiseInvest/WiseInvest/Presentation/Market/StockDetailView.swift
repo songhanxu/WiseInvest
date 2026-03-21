@@ -35,9 +35,8 @@ struct StockDetailView: View {
 
                         // K-Line chart
                         if isLoadingKline {
-                            ProgressView()
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 220)
+                            KLineChartSkeleton()
+                                .padding(.horizontal, 16)
                         } else if !klineData.isEmpty {
                             KLineChartView(data: klineData, accentColor: market.accentColor)
                                 .padding(.horizontal, 16)
@@ -172,12 +171,15 @@ struct StockDetailView: View {
             }
             .padding(.horizontal, 20)
 
-            if analysisItems.isEmpty {
-                Text("加载中...")
-                    .font(.system(size: 13))
-                    .foregroundColor(.textTertiary)
-                    .padding(.horizontal, 20)
-            } else {
+            if isLoadingKline && analysisItems.isEmpty {
+                // Skeleton placeholders for AI analysis cards
+                VStack(spacing: 10) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        AnalysisCardSkeleton()
+                    }
+                }
+                .padding(.horizontal, 16)
+            } else if !analysisItems.isEmpty {
                 VStack(spacing: 10) {
                     ForEach(analysisItems) { item in
                         AnalysisCard(item: item)
@@ -203,9 +205,13 @@ struct StockDetailView: View {
             .padding(.horizontal, 20)
 
             if isLoadingNews {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
+                // Skeleton placeholders for news cards
+                VStack(spacing: 8) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        NewsCardSkeleton()
+                    }
+                }
+                .padding(.horizontal, 16)
             } else if newsItems.isEmpty {
                 Text("暂无相关资讯")
                     .font(.system(size: 13))
