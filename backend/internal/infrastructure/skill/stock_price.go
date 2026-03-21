@@ -2,7 +2,6 @@ package skill
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -175,11 +174,12 @@ func parseTencentStockResponse(raw string) string {
 }
 
 // ─────────────────────────────────────────────
-// USStockPriceSkill — 美股实时行情（Yahoo Finance API）
+// USStockPriceSkill — 美股实时行情（腾讯财经 API）
 // ─────────────────────────────────────────────
 
-// USStockPriceSkill fetches US stock data via Yahoo Finance Chart API.
-// Free, no API key required, supports NYSE and NASDAQ listed stocks.
+// USStockPriceSkill fetches US stock data via Tencent Finance API.
+// Free, no API key required, accessible from mainland China.
+// Supports NYSE and NASDAQ listed stocks.
 type USStockPriceSkill struct{}
 
 func NewUSStockPriceSkill() *USStockPriceSkill { return &USStockPriceSkill{} }
@@ -187,7 +187,7 @@ func NewUSStockPriceSkill() *USStockPriceSkill { return &USStockPriceSkill{} }
 func (s *USStockPriceSkill) Name() string { return "get_us_stock_price" }
 
 func (s *USStockPriceSkill) Description() string {
-	return "查询美股（NYSE/NASDAQ）实时或最新行情数据，包括股价、涨跌幅、成交量、市值等。代码示例：AAPL（苹果）、MSFT（微软）、NVDA（英伟达）、TSLA（特斯拉）、AMZN（亚马逊）、GOOGL（谷歌）。"
+	return "查询美股（NYSE/NASDAQ）实时或最新行情数据，包括股价、涨跌幅、成交量等。代码示例：AAPL（苹果）、MSFT（微软）、NVDA（英伟达）、TSLA（特斯拉）、AMZN（亚马逊）、GOOGL（谷歌）。"
 }
 
 func (s *USStockPriceSkill) Parameters() []SkillParam {
@@ -207,93 +207,121 @@ func (s *USStockPriceSkill) Execute(ctx context.Context, input map[string]interf
 		return nil, fmt.Errorf("symbols is required")
 	}
 
-	httpClient := &http.Client{Timeout: 10 * time.Second}
-	var sb strings.Builder
-
+	// Build Tencent Finance batch query codes: "usAAPL,usNVDA,usTSLA"
+	var tCodes []string
+	var symList []string
 	for _, sym := range strings.Split(symbols, ",") {
 		sym = strings.TrimSpace(strings.ToUpper(sym))
 		if sym == "" {
 			continue
 		}
-		data, err := fetchYahooFinanceQuote(ctx, httpClient, sym)
-		if err != nil {
-			sb.WriteString(fmt.Sprintf("**%s**：获取数据失败（%v）\n\n", sym, err))
+		tCodes = append(tCodes, "us"+sym)
+		symList = append(symList, sym)
+	}
+	if len(tCodes) == 0 {
+		return nil, fmt.Errorf("no valid stock symbols provided")
+	}
+
+	apiURL := fmt.Sprintf("https://qt.gtimg.cn/q=%s", strings.Join(tCodes, ","))
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch stock data: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response: %w", err)
+	}
+	// Tencent Finance returns GBK encoding; decode to UTF-8
+	utf8Body, _, err := transform.Bytes(simplifiedchinese.GBK.NewDecoder(), body)
+	if err != nil {
+		utf8Body = body // fallback to raw
+	}
+	bodyStr := string(utf8Body)
+
+	var sb strings.Builder
+	for _, sym := range symList {
+		tCode := "us" + sym
+		// Parse: v_usAAPL="200~苹果~AAPL.OQ~247.99~245.00~..."
+		prefix := fmt.Sprintf("v_%s=\"", tCode)
+		start := strings.Index(bodyStr, prefix)
+		if start == -1 {
+			sb.WriteString(fmt.Sprintf("**%s**：未找到数据\n\n", sym))
 			continue
 		}
-		sb.WriteString(data)
+		start += len(prefix)
+		end := strings.Index(bodyStr[start:], "\"")
+		if end == -1 {
+			continue
+		}
+		fields := strings.Split(bodyStr[start:start+end], "~")
+		// Tencent US stock quote fields:
+		// [0]=status [1]=中文名 [2]=code [3]=currentPrice [4]=previousClose
+		// [5]=open [6]=volume [31]=change [32]=changePct [33]=high [34]=low
+		// [44]=English name
+		if len(fields) < 35 {
+			sb.WriteString(fmt.Sprintf("**%s**：数据字段不完整\n\n", sym))
+			continue
+		}
+
+		chineseName := fields[1]
+		currentPrice := fields[3]
+		previousClose := fields[4]
+		openPrice := fields[5]
+		volume := fields[6]
+		change := fields[31]
+		changePct := fields[32]
+		high := fields[33]
+		low := fields[34]
+		engName := ""
+		if len(fields) > 44 {
+			engName = fields[44]
+		}
+
+		displayName := chineseName
+		if displayName == "" {
+			displayName = engName
+		}
+		if displayName == "" {
+			displayName = sym
+		}
+
+		// During non-trading hours price may be "0.00"
+		nonTrading := currentPrice == "" || currentPrice == "0.00"
+		if nonTrading {
+			if previousClose == "" || previousClose == "0.00" {
+				continue
+			}
+			currentPrice = previousClose
+			change = "-"
+			changePct = "-"
+		}
+
+		sb.WriteString(fmt.Sprintf("**%s（%s）**\n", displayName, sym))
+		if nonTrading {
+			sb.WriteString(fmt.Sprintf("  最新收盘价（非交易时段）：%s USD\n", currentPrice))
+		} else {
+			sb.WriteString(fmt.Sprintf("  当前价：%s USD │ 涨跌：%s（%s%%）\n", currentPrice, change, changePct))
+			sb.WriteString(fmt.Sprintf("  开盘：%s │ 昨收：%s\n", openPrice, previousClose))
+			sb.WriteString(fmt.Sprintf("  最高：%s │ 最低：%s\n", high, low))
+			if volume != "" && volume != "0" {
+				sb.WriteString(fmt.Sprintf("  成交量：%s 股\n", volume))
+			}
+		}
+		sb.WriteString("\n")
 	}
 
 	if sb.Len() == 0 {
 		return "未获取到美股数据，请检查股票代码是否正确。", nil
 	}
-	return sb.String(), nil
-}
-
-func fetchYahooFinanceQuote(ctx context.Context, client *http.Client, symbol string) (string, error) {
-	url := fmt.Sprintf(
-		"https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=1d&range=1d",
-		symbol,
-	)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	var payload struct {
-		Chart struct {
-			Result []struct {
-				Meta struct {
-					Symbol              string  `json:"symbol"`
-					Currency            string  `json:"currency"`
-					ExchangeName        string  `json:"exchangeName"`
-					RegularMarketPrice  float64 `json:"regularMarketPrice"`
-					PreviousClose       float64 `json:"previousClose"`
-					RegularMarketOpen   float64 `json:"regularMarketOpen"`
-					RegularMarketVolume int64   `json:"regularMarketVolume"`
-					MarketCap           int64   `json:"marketCap"`
-				} `json:"meta"`
-			} `json:"result"`
-			Error *struct {
-				Description string `json:"description"`
-			} `json:"error"`
-		} `json:"chart"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return "", fmt.Errorf("decode failed: %w", err)
-	}
-	if payload.Chart.Error != nil {
-		return "", fmt.Errorf("API error: %s", payload.Chart.Error.Description)
-	}
-	if len(payload.Chart.Result) == 0 {
-		return "", fmt.Errorf("no data returned")
-	}
-
-	m := payload.Chart.Result[0].Meta
-	change := m.RegularMarketPrice - m.PreviousClose
-	changePct := 0.0
-	if m.PreviousClose > 0 {
-		changePct = change / m.PreviousClose * 100
-	}
-
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("**%s**（%s）\n", m.Symbol, m.ExchangeName))
-	sb.WriteString(fmt.Sprintf("  当前价：%.2f %s │ 涨跌：%+.2f（%+.2f%%）\n", m.RegularMarketPrice, m.Currency, change, changePct))
-	sb.WriteString(fmt.Sprintf("  开盘：%.2f │ 昨收：%.2f\n", m.RegularMarketOpen, m.PreviousClose))
-	if m.RegularMarketVolume > 0 {
-		sb.WriteString(fmt.Sprintf("  成交量：%d 股\n", m.RegularMarketVolume))
-	}
-	if m.MarketCap > 0 {
-		sb.WriteString(fmt.Sprintf("  市值：%.2f 亿美元\n", float64(m.MarketCap)/1e8))
-	}
-	sb.WriteString("\n")
 	return sb.String(), nil
 }
 

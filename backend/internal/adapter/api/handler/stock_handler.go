@@ -70,7 +70,10 @@ func (h *StockHandler) GetIndices(c *gin.Context) {
 	}
 
 	if err != nil {
-		h.logger.WithField("error", err).Warn("Failed to fetch indices, returning empty")
+		h.logger.WithField("market", market).WithField("error", err).Warn("Failed to fetch indices, returning empty")
+	}
+	// Ensure we never return null — always return [] for JSON
+	if indices == nil {
 		indices = []IndexResponse{}
 	}
 
@@ -237,150 +240,197 @@ func (h *StockHandler) fetchTencentMinuteData(ctx context.Context, code string) 
 // ── US Stock Indices (Yahoo Finance) ─────────────────────────────────────────
 
 func (h *StockHandler) fetchUSStockIndices(ctx context.Context) ([]IndexResponse, error) {
-	symbols := []struct {
-		symbol    string
+	// Use Tencent Finance API (accessible from mainland China, Yahoo is blocked)
+	indices := []struct {
+		code      string // Tencent Finance code
+		id        string
 		name      string
 		shortName string
 	}{
-		{"^DJI", "道琼斯工业平均指数", "道指"},
-		{"^GSPC", "标普500指数", "标普"},
-		{"^IXIC", "纳斯达克综合指数", "纳指"},
+		{"us.DJI", "DJI", "道琼斯工业平均指数", "道指"},
+		{"us.INX", "GSPC", "标普500指数", "标普"},
+		{"us.IXIC", "IXIC", "纳斯达克综合指数", "纳指"},
 	}
 
-	var results []IndexResponse
-	for _, s := range symbols {
-		idx, err := h.fetchYahooQuote(ctx, s.symbol, s.name, s.shortName)
-		if err != nil {
-			h.logger.WithField("error", err).Warnf("Failed to fetch %s", s.symbol)
-			continue
-		}
-		results = append(results, idx)
+	// Batch fetch all indices in one request
+	codes := make([]string, len(indices))
+	for i, idx := range indices {
+		codes[i] = idx.code
 	}
-	return results, nil
-}
-
-func (h *StockHandler) fetchYahooQuote(ctx context.Context, symbol, name, shortName string) (IndexResponse, error) {
-	apiURL := fmt.Sprintf(
-		"https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=1d&range=5d",
-		url.PathEscape(symbol),
-	)
+	apiURL := fmt.Sprintf("https://qt.gtimg.cn/q=%s", strings.Join(codes, ","))
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
-		return IndexResponse{}, err
+		return nil, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
 
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
-		return IndexResponse{}, err
+		h.logger.WithField("error", err).Warn("fetchUSStockIndices: HTTP request failed")
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	h.logger.Debugf("fetchUSStockIndices: got %d bytes from Tencent Finance", len(body))
+	// Tencent Finance returns GBK encoding, convert to UTF-8
+	utf8Body, _, err := transform.Bytes(simplifiedchinese.GBK.NewDecoder(), body)
+	if err != nil {
+		utf8Body = body // fallback
+	}
+	bodyStr := string(utf8Body)
+
+	var results []IndexResponse
+	for _, idx := range indices {
+		// Parse: v_us.DJI="200~道琼斯~.DJI~45577.47~46021.43~..."
+		prefix := fmt.Sprintf("v_%s=\"", idx.code)
+		start := strings.Index(bodyStr, prefix)
+		if start == -1 {
+			h.logger.Warnf("US index %s not found in response", idx.code)
+			continue
+		}
+		start += len(prefix)
+		end := strings.Index(bodyStr[start:], "\"")
+		if end == -1 {
+			continue
+		}
+		fields := strings.Split(bodyStr[start:start+end], "~")
+		// Tencent US stock fields: [0]=status, [1]=name, [2]=code, [3]=currentPrice,
+		// [4]=previousClose, [5]=open, [6]=volume, ..., [31]=change, [32]=changePercent,
+		// [33]=high, [34]=low
+		if len(fields) < 35 {
+			h.logger.Warnf("US index %s insufficient fields: %d", idx.code, len(fields))
+			continue
+		}
+
+		currentPrice := parseFloat(fields[3])
+		previousClose := parseFloat(fields[4])
+		change := parseFloat(fields[31])
+		changePct := parseFloat(fields[32])
+
+		// Fetch sparkline from recent 5-day K-line data
+		sparkline := h.fetchUSIndexSparkline(ctx, idx.code)
+
+		results = append(results, IndexResponse{
+			ID:            idx.id,
+			Name:          idx.name,
+			ShortName:     idx.shortName,
+			Value:         currentPrice,
+			Change:        change,
+			ChangePercent: changePct,
+			SparklineData: sparkline,
+		})
+		_ = previousClose
+	}
+	return results, nil
+}
+
+// fetchUSIndexSparkline fetches 5-day close prices for US index sparkline chart
+func (h *StockHandler) fetchUSIndexSparkline(ctx context.Context, code string) []float64 {
+	apiURL := fmt.Sprintf("https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=%s,day,,,5,qfq", code)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return nil
 	}
 	defer resp.Body.Close()
 
 	var payload struct {
-		Chart struct {
-			Result []struct {
-				Meta struct {
-					RegularMarketPrice float64 `json:"regularMarketPrice"`
-					PreviousClose      float64 `json:"previousClose"`
-				} `json:"meta"`
-				Indicators struct {
-					Quote []struct {
-						Close []interface{} `json:"close"`
-					} `json:"quote"`
-				} `json:"indicators"`
-			} `json:"result"`
-		} `json:"chart"`
+		Code int                    `json:"code"`
+		Data map[string]interface{} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return IndexResponse{}, err
-	}
-	if len(payload.Chart.Result) == 0 {
-		return IndexResponse{}, fmt.Errorf("no data for %s", symbol)
+		return nil
 	}
 
-	m := payload.Chart.Result[0].Meta
-	change := m.RegularMarketPrice - m.PreviousClose
-	changePct := 0.0
-	if m.PreviousClose > 0 {
-		changePct = change / m.PreviousClose * 100
-	}
-
-	// Extract sparkline from close prices
-	var sparkline []float64
-	if len(payload.Chart.Result[0].Indicators.Quote) > 0 {
-		for _, v := range payload.Chart.Result[0].Indicators.Quote[0].Close {
-			if f, ok := v.(float64); ok && f > 0 {
-				sparkline = append(sparkline, f)
+	// Find the day data in the response
+	for _, v := range payload.Data {
+		m, ok := v.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		dayData, ok := m["day"].([]interface{})
+		if !ok {
+			continue
+		}
+		var sparkline []float64
+		for _, d := range dayData {
+			row, ok := d.([]interface{})
+			if !ok || len(row) < 3 {
+				continue
+			}
+			// K-line row: [date, open, close, high, low, volume]
+			var closePrice float64
+			switch v := row[2].(type) {
+			case string:
+				closePrice = parseFloat(v)
+			case float64:
+				closePrice = v
+			}
+			if closePrice > 0 {
+				sparkline = append(sparkline, closePrice)
 			}
 		}
+		if len(sparkline) > 0 {
+			return sparkline
+		}
 	}
-
-	id := strings.ReplaceAll(symbol, "^", "")
-	return IndexResponse{
-		ID:            id,
-		Name:          name,
-		ShortName:     shortName,
-		Value:         m.RegularMarketPrice,
-		Change:        change,
-		ChangePercent: changePct,
-		SparklineData: sparkline,
-	}, nil
+	return nil
 }
 
-// ── Crypto Indices (CoinGecko) ───────────────────────────────────────────────
+// ── Crypto Indices (Binance API) ─────────────────────────────────────────────
 
 func (h *StockHandler) fetchCryptoIndices(ctx context.Context) ([]IndexResponse, error) {
-	apiURL := "https://api.coingecko.com/api/v3/global"
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	// Fetch BTC and ETH 24hr tickers from Binance for index display
+	tickers, err := h.fetchBinance24hrTickers(ctx, []string{"BTCUSDT", "ETHUSDT"})
 	if err != nil {
 		return nil, err
 	}
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
 
-	var data struct {
-		Data struct {
-			TotalMarketCap           map[string]float64 `json:"total_market_cap"`
-			MarketCapChangePerc24h   float64            `json:"market_cap_change_percentage_24h_usd"`
-			BTCDominance             float64            `json:"market_cap_percentage"`
-		} `json:"data"`
+	var btcPrice, btcChangePct float64
+	var ethPrice float64
+	if t, ok := tickers["BTCUSDT"]; ok {
+		btcPrice = parseFloat(t.LastPrice)
+		btcChangePct = parseFloat(t.PriceChangePercent)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, err
+	if t, ok := tickers["ETHUSDT"]; ok {
+		ethPrice = parseFloat(t.LastPrice)
 	}
+	_ = ethPrice
 
-	totalCap := data.Data.TotalMarketCap["usd"] / 1e12 // in trillions
-	totalCapChange := data.Data.MarketCapChangePerc24h
-
-	// Fetch BTC and overall sentiment from CoinGecko simple price
-	btcData, _ := h.fetchCoinGeckoPrices(ctx, "bitcoin")
-	var btcDominance float64
-	if data.Data.BTCDominance > 0 {
-		btcDominance = data.Data.BTCDominance
-	}
+	// Fetch sparkline data for BTC and ETH (last 24 hourly candles)
+	btcSparkline := h.fetchCryptoSparkline(ctx, "BTCUSDT")
+	ethSparkline := h.fetchCryptoSparkline(ctx, "ETHUSDT")
 
 	indices := []IndexResponse{
 		{
-			ID:            "total_mcap",
-			Name:          "加密总市值",
-			ShortName:     "总市值",
-			Value:         totalCap,
-			Change:        totalCap * totalCapChange / 100,
-			ChangePercent: totalCapChange,
-			SparklineData: []float64{},
+			ID:            "btc_price",
+			Name:          "比特币",
+			ShortName:     "BTC",
+			Value:         btcPrice,
+			Change:        parseFloat(tickers["BTCUSDT"].PriceChange),
+			ChangePercent: btcChangePct,
+			SparklineData: btcSparkline,
 		},
-		{
-			ID:            "btc_dom",
-			Name:          "BTC 主导率",
-			ShortName:     "BTC.D",
-			Value:         btcDominance,
-			Change:        0,
-			ChangePercent: 0,
-			SparklineData: []float64{},
-		},
+	}
+
+	if t, ok := tickers["ETHUSDT"]; ok {
+		indices = append(indices, IndexResponse{
+			ID:            "eth_price",
+			Name:          "以太坊",
+			ShortName:     "ETH",
+			Value:         parseFloat(t.LastPrice),
+			Change:        parseFloat(t.PriceChange),
+			ChangePercent: parseFloat(t.PriceChangePercent),
+			SparklineData: ethSparkline,
+		})
 	}
 
 	// Fear & Greed index from alternative.me
@@ -389,30 +439,93 @@ func (h *StockHandler) fetchCryptoIndices(ctx context.Context) ([]IndexResponse,
 		indices = append(indices, fgIdx)
 	}
 
-	_ = btcData
 	return indices, nil
 }
 
-func (h *StockHandler) fetchCoinGeckoPrices(ctx context.Context, ids string) (map[string]map[string]float64, error) {
+// fetchCryptoSparkline fetches recent hourly close prices from Binance for sparkline display.
+func (h *StockHandler) fetchCryptoSparkline(ctx context.Context, symbol string) []float64 {
 	apiURL := fmt.Sprintf(
-		"https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true&include_market_cap=true",
-		ids,
+		"https://data-api.binance.vision/api/v3/klines?symbol=%s&interval=1h&limit=24",
+		symbol,
 	)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return []float64{}
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return []float64{}
+	}
+	defer resp.Body.Close()
+
+	var rawKlines [][]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&rawKlines); err != nil {
+		return []float64{}
+	}
+
+	var prices []float64
+	for _, k := range rawKlines {
+		if len(k) < 5 {
+			continue
+		}
+		if closeStr, ok := k[4].(string); ok {
+			if p := parseFloat(closeStr); p > 0 {
+				prices = append(prices, p)
+			}
+		}
+	}
+	return prices
+}
+
+// BinanceTicker24hr represents a Binance 24hr ticker response.
+type BinanceTicker24hr struct {
+	Symbol             string `json:"symbol"`
+	PriceChange        string `json:"priceChange"`
+	PriceChangePercent string `json:"priceChangePercent"`
+	WeightedAvgPrice   string `json:"weightedAvgPrice"`
+	PrevClosePrice     string `json:"prevClosePrice"`
+	LastPrice          string `json:"lastPrice"`
+	OpenPrice          string `json:"openPrice"`
+	HighPrice          string `json:"highPrice"`
+	LowPrice           string `json:"lowPrice"`
+	Volume             string `json:"volume"`
+	QuoteVolume        string `json:"quoteVolume"`
+}
+
+// fetchBinance24hrTickers fetches 24hr ticker data for given Binance symbols.
+func (h *StockHandler) fetchBinance24hrTickers(ctx context.Context, symbols []string) (map[string]BinanceTicker24hr, error) {
+	// Build symbols JSON array: ["BTCUSDT","ETHUSDT"]
+	symbolsJSON := "[\"" + strings.Join(symbols, "\",\"") + "\"]"
+	apiURL := fmt.Sprintf("https://data-api.binance.vision/api/v3/ticker/24hr?symbols=%s", url.QueryEscape(symbolsJSON))
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var data map[string]map[string]float64
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("binance API returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var tickers []BinanceTicker24hr
+	if err := json.NewDecoder(resp.Body).Decode(&tickers); err != nil {
 		return nil, err
 	}
-	return data, nil
+
+	result := make(map[string]BinanceTicker24hr, len(tickers))
+	for _, t := range tickers {
+		result[t.Symbol] = t
+	}
+	return result, nil
 }
 
 func (h *StockHandler) fetchFearGreedIndex(ctx context.Context) (IndexResponse, error) {
@@ -657,8 +770,8 @@ func (h *StockHandler) searchUSStocks(ctx context.Context, query string) ([]Stoc
 		return h.fetchUSStocksBySymbol(ctx, "AAPL,NVDA,TSLA,MSFT,GOOGL,AMZN,META,AMD,NFLX")
 	}
 
-	// Yahoo Finance autocomplete API
-	apiURL := fmt.Sprintf("https://query1.finance.yahoo.com/v1/finance/search?q=%s&quotesCount=10&newsCount=0", url.QueryEscape(query))
+	// Tencent Finance smartbox search API (accessible from mainland China)
+	apiURL := fmt.Sprintf("https://smartbox.gtimg.cn/s3/?q=%s&t=us", url.QueryEscape(query))
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
 		return nil, err
@@ -671,27 +784,44 @@ func (h *StockHandler) searchUSStocks(ctx context.Context, query string) ([]Stoc
 	}
 	defer resp.Body.Close()
 
-	var searchResp struct {
-		Quotes []struct {
-			Symbol   string `json:"symbol"`
-			ShortName string `json:"shortname"`
-			Exchange  string `json:"exchange"`
-		} `json:"quotes"`
+	body, _ := io.ReadAll(resp.Body)
+	// Response is GBK encoded
+	utf8Body, _, err := transform.Bytes(simplifiedchinese.GBK.NewDecoder(), body)
+	if err != nil {
+		utf8Body = body
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
-		return nil, err
+	bodyStr := string(utf8Body)
+
+	// Parse: v_hint="us~aapl.oq~Apple~apple~GP^us~aple.n~apple hospitality reit, inc~*~GP"
+	start := strings.Index(bodyStr, "\"")
+	end := strings.LastIndex(bodyStr, "\"")
+	if start == -1 || end <= start {
+		return []StockResponse{}, nil
 	}
+	content := bodyStr[start+1 : end]
 
 	var symbols []string
-	for _, q := range searchResp.Quotes {
-		// Filter to US exchanges only
-		if q.Exchange == "NMS" || q.Exchange == "NYQ" || q.Exchange == "NGM" || q.Exchange == "NAS" || q.Exchange == "NYSE" {
-			symbols = append(symbols, q.Symbol)
+	entries := strings.Split(content, "^")
+	for _, entry := range entries {
+		parts := strings.Split(entry, "~")
+		if len(parts) < 2 {
+			continue
 		}
+		// parts[0]=market(us), parts[1]=code(aapl.oq), parts[2]=name
+		code := parts[1]
+		// Extract symbol before the dot: "aapl.oq" -> "AAPL"
+		if dotIdx := strings.Index(code, "."); dotIdx > 0 {
+			code = code[:dotIdx]
+		}
+		symbols = append(symbols, strings.ToUpper(code))
 	}
 
 	if len(symbols) == 0 {
 		return []StockResponse{}, nil
+	}
+	// Limit to top 10 results
+	if len(symbols) > 10 {
+		symbols = symbols[:10]
 	}
 
 	return h.fetchUSStocksBySymbol(ctx, strings.Join(symbols, ","))
@@ -699,179 +829,206 @@ func (h *StockHandler) searchUSStocks(ctx context.Context, query string) ([]Stoc
 
 func (h *StockHandler) fetchUSStocksBySymbol(ctx context.Context, symbolsStr string) ([]StockResponse, error) {
 	symbols := strings.Split(symbolsStr, ",")
-	var stocks []StockResponse
-
+	// Build Tencent Finance batch query codes: "usAAPL,usNVDA,usTSLA"
+	var tCodes []string
 	for _, sym := range symbols {
 		sym = strings.TrimSpace(sym)
 		if sym == "" {
 			continue
 		}
-		apiURL := fmt.Sprintf("https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=1d&range=1d", sym)
-		req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
-		if err != nil {
+		tCodes = append(tCodes, "us"+strings.ToUpper(sym))
+	}
+	if len(tCodes) == 0 {
+		return nil, nil
+	}
+
+	apiURL := fmt.Sprintf("https://qt.gtimg.cn/q=%s", strings.Join(tCodes, ","))
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	// Tencent Finance returns GBK encoding
+	utf8Body, _, err := transform.Bytes(simplifiedchinese.GBK.NewDecoder(), body)
+	if err != nil {
+		utf8Body = body
+	}
+	bodyStr := string(utf8Body)
+
+	var stocks []StockResponse
+	for _, sym := range symbols {
+		sym = strings.TrimSpace(strings.ToUpper(sym))
+		if sym == "" {
 			continue
 		}
-		req.Header.Set("User-Agent", "Mozilla/5.0")
-
-		resp, err := h.httpClient.Do(req)
-		if err != nil {
+		tCode := "us" + sym
+		// Find the line for this symbol: v_usAAPL="200~苹果~AAPL.OQ~247.99~..."
+		prefix := fmt.Sprintf("v_%s=\"", tCode)
+		start := strings.Index(bodyStr, prefix)
+		if start == -1 {
+			continue
+		}
+		start += len(prefix)
+		end := strings.Index(bodyStr[start:], "\"")
+		if end == -1 {
+			continue
+		}
+		fields := strings.Split(bodyStr[start:start+end], "~")
+		// Tencent US stock quote fields:
+		// [0]=status(200) [1]=中文名 [2]=code(AAPL.OQ) [3]=currentPrice [4]=previousClose
+		// [5]=open [6]=volume [31]=change [32]=changePercent [33]=high [34]=low
+		// [44]=English name [45]=xxx [46]=52wHigh [47]=52wLow
+		if len(fields) < 45 {
 			continue
 		}
 
-		var payload struct {
-			Chart struct {
-				Result []struct {
-					Meta struct {
-						Symbol             string  `json:"symbol"`
-						RegularMarketPrice float64 `json:"regularMarketPrice"`
-						PreviousClose      float64 `json:"previousClose"`
-						RegularMarketOpen  float64 `json:"regularMarketOpen"`
-						RegularMarketVolume int64  `json:"regularMarketVolume"`
-						RegularMarketDayHigh float64 `json:"regularMarketDayHigh"`
-						RegularMarketDayLow  float64 `json:"regularMarketDayLow"`
-						ShortName          string  `json:"shortName"`
-					} `json:"meta"`
-				} `json:"result"`
-			} `json:"chart"`
-		}
-		json.NewDecoder(resp.Body).Decode(&payload)
-		resp.Body.Close()
+		currentPrice := parseFloat(fields[3])
+		previousClose := parseFloat(fields[4])
+		openPrice := parseFloat(fields[5])
+		volume := parseFloat(fields[6])
+		change := parseFloat(fields[31])
+		changePct := parseFloat(fields[32])
+		high := parseFloat(fields[33])
+		low := parseFloat(fields[34])
 
-		if len(payload.Chart.Result) == 0 {
-			continue
+		displayName := fields[1] // Chinese name
+		engName := ""
+		if len(fields) > 44 {
+			engName = fields[44]
 		}
-
-		m := payload.Chart.Result[0].Meta
-		change := m.RegularMarketPrice - m.PreviousClose
-		changePct := 0.0
-		if m.PreviousClose > 0 {
-			changePct = change / m.PreviousClose * 100
-		}
-
-		displayName := m.ShortName
 		if displayName == "" {
-			displayName = m.Symbol
+			displayName = engName
+		}
+		if displayName == "" {
+			displayName = sym
 		}
 
 		stocks = append(stocks, StockResponse{
-			ID:            m.Symbol,
-			Symbol:        m.Symbol,
+			ID:            sym,
+			Symbol:        sym,
 			Name:          displayName,
 			Market:        "us_stock",
-			CurrentPrice:  m.RegularMarketPrice,
+			CurrentPrice:  currentPrice,
 			Change:        change,
 			ChangePercent: changePct,
-			Volume:        float64(m.RegularMarketVolume) / 1e8, // to 亿股
-			High:          m.RegularMarketDayHigh,
-			Low:           m.RegularMarketDayLow,
-			Open:          m.RegularMarketOpen,
-			PreviousClose: m.PreviousClose,
+			Volume:        volume / 1e8, // to 亿股
+			High:          high,
+			Low:           low,
+			Open:          openPrice,
+			PreviousClose: previousClose,
 		})
 	}
 	return stocks, nil
 }
 
-// ── Crypto Search (CoinGecko) ────────────────────────────────────────────────
+// ── Crypto Search (Binance API) ──────────────────────────────────────────────
 
-var defaultCryptoIDs = map[string]struct {
-	Symbol string
-	Name   string
+// cryptoSymbolMap maps common lowercase tickers to their Binance symbol and display name.
+var cryptoSymbolMap = map[string]struct {
+	BinanceSymbol string
+	DisplayName   string
 }{
-	"bitcoin":      {"BTC/USDT", "Bitcoin"},
-	"ethereum":     {"ETH/USDT", "Ethereum"},
-	"solana":       {"SOL/USDT", "Solana"},
-	"binancecoin":  {"BNB/USDT", "BNB"},
-	"ripple":       {"XRP/USDT", "XRP"},
-	"dogecoin":     {"DOGE/USDT", "Dogecoin"},
-	"cardano":      {"ADA/USDT", "Cardano"},
-	"avalanche-2":  {"AVAX/USDT", "Avalanche"},
+	"btc": {"BTCUSDT", "Bitcoin"}, "bitcoin": {"BTCUSDT", "Bitcoin"},
+	"eth": {"ETHUSDT", "Ethereum"}, "ethereum": {"ETHUSDT", "Ethereum"},
+	"bnb": {"BNBUSDT", "BNB"},
+	"sol": {"SOLUSDT", "Solana"}, "solana": {"SOLUSDT", "Solana"},
+	"xrp": {"XRPUSDT", "XRP"}, "ripple": {"XRPUSDT", "XRP"},
+	"ada": {"ADAUSDT", "Cardano"}, "cardano": {"ADAUSDT", "Cardano"},
+	"doge": {"DOGEUSDT", "Dogecoin"}, "dogecoin": {"DOGEUSDT", "Dogecoin"},
+	"avax": {"AVAXUSDT", "Avalanche"},
+	"dot": {"DOTUSDT", "Polkadot"}, "polkadot": {"DOTUSDT", "Polkadot"},
+	"link": {"LINKUSDT", "Chainlink"}, "chainlink": {"LINKUSDT", "Chainlink"},
+	"ltc": {"LTCUSDT", "Litecoin"}, "litecoin": {"LTCUSDT", "Litecoin"},
+	"atom": {"ATOMUSDT", "Cosmos"}, "cosmos": {"ATOMUSDT", "Cosmos"},
+	"uni": {"UNIUSDT", "Uniswap"},
+	"matic": {"MATICUSDT", "Polygon"},
+	"near": {"NEARUSDT", "NEAR"},
+	"trx": {"TRXUSDT", "TRON"},
+	"etc": {"ETCUSDT", "Ethereum Classic"},
+	"bch": {"BCHUSDT", "Bitcoin Cash"},
+	"sui": {"SUIUSDT", "Sui"},
+	"apt": {"APTUSDT", "Aptos"},
+	"arb": {"ARBUSDT", "Arbitrum"},
+	"op": {"OPUSDT", "Optimism"},
+	"ton": {"TONUSDT", "Toncoin"},
+	"pepe": {"PEPEUSDT", "Pepe"},
+	"shib": {"SHIBUSDT", "Shiba Inu"},
 }
 
-var cryptoSymbolToID = map[string]string{
-	"btc": "bitcoin", "eth": "ethereum", "bnb": "binancecoin", "sol": "solana",
-	"xrp": "ripple", "ada": "cardano", "doge": "dogecoin", "avax": "avalanche-2",
-	"dot": "polkadot", "link": "chainlink", "ltc": "litecoin", "atom": "cosmos",
-}
+// defaultCryptoSymbols is the list of default crypto symbols shown when no query is provided.
+var defaultCryptoSymbols = []string{"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT"}
 
 func (h *StockHandler) searchCryptoStocks(ctx context.Context, query string) ([]StockResponse, error) {
-	ids := "bitcoin,ethereum,solana,binancecoin,ripple,dogecoin,cardano,avalanche-2"
-	if query != "" {
+	var binanceSymbols []string
+
+	if query == "" {
+		binanceSymbols = defaultCryptoSymbols
+	} else {
 		q := strings.ToLower(strings.TrimSpace(query))
-		if cgID, ok := cryptoSymbolToID[q]; ok {
-			ids = cgID
+		if info, ok := cryptoSymbolMap[q]; ok {
+			binanceSymbols = []string{info.BinanceSymbol}
 		} else {
-			// Use CoinGecko search
-			searchURL := fmt.Sprintf("https://api.coingecko.com/api/v3/search?query=%s", url.QueryEscape(q))
-			req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
-			if err != nil {
-				return nil, err
-			}
-			resp, err := h.httpClient.Do(req)
-			if err != nil {
-				return nil, err
-			}
-			defer resp.Body.Close()
-
-			var searchResp struct {
-				Coins []struct {
-					ID     string `json:"id"`
-					Name   string `json:"name"`
-					Symbol string `json:"symbol"`
-				} `json:"coins"`
-			}
-			json.NewDecoder(resp.Body).Decode(&searchResp)
-
-			var coinIDs []string
-			for _, c := range searchResp.Coins {
-				if len(coinIDs) >= 10 {
-					break
-				}
-				coinIDs = append(coinIDs, c.ID)
-			}
-			if len(coinIDs) > 0 {
-				ids = strings.Join(coinIDs, ",")
-			}
+			// Try uppercase symbol + USDT as Binance pair
+			binanceSymbols = []string{strings.ToUpper(q) + "USDT"}
 		}
 	}
 
-	prices, err := h.fetchCoinGeckoPrices(ctx, ids)
+	return h.fetchBinanceCryptoStocks(ctx, binanceSymbols)
+}
+
+// fetchBinanceCryptoStocks fetches crypto stock data from Binance 24hr ticker.
+func (h *StockHandler) fetchBinanceCryptoStocks(ctx context.Context, symbols []string) ([]StockResponse, error) {
+	tickers, err := h.fetchBinance24hrTickers(ctx, symbols)
 	if err != nil {
 		return nil, err
 	}
 
 	var stocks []StockResponse
-	for id, data := range prices {
-		price := data["usd"]
-		change24h := data["usd_24h_change"]
-		vol := data["usd_24h_vol"]
-		mcap := data["usd_market_cap"]
-
-		info, ok := defaultCryptoIDs[id]
-		symbol := strings.ToUpper(id) + "/USDT"
-		name := strings.ToUpper(id)
-		if ok {
-			symbol = info.Symbol
-			name = info.Name
+	for _, sym := range symbols {
+		t, ok := tickers[sym]
+		if !ok {
+			continue
 		}
 
-		// Approximate previous close from 24h change
-		prevPrice := price / (1 + change24h/100)
+		// Extract base symbol: BTCUSDT → BTC
+		base := strings.TrimSuffix(sym, "USDT")
+		displayName := base
+		// Look up display name from map
+		if info, ok := cryptoSymbolMap[strings.ToLower(base)]; ok {
+			displayName = info.DisplayName
+		}
+
+		price := parseFloat(t.LastPrice)
+		prevClose := parseFloat(t.PrevClosePrice)
+		change := parseFloat(t.PriceChange)
+		changePct := parseFloat(t.PriceChangePercent)
+		high := parseFloat(t.HighPrice)
+		low := parseFloat(t.LowPrice)
+		openPrice := parseFloat(t.OpenPrice)
+		vol := parseFloat(t.QuoteVolume) // USDT volume
 
 		stocks = append(stocks, StockResponse{
-			ID:            strings.ToUpper(strings.Split(symbol, "/")[0]),
-			Symbol:        symbol,
-			Name:          name,
+			ID:            base,
+			Symbol:        base + "/USDT",
+			Name:          displayName,
 			Market:        "crypto",
 			CurrentPrice:  price,
-			Change:        price - prevPrice,
-			ChangePercent: change24h,
-			Volume:        vol / 1e8,
-			High:          price * 1.01, // CoinGecko simple API doesn't provide high/low
-			Low:           price * 0.99,
-			Open:          prevPrice,
-			PreviousClose: prevPrice,
+			Change:        change,
+			ChangePercent: changePct,
+			Volume:        vol / 1e8, // to 亿
+			High:          high,
+			Low:           low,
+			Open:          openPrice,
+			PreviousClose: prevClose,
 		})
-		_ = mcap
 	}
 	return stocks, nil
 }
@@ -906,11 +1063,17 @@ func (h *StockHandler) GetWatchlist(c *gin.Context) {
 	case "a_share":
 		var codes []string
 		for _, item := range items {
-			prefix := "sh"
-			if strings.HasPrefix(item.StockCode, "0") || strings.HasPrefix(item.StockCode, "3") {
-				prefix = "sz"
+			code := strings.TrimSpace(item.StockCode)
+			// If stock_code already has sh/sz prefix (e.g. "sh000001"), use as-is
+			if strings.HasPrefix(strings.ToLower(code), "sh") || strings.HasPrefix(strings.ToLower(code), "sz") {
+				codes = append(codes, strings.ToLower(code))
+			} else {
+				prefix := "sh"
+				if strings.HasPrefix(code, "0") || strings.HasPrefix(code, "3") {
+					prefix = "sz"
+				}
+				codes = append(codes, prefix+code)
 			}
-			codes = append(codes, prefix+item.StockCode)
 		}
 		stocks, _ = h.fetchAShareStocksByCode(ctx, strings.Join(codes, ","))
 	case "us_stock":
@@ -920,49 +1083,68 @@ func (h *StockHandler) GetWatchlist(c *gin.Context) {
 		}
 		stocks, _ = h.fetchUSStocksBySymbol(ctx, strings.Join(symbols, ","))
 	case "crypto":
-		var ids []string
+		var binanceSymbols []string
+		seen := make(map[string]bool) // Deduplicate symbols (e.g. "BTC" and "btc_price" both map to BTCUSDT)
 		for _, item := range items {
-			id := strings.ToLower(item.StockCode)
-			if cgID, ok := cryptoSymbolToID[id]; ok {
-				ids = append(ids, cgID)
-			} else {
-				ids = append(ids, id)
+			code := strings.TrimSpace(item.StockCode)
+			// Map index IDs to real symbols (e.g. "btc_price" → "BTC")
+			if mapped, ok := cryptoIndexToSymbol[strings.ToLower(code)]; ok {
+				code = mapped
+			}
+			// Skip non-tradeable indices like "fear_greed"
+			if strings.EqualFold(code, "fear_greed") {
+				continue
+			}
+			sym := strings.ToUpper(code)
+			// If StockCode is just the base (e.g., "BTC"), append USDT
+			if !strings.HasSuffix(sym, "USDT") {
+				sym = sym + "USDT"
+			}
+			if !seen[sym] {
+				binanceSymbols = append(binanceSymbols, sym)
+				seen[sym] = true
 			}
 		}
-		if len(ids) > 0 {
-			prices, err := h.fetchCoinGeckoPrices(ctx, strings.Join(ids, ","))
-			if err == nil {
-				for id, data := range prices {
-					price := data["usd"]
-					change24h := data["usd_24h_change"]
-					vol := data["usd_24h_vol"]
-					prevPrice := price / (1 + change24h/100)
-					info, ok := defaultCryptoIDs[id]
-					symbol := strings.ToUpper(id) + "/USDT"
-					name := strings.ToUpper(id)
-					if ok {
-						symbol = info.Symbol
-						name = info.Name
+		if len(binanceSymbols) > 0 {
+			var fetchErr error
+			stocks, fetchErr = h.fetchBinanceCryptoStocks(ctx, binanceSymbols)
+			if fetchErr != nil {
+				h.logger.WithField("error", fetchErr).Warn("Binance API failed for crypto watchlist")
+			}
+			// Fallback: if Binance API failed or returned fewer results than expected,
+			// fill in missing stocks from DB records so the list is never empty.
+			if len(stocks) < len(items) {
+				// Build set of IDs already fetched
+				fetched := make(map[string]bool, len(stocks))
+				for _, s := range stocks {
+					fetched[strings.ToUpper(s.ID)] = true
+				}
+				for _, item := range items {
+					base := strings.ToUpper(strings.TrimSpace(item.StockCode))
+					if mapped, ok := cryptoIndexToSymbol[strings.ToLower(base)]; ok {
+						base = strings.ToUpper(mapped)
 					}
-					stocks = append(stocks, StockResponse{
-						ID:            strings.ToUpper(strings.Split(symbol, "/")[0]),
-						Symbol:        symbol,
-						Name:          name,
-						Market:        "crypto",
-						CurrentPrice:  price,
-						Change:        price - prevPrice,
-						ChangePercent: change24h,
-						Volume:        vol / 1e8,
-						High:          price * 1.01,
-						Low:           price * 0.99,
-						Open:          prevPrice,
-						PreviousClose: prevPrice,
-					})
+					if strings.EqualFold(base, "fear_greed") {
+						continue
+					}
+					if !fetched[base] {
+						// Add a placeholder entry from DB so the watchlist is not empty
+						stocks = append(stocks, StockResponse{
+							ID:     base,
+							Symbol: base + "/USDT",
+							Name:   item.Name,
+							Market: "crypto",
+						})
+					}
 				}
 			}
 		}
 	}
 
+	// Ensure we never return null — always return [] for JSON
+	if stocks == nil {
+		stocks = []StockResponse{}
+	}
 	c.JSON(http.StatusOK, stocks)
 }
 
@@ -982,11 +1164,24 @@ func (h *StockHandler) AddToWatchlist(c *gin.Context) {
 		return
 	}
 
+	h.logger.WithField("userID", userID).WithField("market", req.Market).WithField("stock_code", req.StockCode).Info("AddToWatchlist request")
+
+	// Normalize crypto index IDs to real symbols before storing
+	// e.g. "btc_price" → "BTC", "eth_price" → "ETH"
+	stockCode := req.StockCode
+	symbol := req.Symbol
+	if req.Market == "crypto" {
+		if mapped, ok := cryptoIndexToSymbol[strings.ToLower(stockCode)]; ok {
+			stockCode = mapped
+			symbol = mapped + "/USDT"
+		}
+	}
+
 	item := &model.WatchlistItem{
 		UserID:    userID,
 		Market:    req.Market,
-		StockCode: req.StockCode,
-		Symbol:    req.Symbol,
+		StockCode: stockCode,
+		Symbol:    symbol,
 		Name:      req.Name,
 	}
 
@@ -1057,30 +1252,16 @@ func (h *StockHandler) GetStockQuote(c *gin.Context) {
 	case "us_stock":
 		stocks, err = h.fetchUSStocksBySymbol(ctx, code)
 	case "crypto":
-		q := strings.ToLower(code)
-		if cgID, ok := cryptoSymbolToID[q]; ok {
-			q = cgID
+		coinCode := strings.TrimSpace(code)
+		// Map index IDs to real symbols (e.g. "btc_price" → "BTC")
+		if mapped, ok := cryptoIndexToSymbol[strings.ToLower(coinCode)]; ok {
+			coinCode = mapped
 		}
-		prices, ferr := h.fetchCoinGeckoPrices(ctx, q)
-		if ferr != nil {
-			err = ferr
-		} else {
-			for id, data := range prices {
-				price := data["usd"]
-				change24h := data["usd_24h_change"]
-				prevPrice := price / (1 + change24h/100)
-				stocks = append(stocks, StockResponse{
-					ID:            strings.ToUpper(code),
-					Symbol:        strings.ToUpper(code) + "/USDT",
-					Name:          strings.ToUpper(id),
-					Market:        "crypto",
-					CurrentPrice:  price,
-					Change:        price - prevPrice,
-					ChangePercent: change24h,
-					PreviousClose: prevPrice,
-				})
-			}
+		sym := strings.ToUpper(coinCode)
+		if !strings.HasSuffix(sym, "USDT") {
+			sym = sym + "USDT"
 		}
+		stocks, err = h.fetchBinanceCryptoStocks(ctx, []string{sym})
 	}
 
 	if err != nil || len(stocks) == 0 {
@@ -1130,7 +1311,10 @@ func (h *StockHandler) GetKLineData(c *gin.Context) {
 	}
 
 	if err != nil {
-		h.logger.WithField("error", err).Warn("Failed to fetch K-line data")
+		h.logger.WithField("code", code).WithField("market", market).WithField("error", err).Warn("Failed to fetch K-line data")
+	}
+	// Ensure we never return null — always return [] for JSON
+	if klines == nil {
 		klines = []KLineResponse{}
 	}
 
@@ -1218,23 +1402,201 @@ func (h *StockHandler) fetchAShareKLine(ctx context.Context, code string, days s
 	return klines, nil
 }
 
+// usIndexTencentCode maps index IDs used by the iOS app to Tencent Finance kline codes.
+var usIndexTencentCode = map[string]string{
+	"DJI":  "us.DJI",
+	"GSPC": "us.INX",
+	"IXIC": "us.IXIC",
+}
+
 func (h *StockHandler) fetchUSStockKLine(ctx context.Context, symbol string, days string) ([]KLineResponse, error) {
 	daysInt := 60
 	if d := parseFloat(days); d > 0 {
 		daysInt = int(d)
 	}
 
-	range_ := "3mo"
-	if daysInt > 90 {
-		range_ = "6mo"
+	// Check if the symbol is a US index — use Tencent Finance kline API for indices
+	// (Sina API returns null for US indices like DJI/INX/IXIC)
+	sym := strings.TrimSpace(symbol)
+	if tencentCode, ok := usIndexTencentCode[strings.ToUpper(sym)]; ok {
+		return h.fetchTencentKLine(ctx, tencentCode, daysInt)
 	}
-	if daysInt > 180 {
-		range_ = "1y"
+
+	// For individual stocks, use Sina Finance US stock K-line API
+	lowerSym := strings.ToLower(sym)
+	apiURL := fmt.Sprintf(
+		"https://stock.finance.sina.com.cn/usstock/api/jsonp_v2.php/var%%20_gb_%s=/US_MinKService.getDailyK?symbol=%s&type=daily&num=%d",
+		lowerSym, lowerSym, daysInt,
+	)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+	req.Header.Set("Referer", "https://finance.sina.com.cn")
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	// Response is JSONP: var _gb_aapl=([{...}, ...]);
+	// Sometimes prefixed with: /*<script>location.href='//sina.com';</script>*/
+	bodyStr := string(body)
+	start := strings.Index(bodyStr, "(")
+	end := strings.LastIndex(bodyStr, ")")
+	if start == -1 || end <= start {
+		return nil, fmt.Errorf("invalid JSONP response for US stock %s", symbol)
+	}
+	jsonStr := bodyStr[start+1 : end]
+
+	var items []struct {
+		Day    string `json:"d"`
+		Open   string `json:"o"`
+		High   string `json:"h"`
+		Low    string `json:"l"`
+		Close  string `json:"c"`
+		Volume string `json:"v"`
+	}
+	if err := json.Unmarshal([]byte(jsonStr), &items); err != nil {
+		return nil, fmt.Errorf("failed to parse Sina US kline JSON: %w", err)
+	}
+
+	// Only take the last N days
+	if len(items) > daysInt {
+		items = items[len(items)-daysInt:]
+	}
+
+	var klines []KLineResponse
+	for _, item := range items {
+		klines = append(klines, KLineResponse{
+			Date:   item.Day,
+			Open:   parseFloat(item.Open),
+			Close:  parseFloat(item.Close),
+			High:   parseFloat(item.High),
+			Low:    parseFloat(item.Low),
+			Volume: parseFloat(item.Volume),
+		})
+	}
+	return klines, nil
+}
+
+// fetchTencentKLine fetches K-line data from Tencent Finance web API.
+// Works for US indices (us.DJI, us.INX, us.IXIC) and individual US stocks.
+func (h *StockHandler) fetchTencentKLine(ctx context.Context, tencentCode string, days int) ([]KLineResponse, error) {
+	apiURL := fmt.Sprintf(
+		"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?_var=kline_dayqfq&param=%s,day,,,%d,qfq",
+		tencentCode, days,
+	)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	// Response format: kline_dayqfq={"code":0,"msg":"","data":{"us.DJI":{"day":[["2026-03-16","46707.400","46946.410","47176.140","46707.400","514985340.000"], ...]}}}
+	// Extract JSON from JSONP wrapper
+	bodyStr := string(body)
+	eqIdx := strings.Index(bodyStr, "=")
+	if eqIdx == -1 {
+		return nil, fmt.Errorf("invalid Tencent kline response for %s", tencentCode)
+	}
+	jsonStr := strings.TrimSpace(bodyStr[eqIdx+1:])
+
+	var result struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+		Data map[string]struct {
+			Day [][]interface{} `json:"day"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse Tencent kline JSON for %s: %w", tencentCode, err)
+	}
+
+	stockData, ok := result.Data[tencentCode]
+	if !ok || len(stockData.Day) == 0 {
+		return nil, fmt.Errorf("no kline data for %s", tencentCode)
+	}
+
+	var klines []KLineResponse
+	for _, row := range stockData.Day {
+		if len(row) < 6 {
+			continue
+		}
+		date, _ := row[0].(string)
+		openStr, _ := row[1].(string)
+		closeStr, _ := row[2].(string)
+		highStr, _ := row[3].(string)
+		lowStr, _ := row[4].(string)
+		volStr, _ := row[5].(string)
+
+		klines = append(klines, KLineResponse{
+			Date:   date,
+			Open:   parseFloat(openStr),
+			Close:  parseFloat(closeStr),
+			High:   parseFloat(highStr),
+			Low:    parseFloat(lowStr),
+			Volume: parseFloat(volStr),
+		})
+	}
+	return klines, nil
+}
+
+// cryptoIndexToSymbol maps special index IDs from fetchCryptoIndices to real Binance symbols.
+var cryptoIndexToSymbol = map[string]string{
+	"btc_price": "BTC",
+	"eth_price": "ETH",
+}
+
+func (h *StockHandler) fetchCryptoKLine(ctx context.Context, coinID string, days string) ([]KLineResponse, error) {
+	rawID := strings.TrimSpace(coinID)
+
+	// Handle special IDs: fear_greed index has no K-line data
+	if strings.EqualFold(rawID, "fear_greed") {
+		return []KLineResponse{}, nil
+	}
+
+	// Map index IDs to real coin symbols (btc_price → BTC, eth_price → ETH)
+	if mapped, ok := cryptoIndexToSymbol[strings.ToLower(rawID)]; ok {
+		rawID = mapped
+	}
+
+	// Convert coinID to Binance symbol: "btc" or "BTC" → "BTCUSDT"
+	sym := strings.ToUpper(rawID)
+	if !strings.HasSuffix(sym, "USDT") {
+		sym = sym + "USDT"
+	}
+
+	limit := 60
+	if d := parseFloat(days); d > 0 {
+		limit = int(d)
+	}
+	if limit > 1000 {
+		limit = 1000 // Binance API max
 	}
 
 	apiURL := fmt.Sprintf(
-		"https://query1.finance.yahoo.com/v8/finance/chart/%s?interval=1d&range=%s",
-		url.PathEscape(symbol), range_,
+		"https://data-api.binance.vision/api/v3/klines?symbol=%s&interval=1d&limit=%d",
+		sym, limit,
 	)
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
@@ -1248,109 +1610,33 @@ func (h *StockHandler) fetchUSStockKLine(ctx context.Context, symbol string, day
 	}
 	defer resp.Body.Close()
 
-	var payload struct {
-		Chart struct {
-			Result []struct {
-				Timestamp  []int64 `json:"timestamp"`
-				Indicators struct {
-					Quote []struct {
-						Open   []interface{} `json:"open"`
-						Close  []interface{} `json:"close"`
-						High   []interface{} `json:"high"`
-						Low    []interface{} `json:"low"`
-						Volume []interface{} `json:"volume"`
-					} `json:"quote"`
-				} `json:"indicators"`
-			} `json:"result"`
-		} `json:"chart"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
-	}
-	if len(payload.Chart.Result) == 0 || len(payload.Chart.Result[0].Indicators.Quote) == 0 {
-		return nil, fmt.Errorf("no data")
-	}
-
-	r := payload.Chart.Result[0]
-	q := r.Indicators.Quote[0]
-	var klines []KLineResponse
-
-	for i := range r.Timestamp {
-		if i >= len(q.Open) || i >= len(q.Close) || i >= len(q.High) || i >= len(q.Low) || i >= len(q.Volume) {
-			break
-		}
-
-		open, _ := toFloatVal(q.Open[i])
-		close, _ := toFloatVal(q.Close[i])
-		high, _ := toFloatVal(q.High[i])
-		low, _ := toFloatVal(q.Low[i])
-		vol, _ := toFloatVal(q.Volume[i])
-
-		if open == 0 && close == 0 {
-			continue
-		}
-
-		t := time.Unix(r.Timestamp[i], 0)
-		klines = append(klines, KLineResponse{
-			Date:   t.Format("2006-01-02"),
-			Open:   open,
-			Close:  close,
-			High:   high,
-			Low:    low,
-			Volume: vol,
-		})
-	}
-
-	if len(klines) > daysInt {
-		klines = klines[len(klines)-daysInt:]
-	}
-	return klines, nil
-}
-
-func (h *StockHandler) fetchCryptoKLine(ctx context.Context, coinID string, days string) ([]KLineResponse, error) {
-	q := strings.ToLower(coinID)
-	if cgID, ok := cryptoSymbolToID[q]; ok {
-		q = cgID
-	}
-
-	daysStr := "60"
-	if days != "" {
-		daysStr = days
-	}
-
-	apiURL := fmt.Sprintf(
-		"https://api.coingecko.com/api/v3/coins/%s/ohlc?vs_currency=usd&days=%s",
-		q, daysStr,
-	)
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	// Response: [[timestamp, open, high, low, close], ...]
-	var data [][]float64
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, err
+	// Binance kline response: [[openTime, open, high, low, close, volume, closeTime, ...], ...]
+	var rawKlines [][]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&rawKlines); err != nil {
+		return nil, fmt.Errorf("failed to decode Binance kline: %w", err)
 	}
 
 	var klines []KLineResponse
-	for _, candle := range data {
-		if len(candle) < 5 {
+	for _, k := range rawKlines {
+		if len(k) < 6 {
 			continue
 		}
-		t := time.Unix(int64(candle[0])/1000, 0)
+		openTime := int64(k[0].(float64))
+		t := time.Unix(openTime/1000, 0)
+
+		open, _ := k[1].(string)
+		high, _ := k[2].(string)
+		low, _ := k[3].(string)
+		closeP, _ := k[4].(string)
+		vol, _ := k[5].(string)
+
 		klines = append(klines, KLineResponse{
 			Date:   t.Format("2006-01-02"),
-			Open:   candle[1],
-			Close:  candle[4],
-			High:   candle[2],
-			Low:    candle[3],
-			Volume: 0,
+			Open:   parseFloat(open),
+			Close:  parseFloat(closeP),
+			High:   parseFloat(high),
+			Low:    parseFloat(low),
+			Volume: parseFloat(vol),
 		})
 	}
 	return klines, nil
@@ -1482,17 +1768,21 @@ func (h *StockHandler) fetchAShareNews(ctx context.Context, code string, name st
 }
 
 func (h *StockHandler) fetchUSStockNews(ctx context.Context, symbol string, name string) ([]NewsResponse, error) {
-	// Yahoo Finance news via search
+	// Use Eastmoney search API (accessible from mainland China, same as A-share news)
 	query := symbol
 	if name != "" {
-		query = name + " stock"
+		query = name
 	}
-	apiURL := fmt.Sprintf("https://query1.finance.yahoo.com/v1/finance/search?q=%s&quotesCount=0&newsCount=8", url.QueryEscape(query))
+	apiURL := fmt.Sprintf(
+		"https://search-api-web.eastmoney.com/search/jsonp?cb=&param={\"uid\":\"\",\"keyword\":\"%s\",\"type\":[\"cmsArticleWebOld\"],\"client\":\"web\",\"clientType\":\"web\",\"clientVersion\":\"curr\",\"param\":{\"cmsArticleWebOld\":{\"searchScope\":\"default\",\"sort\":\"default\",\"pageIndex\":1,\"pageSize\":8,\"preTag\":\"<em>\",\"postTag\":\"</em>\"}}}",
+		url.QueryEscape(query),
+	)
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0")
+	req.Header.Set("Referer", "https://www.eastmoney.com")
 
 	resp, err := h.httpClient.Do(req)
 	if err != nil {
@@ -1500,35 +1790,64 @@ func (h *StockHandler) fetchUSStockNews(ctx context.Context, symbol string, name
 	}
 	defer resp.Body.Close()
 
-	var result struct {
-		News []struct {
-			Title     string `json:"title"`
-			Publisher string `json:"publisher"`
-			Link      string `json:"link"`
-			ProviderPublishTime int64 `json:"providerPublishTime"`
-		} `json:"news"`
+	body, _ := io.ReadAll(resp.Body)
+	bodyStr := string(body)
+
+	// JSONP callback strip
+	if idx := strings.Index(bodyStr, "("); idx >= 0 {
+		bodyStr = bodyStr[idx+1:]
 	}
-	json.NewDecoder(resp.Body).Decode(&result)
+	if idx := strings.LastIndex(bodyStr, ")"); idx >= 0 {
+		bodyStr = bodyStr[:idx]
+	}
+
+	var result struct {
+		Result struct {
+			CmsArticleWebOld []struct {
+				Title      string `json:"title"`
+				Content    string `json:"content"`
+				Date       string `json:"date"`
+				MediaName  string `json:"mediaName"`
+				ArticleUrl string `json:"url"`
+			} `json:"cmsArticleWebOld"`
+		} `json:"result"`
+	}
 
 	var news []NewsResponse
-	for i, n := range result.News {
-		t := time.Unix(n.ProviderPublishTime, 0)
-		timeStr := t.Format("01-02 15:04")
+	if err := json.Unmarshal([]byte(bodyStr), &result); err != nil {
+		return news, nil
+	}
+
+	for i, article := range result.Result.CmsArticleWebOld {
+		if i >= 8 {
+			break
+		}
+		title := strings.ReplaceAll(article.Title, "<em>", "")
+		title = strings.ReplaceAll(title, "</em>", "")
+
+		summary := article.Content
+		if len(summary) > 200 {
+			summary = summary[:200] + "..."
+		}
+		summary = strings.ReplaceAll(summary, "<em>", "")
+		summary = strings.ReplaceAll(summary, "</em>", "")
+
+		sentiment := "neutral"
 		news = append(news, NewsResponse{
 			ID:        fmt.Sprintf("%s_news_%d", symbol, i),
-			Title:     n.Title,
-			Source:    n.Publisher,
-			Time:      timeStr,
-			Summary:   n.Title,
-			Sentiment: "neutral",
-			URL:       n.Link,
+			Title:     title,
+			Source:    article.MediaName,
+			Time:      article.Date,
+			Summary:   summary,
+			Sentiment: sentiment,
+			URL:       article.ArticleUrl,
 		})
 	}
 	return news, nil
 }
 
 func (h *StockHandler) fetchCryptoNews(ctx context.Context, coinID string, name string) ([]NewsResponse, error) {
-	// CoinGecko doesn't have a free news API; use placeholder
+	// No free crypto news API available; return empty placeholder
 	return []NewsResponse{}, nil
 }
 

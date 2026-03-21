@@ -7,6 +7,8 @@ struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @State private var sheetItem: ConversationSheetItem?
     @State private var marketSheetItem: Market?
+    /// Holds a market that the user tapped while a sheet was still dismissing.
+    @State private var pendingMarket: Market?
     @State private var showAccountMenu = false
 
     var body: some View {
@@ -26,8 +28,18 @@ struct HomeView: View {
             }
             .navigationBarHidden(true)
         }
-        .sheet(item: $marketSheetItem) { market in
+        .sheet(item: $marketSheetItem, onDismiss: {
+            // If the user tapped another market while this sheet was dismissing,
+            // present it now that the dismiss animation has fully finished.
+            if let next = pendingMarket {
+                pendingMarket = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    marketSheetItem = next
+                }
+            }
+        }) { market in
             MarketDetailView(market: market, coordinator: coordinator)
+                .id(market)  // Force SwiftUI to recreate View + @StateObject when market changes
         }
         .sheet(item: $sheetItem, onDismiss: {
             viewModel.loadRecentConversations()
@@ -129,12 +141,30 @@ struct HomeView: View {
             VStack(spacing: 12) {
                 ForEach(Market.allCases) { market in
                     MarketCard(market: market) {
-                        marketSheetItem = market
+                        openMarketSheet(market)
                     }
                     .padding(.horizontal, 20)
                 }
             }
             .padding(.bottom, 8)
+        }
+    }
+
+    // MARK: - Open Market Sheet (handles dismiss-animation race)
+
+    /// Safely opens a market sheet even if one is currently being dismissed.
+    private func openMarketSheet(_ market: Market) {
+        if marketSheetItem != nil {
+            // Sheet is still presented — dismiss it first, open the new one in onDismiss.
+            pendingMarket = market
+            marketSheetItem = nil
+        } else if pendingMarket != nil {
+            // A previous sheet is still in dismiss animation (pendingMarket waiting).
+            // Replace the pending target with the new one.
+            pendingMarket = market
+        } else {
+            // No sheet active — present immediately.
+            marketSheetItem = market
         }
     }
 

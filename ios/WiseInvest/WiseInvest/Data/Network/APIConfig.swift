@@ -13,7 +13,7 @@ enum APIConfig {
     /// 公网模式：Cloudflare Tunnel 地址（手机随处可用）
     /// 格式：https://<tunnel-id>.cfargotunnel.com
     /// 创建方式见 WiseInvest/start-tunnel.sh
-    static let tunnelURL: String? = "http://119.91.123.144"
+    static let tunnelURL: String? = nil
   // 腾讯云服务器公网地址
 
     // MARK: - 自动选择 URL（无需手动修改）

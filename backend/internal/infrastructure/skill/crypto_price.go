@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
 
-// CryptoPriceSkill fetches cryptocurrency prices via CoinGecko's free public API.
-// No API key required. Supports the /simple/price endpoint with 24h change and volume.
+// CryptoPriceSkill fetches cryptocurrency prices via Binance public API.
+// No API key required. Uses /api/v3/ticker/24hr endpoint for 24h price statistics.
 type CryptoPriceSkill struct{}
 
 func NewCryptoPriceSkill() *CryptoPriceSkill { return &CryptoPriceSkill{} }
@@ -18,7 +19,7 @@ func NewCryptoPriceSkill() *CryptoPriceSkill { return &CryptoPriceSkill{} }
 func (s *CryptoPriceSkill) Name() string { return "get_crypto_price" }
 
 func (s *CryptoPriceSkill) Description() string {
-	return "查询加密货币实时价格、24h涨跌幅、24h成交额、市值等行情数据。支持常用简称（BTC/ETH/SOL等）自动转换为 CoinGecko ID。"
+	return "查询加密货币实时价格、24h涨跌幅、24h成交额等行情数据（数据来源：币安）。支持常用简称（BTC/ETH/SOL等）自动转换为币安交易对。"
 }
 
 func (s *CryptoPriceSkill) Parameters() []SkillParam {
@@ -26,15 +27,8 @@ func (s *CryptoPriceSkill) Parameters() []SkillParam {
 		{
 			Name:        "coins",
 			Type:        "string",
-			Description: "加密货币 ID 或常用简称，多个用英文逗号分隔。常用简称：BTC, ETH, BNB, SOL, XRP, ADA, DOGE, AVAX, DOT, LINK, MATIC, LTC, ATOM, NEAR, TRX, BCH。也可直接使用 CoinGecko ID（如 bitcoin, ethereum）。",
+			Description: "加密货币简称，多个用英文逗号分隔。例如：BTC, ETH, BNB, SOL, XRP, ADA, DOGE, AVAX, DOT, LINK, MATIC, LTC, ATOM, NEAR, TRX, BCH, SUI, APT, ARB, OP, TON, PEPE, SHIB。",
 			Required:    true,
-		},
-		{
-			Name:        "vs_currency",
-			Type:        "string",
-			Description: "计价货币，默认 usd。可选：usd, cny",
-			Required:    false,
-			Enum:        []string{"usd", "cny"},
 		},
 	}
 }
@@ -45,25 +39,47 @@ func (s *CryptoPriceSkill) Execute(ctx context.Context, input map[string]interfa
 		return nil, fmt.Errorf("coins is required")
 	}
 
-	vsCurrency := "usd"
-	if vc, ok := input["vs_currency"].(string); ok && vc != "" {
-		vsCurrency = strings.ToLower(vc)
+	// Normalize input to Binance symbols: "btc,eth" → ["BTCUSDT","ETHUSDT"]
+	var binanceSymbols []string
+	var orderedBases []string // to maintain output order
+	seen := make(map[string]bool)
+	for _, p := range strings.Split(coins, ",") {
+		p = strings.TrimSpace(strings.ToUpper(p))
+		if p == "" {
+			continue
+		}
+		// Handle various input formats
+		base := p
+		if strings.HasSuffix(p, "USDT") {
+			base = strings.TrimSuffix(p, "USDT")
+		} else if strings.HasSuffix(p, "/USDT") {
+			base = strings.TrimSuffix(p, "/USDT")
+		}
+		// Also handle CoinGecko IDs passed by crypto_agent
+		if mapped, ok := coinGeckoIDToSymbol[strings.ToLower(base)]; ok {
+			base = mapped
+		}
+		sym := base + "USDT"
+		if !seen[sym] {
+			seen[sym] = true
+			binanceSymbols = append(binanceSymbols, sym)
+			orderedBases = append(orderedBases, base)
+		}
+	}
+	if len(binanceSymbols) == 0 {
+		return nil, fmt.Errorf("no valid coin symbols provided")
 	}
 
-	coinIDs := normalizeCoinIDs(coins)
-
-	url := fmt.Sprintf(
-		"https://api.coingecko.com/api/v3/simple/price?ids=%s&vs_currencies=%s&include_24hr_change=true&include_24hr_vol=true&include_market_cap=true",
-		strings.Join(coinIDs, ","),
-		vsCurrency,
-	)
+	// Build Binance batch query: /api/v3/ticker/24hr?symbols=["BTCUSDT","ETHUSDT"]
+	symbolsJSON := "[\"" + strings.Join(binanceSymbols, "\",\"") + "\"]"
+	apiURL := fmt.Sprintf("https://data-api.binance.vision/api/v3/ticker/24hr?symbols=%s", url.QueryEscape(symbolsJSON))
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0")
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -71,43 +87,59 @@ func (s *CryptoPriceSkill) Execute(ctx context.Context, input map[string]interfa
 	}
 	defer resp.Body.Close()
 
-	// Response: { "bitcoin": { "usd": 65000, "usd_24h_change": 2.5, ... }, ... }
-	var data map[string]map[string]float64
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	var tickers []struct {
+		Symbol             string `json:"symbol"`
+		PriceChange        string `json:"priceChange"`
+		PriceChangePercent string `json:"priceChangePercent"`
+		PrevClosePrice     string `json:"prevClosePrice"`
+		LastPrice          string `json:"lastPrice"`
+		OpenPrice          string `json:"openPrice"`
+		HighPrice          string `json:"highPrice"`
+		LowPrice           string `json:"lowPrice"`
+		Volume             string `json:"volume"`
+		QuoteVolume        string `json:"quoteVolume"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tickers); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	if len(data) == 0 {
-		return "未找到加密货币数据，请检查币种 ID 是否正确。CoinGecko 免费 API 有频率限制，请稍候重试。", nil
+	if len(tickers) == 0 {
+		return "未找到加密货币数据，请检查币种代码是否正确。", nil
 	}
 
-	// Maintain input order for readability
+	// Index tickers by symbol for ordered output
+	tickerMap := make(map[string]int, len(tickers))
+	for i, t := range tickers {
+		tickerMap[t.Symbol] = i
+	}
+
 	var sb strings.Builder
-	for _, coinID := range coinIDs {
-		prices, ok := data[coinID]
+	for i, base := range orderedBases {
+		sym := binanceSymbols[i]
+		idx, ok := tickerMap[sym]
 		if !ok {
 			continue
 		}
-		price := prices[vsCurrency]
-		change24h := prices[vsCurrency+"_24h_change"]
-		vol24h := prices[vsCurrency+"_24h_vol"]
-		marketCap := prices[vsCurrency+"_market_cap"]
+		t := tickers[idx]
 
-		displayName := coinIDToSymbol(coinID)
-		currencyLabel := strings.ToUpper(vsCurrency)
+		price := parseSkillFloat(t.LastPrice)
+		changePct := parseSkillFloat(t.PriceChangePercent)
+		change := parseSkillFloat(t.PriceChange)
+		vol := parseSkillFloat(t.QuoteVolume) // USDT volume
+		high := parseSkillFloat(t.HighPrice)
+		low := parseSkillFloat(t.LowPrice)
 
-		sb.WriteString(fmt.Sprintf("**%s**（%s）\n", displayName, coinID))
-		if vsCurrency == "usd" {
-			sb.WriteString(fmt.Sprintf("  当前价：$%.6g USD\n", price))
-		} else {
-			sb.WriteString(fmt.Sprintf("  当前价：%.6g %s\n", price, currencyLabel))
+		displayName := base
+		if name, ok := cryptoDisplayNames[base]; ok {
+			displayName = name
 		}
-		sb.WriteString(fmt.Sprintf("  24h 涨跌幅：%+.2f%%\n", change24h))
-		if vol24h > 0 {
-			sb.WriteString(fmt.Sprintf("  24h 成交额：%.2f 亿 %s\n", vol24h/1e8, currencyLabel))
-		}
-		if marketCap > 0 {
-			sb.WriteString(fmt.Sprintf("  市值：%.2f 亿 %s\n", marketCap/1e8, currencyLabel))
+
+		sb.WriteString(fmt.Sprintf("**%s（%s）**\n", displayName, base))
+		sb.WriteString(fmt.Sprintf("  当前价：$%.6g USD\n", price))
+		sb.WriteString(fmt.Sprintf("  24h 涨跌：%+.2f USD（%+.2f%%）\n", change, changePct))
+		sb.WriteString(fmt.Sprintf("  24h 最高：$%.6g │ 最低：$%.6g\n", high, low))
+		if vol > 0 {
+			sb.WriteString(fmt.Sprintf("  24h 成交额：%.2f 亿 USD\n", vol/1e8))
 		}
 		sb.WriteString("\n")
 	}
@@ -118,92 +150,36 @@ func (s *CryptoPriceSkill) Execute(ctx context.Context, input map[string]interfa
 	return sb.String(), nil
 }
 
-// symbolToID maps common uppercase tickers to CoinGecko IDs.
-var symbolToID = map[string]string{
-	"btc":   "bitcoin",
-	"eth":   "ethereum",
-	"bnb":   "binancecoin",
-	"sol":   "solana",
-	"xrp":   "ripple",
-	"ada":   "cardano",
-	"doge":  "dogecoin",
-	"avax":  "avalanche-2",
-	"dot":   "polkadot",
-	"link":  "chainlink",
-	"uni":   "uniswap",
-	"matic": "matic-network",
-	"pol":   "matic-network",
-	"ltc":   "litecoin",
-	"atom":  "cosmos",
-	"near":  "near",
-	"ftm":   "fantom",
-	"trx":   "tron",
-	"etc":   "ethereum-classic",
-	"bch":   "bitcoin-cash",
-	"sui":   "sui",
-	"apt":   "aptos",
-	"arb":   "arbitrum",
-	"op":    "optimism",
-	"inj":   "injective-protocol",
-	"sei":   "sei-network",
-	"ton":   "the-open-network",
-	"pepe":  "pepe",
-	"shib":  "shiba-inu",
+// coinGeckoIDToSymbol maps CoinGecko IDs to Binance base symbols.
+// This ensures backward compatibility when crypto_agent passes CoinGecko IDs.
+var coinGeckoIDToSymbol = map[string]string{
+	"bitcoin": "BTC", "ethereum": "ETH", "binancecoin": "BNB", "solana": "SOL",
+	"ripple": "XRP", "cardano": "ADA", "dogecoin": "DOGE", "avalanche-2": "AVAX",
+	"polkadot": "DOT", "chainlink": "LINK", "uniswap": "UNI", "matic-network": "MATIC",
+	"litecoin": "LTC", "cosmos": "ATOM", "near": "NEAR", "fantom": "FTM",
+	"tron": "TRX", "ethereum-classic": "ETC", "bitcoin-cash": "BCH", "sui": "SUI",
+	"aptos": "APT", "arbitrum": "ARB", "optimism": "OP", "the-open-network": "TON",
+	"pepe": "PEPE", "shiba-inu": "SHIB", "injective-protocol": "INJ", "sei-network": "SEI",
 }
 
-// normalizeCoinIDs converts ticker symbols and mixed input to CoinGecko IDs.
-func normalizeCoinIDs(coins string) []string {
-	parts := strings.Split(coins, ",")
-	result := make([]string, 0, len(parts))
-	seen := make(map[string]bool)
-	for _, p := range parts {
-		p = strings.TrimSpace(strings.ToLower(p))
-		if p == "" {
-			continue
-		}
-		if id, ok := symbolToID[p]; ok {
-			p = id
-		}
-		if !seen[p] {
-			seen[p] = true
-			result = append(result, p)
-		}
-	}
-	return result
+// cryptoDisplayNames maps uppercase base symbols to human-readable names.
+var cryptoDisplayNames = map[string]string{
+	"BTC": "Bitcoin", "ETH": "Ethereum", "BNB": "BNB", "SOL": "Solana",
+	"XRP": "XRP", "ADA": "Cardano", "DOGE": "Dogecoin", "AVAX": "Avalanche",
+	"DOT": "Polkadot", "LINK": "Chainlink", "UNI": "Uniswap", "MATIC": "Polygon",
+	"LTC": "Litecoin", "ATOM": "Cosmos", "NEAR": "NEAR", "FTM": "Fantom",
+	"TRX": "TRON", "ETC": "Ethereum Classic", "BCH": "Bitcoin Cash", "SUI": "Sui",
+	"APT": "Aptos", "ARB": "Arbitrum", "OP": "Optimism", "TON": "Toncoin",
+	"PEPE": "Pepe", "SHIB": "Shiba Inu", "INJ": "Injective", "SEI": "Sei",
 }
 
-// coinIDToSymbol returns a display symbol for a CoinGecko ID.
-func coinIDToSymbol(id string) string {
-	idToSymbol := map[string]string{
-		"bitcoin":          "BTC",
-		"ethereum":         "ETH",
-		"binancecoin":      "BNB",
-		"solana":           "SOL",
-		"ripple":           "XRP",
-		"cardano":          "ADA",
-		"dogecoin":         "DOGE",
-		"avalanche-2":      "AVAX",
-		"polkadot":         "DOT",
-		"chainlink":        "LINK",
-		"uniswap":          "UNI",
-		"matic-network":    "MATIC",
-		"litecoin":         "LTC",
-		"cosmos":           "ATOM",
-		"near":             "NEAR",
-		"fantom":           "FTM",
-		"tron":             "TRX",
-		"ethereum-classic": "ETC",
-		"bitcoin-cash":     "BCH",
-		"sui":              "SUI",
-		"aptos":            "APT",
-		"arbitrum":         "ARB",
-		"optimism":         "OP",
-		"the-open-network": "TON",
-		"pepe":             "PEPE",
-		"shiba-inu":        "SHIB",
+// parseSkillFloat parses a numeric string to float64 (local helper to avoid dependency on handler package).
+func parseSkillFloat(s string) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "-" {
+		return 0
 	}
-	if sym, ok := idToSymbol[id]; ok {
-		return sym
-	}
-	return strings.ToUpper(id)
+	var f float64
+	fmt.Sscanf(s, "%f", &f)
+	return f
 }

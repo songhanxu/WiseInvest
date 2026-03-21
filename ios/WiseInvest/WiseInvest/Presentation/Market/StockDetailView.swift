@@ -97,17 +97,20 @@ struct StockDetailView: View {
 
             Spacer()
 
-            Button(action: {
-                if isInWatchlist {
-                    stockService.removeFromWatchlist(stock.id, for: market)
-                } else {
-                    stockService.addToWatchlist(stock, for: market)
+            // Only show watchlist star for regular stocks, not indices
+            if !stock.isIndex {
+                Button(action: {
+                    if isInWatchlist {
+                        stockService.removeFromWatchlist(stock.id, for: market)
+                    } else {
+                        stockService.addToWatchlist(stock, for: market)
+                    }
+                    isInWatchlist.toggle()
+                }) {
+                    Image(systemName: isInWatchlist ? "star.fill" : "star")
+                        .font(.system(size: 20))
+                        .foregroundColor(isInWatchlist ? Color(hex: "FFD700") : .textSecondary)
                 }
-                isInWatchlist.toggle()
-            }) {
-                Image(systemName: isInWatchlist ? "star.fill" : "star")
-                    .font(.system(size: 20))
-                    .foregroundColor(isInWatchlist ? Color(hex: "FFD700") : .textSecondary)
             }
         }
         .padding(.horizontal, 16)

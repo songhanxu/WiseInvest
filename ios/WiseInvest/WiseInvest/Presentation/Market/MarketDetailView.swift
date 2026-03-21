@@ -49,7 +49,10 @@ struct MarketDetailView: View {
                 watchlistIDs: viewModel.watchlistIDs
             )
         }
-        .sheet(item: $selectedIndex, onDismiss: nil) { index in
+        .sheet(item: $selectedIndex, onDismiss: {
+            // Refresh watchlist when index detail dismisses (user may have toggled star)
+            viewModel.loadWatchlist()
+        }) { index in
             // Convert MarketIndex to Stock for the detail view
             let indexStock = Stock(
                 id: index.id,
@@ -63,7 +66,8 @@ struct MarketDetailView: View {
                 high: index.value,
                 low: index.value,
                 open: index.value,
-                previousClose: index.value - index.change
+                previousClose: index.value - index.change,
+                isIndex: true
             )
             StockDetailView(
                 stock: indexStock,
@@ -140,16 +144,14 @@ struct MarketDetailView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 20)
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(viewModel.indices) { index in
-                            IndexCard(index: index, market: market) {
-                                selectedIndex = index
-                            }
+                HStack(spacing: 8) {
+                    ForEach(viewModel.indices) { index in
+                        IndexCard(index: index, market: market) {
+                            selectedIndex = index
                         }
                     }
-                    .padding(.horizontal, 20)
                 }
+                .padding(.horizontal, 16)
             }
         }
         .padding(.top, 16)
@@ -233,34 +235,38 @@ private struct IndexCard: View {
 
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 2) {
                     Text(index.shortName)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.textSecondary)
-                    Spacer()
+                        .lineLimit(1)
+                    Spacer(minLength: 2)
                     Text(index.changePercentText)
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .foregroundColor(index.isUp ? .accentGreen : Color(hex: "E53935"))
+                        .lineLimit(1)
                 }
 
                 Text(index.valueText)
-                    .font(.system(size: 20, weight: .bold, design: .monospaced))
+                    .font(.system(size: 16, weight: .bold, design: .monospaced))
                     .foregroundColor(.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
 
                 if !index.sparklineData.isEmpty {
                     SparklineView(data: index.sparklineData, isUp: index.isUp)
-                        .frame(height: 32)
+                        .frame(height: 28)
                 } else {
                     Rectangle()
                         .fill(Color.clear)
-                        .frame(height: 32)
+                        .frame(height: 28)
                 }
             }
-            .padding(14)
-            .frame(width: 160)
+            .padding(10)
+            .frame(maxWidth: .infinity)
             .background(Color.secondaryBackground)
-            .cornerRadius(14)
+            .cornerRadius(12)
         }
         .buttonStyle(ScaleButtonStyle())
     }

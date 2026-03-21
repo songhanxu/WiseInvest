@@ -13,7 +13,7 @@ func LoadBinanceConfig() *BinanceConfig {
 	return &BinanceConfig{
 		APIKey:    getEnv("BINANCE_API_KEY", ""),
 		APISecret: getEnv("BINANCE_API_SECRET", ""),
-		BaseURL:   getEnv("BINANCE_BASE_URL", "https://api.binance.com"),
+		BaseURL:   getEnv("BINANCE_BASE_URL", "https://data-api.binance.vision"),
 		Testnet:   getEnv("BINANCE_TESTNET", "false") == "true",
 	}
 }

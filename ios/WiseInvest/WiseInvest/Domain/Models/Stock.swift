@@ -15,6 +15,49 @@ struct Stock: Identifiable, Codable, Hashable {
     var low: Double
     var open: Double
     var previousClose: Double
+    var isIndex: Bool        // 是否为大盘指数（指数不可加入自选）
+
+    enum CodingKeys: String, CodingKey {
+        case id, symbol, name, market, currentPrice, change, changePercent
+        case volume, high, low, open, previousClose, isIndex
+    }
+
+    /// Default initializer with isIndex defaulting to false
+    init(id: String, symbol: String, name: String, market: String,
+         currentPrice: Double, change: Double, changePercent: Double,
+         volume: Double, high: Double, low: Double, open: Double,
+         previousClose: Double, isIndex: Bool = false) {
+        self.id = id
+        self.symbol = symbol
+        self.name = name
+        self.market = market
+        self.currentPrice = currentPrice
+        self.change = change
+        self.changePercent = changePercent
+        self.volume = volume
+        self.high = high
+        self.low = low
+        self.open = open
+        self.previousClose = previousClose
+        self.isIndex = isIndex
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        symbol = try c.decode(String.self, forKey: .symbol)
+        name = try c.decode(String.self, forKey: .name)
+        market = try c.decode(String.self, forKey: .market)
+        currentPrice = try c.decode(Double.self, forKey: .currentPrice)
+        change = try c.decode(Double.self, forKey: .change)
+        changePercent = try c.decode(Double.self, forKey: .changePercent)
+        volume = try c.decode(Double.self, forKey: .volume)
+        high = try c.decode(Double.self, forKey: .high)
+        low = try c.decode(Double.self, forKey: .low)
+        open = try c.decode(Double.self, forKey: .open)
+        previousClose = try c.decode(Double.self, forKey: .previousClose)
+        isIndex = try c.decodeIfPresent(Bool.self, forKey: .isIndex) ?? false
+    }
 
     var isUp: Bool { change >= 0 }
 
