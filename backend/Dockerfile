@@ -5,12 +5,15 @@
 # ---- Stage 1: Build ----
 FROM golang:1.24-alpine AS builder
 
-RUN apk add --no-cache git ca-certificates tzdata
+# 使用阿里云 Alpine 镜像源（国内服务器加速）
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+    && apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /app
 
 # 缓存依赖层
 COPY go.mod go.sum ./
+ENV GOPROXY=https://goproxy.cn,direct
 RUN go mod download
 
 # 编译
@@ -23,7 +26,9 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # ---- Stage 2: Runtime ----
 FROM alpine:3.19
 
-RUN apk add --no-cache ca-certificates tzdata curl
+# 使用阿里云 Alpine 镜像源
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+    && apk add --no-cache ca-certificates tzdata curl
 
 # 设置时区（定时任务依赖 Asia/Shanghai）
 ENV TZ=Asia/Shanghai
