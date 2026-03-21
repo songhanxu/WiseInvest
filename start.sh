@@ -95,10 +95,12 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# 检查 OPENAI_API_KEY
-if ! grep -q "OPENAI_API_KEY=sk-" .env; then
+# 检查 OPENAI_API_KEY 是否已配置（排除占位符）
+OPENAI_KEY=$(grep "^OPENAI_API_KEY=" .env | cut -d'=' -f2)
+if [ -z "$OPENAI_KEY" ] || [ "$OPENAI_KEY" = "your_openai_or_deepseek_api_key_here" ]; then
     echo -e "${RED}❌ 请在 backend/.env 文件中配置 OPENAI_API_KEY${NC}"
     echo -e "${YELLOW}   编辑 backend/.env，将 OPENAI_API_KEY 设置为你的 API Key${NC}"
+    echo -e "${YELLOW}   支持 OpenAI (sk-...) 或 DeepSeek API Key${NC}"
     exit 1
 fi
 
@@ -113,7 +115,7 @@ if ! psql -h localhost -U wiseinvest -d wiseinvest -c "SELECT 1" &> /dev/null; t
     echo -e "${YELLOW}创建数据库用户和数据库...${NC}"
     
     # 创建用户（如果不存在）
-    psql postgres -c "CREATE USER wiseinvest WITH PASSWORD 'wiseinvest123';" 2>/dev/null || true
+    psql postgres -c "CREATE USER wiseinvest WITH PASSWORD 'wiseinvest';" 2>/dev/null || true
     
     # 创建数据库
     psql postgres -c "CREATE DATABASE wiseinvest OWNER wiseinvest;" 2>/dev/null || true
@@ -140,22 +142,30 @@ echo ""
 echo -e "${BLUE}🚀 启动后端服务...${NC}"
 echo ""
 
+# 创建日志目录
+mkdir -p ../logs
+
 # 在后台启动
 nohup go run cmd/server/main.go > ../logs/backend.log 2>&1 &
 BACKEND_PID=$!
 
-# 创建日志目录
-mkdir -p ../logs
+# 等待服务启动（最多等待 60 秒）
+echo -e "${YELLOW}等待服务启动（首次启动需编译，可能较慢）...${NC}"
+MAX_WAIT=60
+WAITED=0
+while [ $WAITED -lt $MAX_WAIT ]; do
+    if curl -s http://localhost:8080/health > /dev/null 2>&1; then
+        echo -e "${GREEN}✓ 后端服务启动成功 (PID: $BACKEND_PID)，耗时 ${WAITED}s${NC}"
+        break
+    fi
+    sleep 2
+    WAITED=$((WAITED + 2))
+    echo -ne "\r${YELLOW}  已等待 ${WAITED}s / ${MAX_WAIT}s ...${NC}"
+done
 
-# 等待服务启动
-echo -e "${YELLOW}等待服务启动...${NC}"
-sleep 5
-
-# 检查服务是否启动成功
-if curl -s http://localhost:8080/health > /dev/null; then
-    echo -e "${GREEN}✓ 后端服务启动成功 (PID: $BACKEND_PID)${NC}"
-else
-    echo -e "${RED}❌ 后端服务启动失败，请查看日志: logs/backend.log${NC}"
+if [ $WAITED -ge $MAX_WAIT ]; then
+    echo ""
+    echo -e "${RED}❌ 后端服务启动超时（${MAX_WAIT}s），请查看日志: logs/backend.log${NC}"
     exit 1
 fi
 

@@ -7,13 +7,13 @@ enum APIConfig {
 
     /// 本地局域网模式：Mac 的 IP 地址（真机同 Wi-Fi 时使用）
     /// 运行 `ipconfig getifaddr en0` 查看当前 IP
-    static let localDeviceHost = "30.22.158.12"
+    static let localDeviceHost = "192.168.1.4"
     static let localPort = 8080
 
     /// 公网模式：Cloudflare Tunnel 地址（手机随处可用）
     /// 格式：https://<tunnel-id>.cfargotunnel.com
     /// 创建方式见 WiseInvest/start-tunnel.sh
-    static let tunnelURL: String? = "https://nonimbricative-ungoitered-joyce.ngrok-free.dev"
+    static let tunnelURL: String? = nil
   // 示例: "https://abc123-xxxx.cfargotunnel.com"
 
     // MARK: - 自动选择 URL（无需手动修改）
