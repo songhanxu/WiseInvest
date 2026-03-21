@@ -89,6 +89,8 @@ class StockDataService: ObservableObject {
 
     func getWatchlist(for market: Market, completion: @escaping ([Stock]) -> Void) {
         let urlString = "\(baseURL)/api/v1/stocks/watchlist?market=\(market.rawValue)"
+        print("[StockDataService] getWatchlist URL: \(urlString)")
+        print("[StockDataService] getWatchlist token: \(AuthState.shared.token != nil ? "present" : "MISSING")")
         guard let url = URL(string: urlString) else {
             completion([])
             return
@@ -98,7 +100,29 @@ class StockDataService: ObservableObject {
         addAuthHeader(to: &request)
 
         session.dataTask(with: request) { data, response, error in
-            guard let data = data, error == nil else {
+            if let error = error {
+                print("[StockDataService] getWatchlist NETWORK ERROR: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("[StockDataService] getWatchlist HTTP status: \(httpResponse.statusCode)")
+                if httpResponse.statusCode == 401 {
+                    print("[StockDataService] ⚠️ getWatchlist 401 Unauthorized — 用户未登录或 token 过期")
+                    DispatchQueue.main.async { completion([]) }
+                    return
+                }
+                if httpResponse.statusCode != 200 {
+                    if let data = data, let body = String(data: data, encoding: .utf8) {
+                        print("[StockDataService] getWatchlist ERROR body: \(body)")
+                    }
+                    DispatchQueue.main.async { completion([]) }
+                    return
+                }
+            }
+            
+            guard let data = data else {
                 DispatchQueue.main.async { completion([]) }
                 return
             }
@@ -106,9 +130,13 @@ class StockDataService: ObservableObject {
             do {
                 let stocks = try JSONDecoder().decode([StockAPIResponse].self, from: data)
                 let result = stocks.map { $0.toStock() }
+                print("[StockDataService] getWatchlist decoded \(result.count) stocks")
                 DispatchQueue.main.async { completion(result) }
             } catch {
                 print("[StockDataService] Failed to decode watchlist: \(error)")
+                if let body = String(data: data, encoding: .utf8) {
+                    print("[StockDataService] getWatchlist raw response: \(body.prefix(500))")
+                }
                 DispatchQueue.main.async { completion([]) }
             }
         }.resume()
@@ -116,6 +144,9 @@ class StockDataService: ObservableObject {
 
     func addToWatchlist(_ stock: Stock, for market: Market, completion: ((Bool) -> Void)? = nil) {
         let urlString = "\(baseURL)/api/v1/stocks/watchlist"
+        print("[StockDataService] addToWatchlist URL: \(urlString)")
+        print("[StockDataService] addToWatchlist token: \(AuthState.shared.token != nil ? "present" : "MISSING")")
+        print("[StockDataService] addToWatchlist stock: \(stock.id) / \(stock.symbol) / \(stock.name) / \(market.rawValue)")
         guard let url = URL(string: urlString) else {
             completion?(false)
             return
@@ -134,8 +165,25 @@ class StockDataService: ObservableObject {
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        session.dataTask(with: request) { _, response, error in
-            let success = error == nil
+        session.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("[StockDataService] addToWatchlist NETWORK ERROR: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            
+            let httpResponse = response as? HTTPURLResponse
+            let statusCode = httpResponse?.statusCode ?? 0
+            print("[StockDataService] addToWatchlist HTTP status: \(statusCode)")
+            
+            if let data = data, let body = String(data: data, encoding: .utf8) {
+                print("[StockDataService] addToWatchlist response: \(body)")
+            }
+            
+            let success = statusCode == 200
+            if !success {
+                print("[StockDataService] ⚠️ addToWatchlist FAILED — status \(statusCode)")
+            }
             DispatchQueue.main.async { completion?(success) }
         }.resume()
     }
@@ -158,8 +206,18 @@ class StockDataService: ObservableObject {
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
 
-        session.dataTask(with: request) { _, response, error in
-            let success = error == nil
+        session.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("[StockDataService] removeFromWatchlist NETWORK ERROR: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion?(false) }
+                return
+            }
+            
+            let httpResponse = response as? HTTPURLResponse
+            let statusCode = httpResponse?.statusCode ?? 0
+            print("[StockDataService] removeFromWatchlist HTTP status: \(statusCode)")
+            
+            let success = statusCode == 200
             DispatchQueue.main.async { completion?(success) }
         }.resume()
     }
