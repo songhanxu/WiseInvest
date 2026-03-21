@@ -13,14 +13,27 @@ struct StockDetailView: View {
     @State private var showConversation = false
     @State private var isInWatchlist = false
     @State private var isLoadingKline = true
+    @State private var isLoadingMore = false
     @State private var isLoadingNews = true
     @State private var liveStock: Stock?
     @State private var tradingStatus: MarketTradingHours.TradingStatus = .closed("已收盘")
     @State private var refreshTimer: Timer?
+    @State private var selectedPeriod: StockDataService.KLinePeriod = .d1
     /// Monotonically increasing counter — each new quote request gets the next value.
     @State private var quoteCounter: UInt64 = 0
     /// High-water mark: the highest seq whose response has been accepted.
     @State private var quoteHighWaterMark: UInt64 = 0
+    /// Alert state for timeout/error messages
+    @State private var showTimeoutAlert = false
+    @State private var timeoutAlertMessage = ""
+    /// Timer for detecting K-line data load timeout
+    @State private var klineTimeoutTimer: Timer?
+    /// Timer for detecting news data load timeout
+    @State private var newsTimeoutTimer: Timer?
+    /// Client-side K-line retry state (with exponential backoff)
+    @State private var klineRetryCount: Int = 0
+    @State private var klineRetryTimer: Timer?
+    private let klineMaxClientRetries = 3
 
     private let stockService = StockDataService.shared
 
@@ -39,13 +52,50 @@ struct StockDetailView: View {
                         // Stock price overview
                         priceSection
 
-                        // K-Line chart
-                        if isLoadingKline {
-                            KLineChartSkeleton()
+                        // K-Line chart with period selector
+                        VStack(spacing: 0) {
+                            // Period selector
+                            periodSelector
                                 .padding(.horizontal, 16)
-                        } else if !klineData.isEmpty {
-                            KLineChartView(data: klineData, accentColor: market.accentColor)
+                                .padding(.bottom, 8)
+
+                            if isLoadingKline {
+                                KLineChartSkeleton()
+                                    .padding(.horizontal, 16)
+                            } else if !klineData.isEmpty {
+                                KLineChartView(
+                                    data: klineData,
+                                    accentColor: market.accentColor,
+                                    onLoadMore: { loadMoreKLineData() },
+                                    period: selectedPeriod.rawValue
+                                )
                                 .padding(.horizontal, 16)
+                            } else {
+                                // Empty state — data failed to load, user can tap to retry
+                                VStack(spacing: 12) {
+                                    Image(systemName: "chart.xyaxis.line")
+                                        .font(.system(size: 32))
+                                        .foregroundColor(.textTertiary)
+                                    Text("暂无K线数据")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.textSecondary)
+                                    Button(action: {
+                                        klineRetryCount = 0
+                                        loadKLineData()
+                                    }) {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "arrow.clockwise")
+                                                .font(.system(size: 12))
+                                            Text("点击重试")
+                                                .font(.system(size: 13, weight: .medium))
+                                        }
+                                        .foregroundColor(market.accentColor)
+                                    }
+                                }
+                                .frame(height: 200)
+                                .frame(maxWidth: .infinity)
+                                .padding(.horizontal, 16)
+                            }
                         }
 
                         // AI Analysis
@@ -74,6 +124,35 @@ struct StockDetailView: View {
         }
         .onDisappear {
             stopAutoRefresh()
+            klineTimeoutTimer?.invalidate()
+            klineTimeoutTimer = nil
+            klineRetryTimer?.invalidate()
+            klineRetryTimer = nil
+            newsTimeoutTimer?.invalidate()
+            newsTimeoutTimer = nil
+        }
+        .alert("数据加载失败", isPresented: $showTimeoutAlert) {
+            Button("重试") {
+                if isLoadingKline {
+                    // Reset retry count so user-initiated retry gets fresh attempts
+                    klineRetryCount = 0
+                    performKLineLoad()
+                }
+                if isLoadingNews {
+                    loadNewsData()
+                }
+            }
+            Button("取消", role: .cancel) {
+                // Dismiss skeleton — show empty state instead of infinite loading
+                if isLoadingKline {
+                    isLoadingKline = false
+                }
+                if isLoadingNews {
+                    isLoadingNews = false
+                }
+            }
+        } message: {
+            Text(timeoutAlertMessage)
         }
         .sheet(isPresented: $showConversation) {
             StockConversationView(
@@ -295,24 +374,186 @@ struct StockDetailView: View {
             }
         }
 
-        // Load K-line
-        isLoadingKline = true
-        stockService.getKLineData(for: stock) { points in
-            self.klineData = points
-            self.isLoadingKline = false
-            // Generate AI analysis from real K-line data
-            self.analysisItems = Self.generateAnalysis(stock: self.displayStock, klineData: points)
-        }
+        // Load K-line with selected period
+        loadKLineData()
 
         // Load news
-        isLoadingNews = true
-        stockService.getNews(for: stock) { news in
-            self.newsItems = news
-            self.isLoadingNews = false
-        }
+        loadNewsData()
 
         // Check watchlist status from the parent view's watchlist data
         isInWatchlist = watchlistIDs.contains(stock.id)
+    }
+
+    /// Load news data with timeout protection. The skeleton screen only dismisses
+    /// when valid data arrives; on empty/error, it stays.
+    private func loadNewsData() {
+        isLoadingNews = true
+
+        // Start timeout timer
+        newsTimeoutTimer?.invalidate()
+        newsTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 8.0, repeats: false) { _ in
+            if self.isLoadingNews {
+                // On timeout, dismiss the news skeleton and show empty state
+                // (news is less critical, just show "暂无资讯" rather than blocking)
+                self.isLoadingNews = false
+            }
+        }
+
+        stockService.getNews(for: stock) { news in
+            self.newsTimeoutTimer?.invalidate()
+            self.newsTimeoutTimer = nil
+            self.newsItems = news
+            self.isLoadingNews = false
+        }
+    }
+
+    /// Load K-line data for the current period. Called on initial load and period switch.
+    /// After initial data arrives, immediately kicks off a background preload for more history.
+    /// The skeleton screen is only dismissed when valid data arrives; on empty/error, it stays.
+    ///
+    /// **Retry strategy**: If the backend returns an error (e.g. "获取数据超时") or empty data,
+    /// the client retries up to `klineMaxClientRetries` times with exponential backoff
+    /// (2s, 4s, 8s). If all retries fail, a user-facing alert is shown with the backend's
+    /// error message (or a generic timeout message).
+    private func loadKLineData() {
+        isLoadingKline = true
+        isLoadingMore = false
+        // Reset retry state on fresh load (e.g. period switch)
+        klineRetryCount = 0
+        klineRetryTimer?.invalidate()
+        klineRetryTimer = nil
+
+        performKLineLoad()
+    }
+
+    /// Internal method that performs a single K-line fetch attempt and handles retries.
+    private func performKLineLoad() {
+        // Cancel any pending timeout timer from a previous attempt
+        klineTimeoutTimer?.invalidate()
+
+        // Start timeout timer — if data hasn't arrived after 10 seconds, trigger retry or alert
+        klineTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: false) { _ in
+            if self.isLoadingKline {
+                self.handleKLineLoadFailure(errorMessage: "网络请求超时，请检查网络连接")
+            }
+        }
+
+        stockService.getKLineData(for: stock, period: selectedPeriod) { result in
+            // Cancel the timeout timer since we got a response
+            self.klineTimeoutTimer?.invalidate()
+            self.klineTimeoutTimer = nil
+
+            if let errorMsg = result.errorMessage {
+                // Backend returned a specific error — try to retry or show alert
+                self.handleKLineLoadFailure(errorMessage: errorMsg)
+                return
+            }
+
+            if result.points.isEmpty {
+                // Empty data with no error — still retry
+                self.handleKLineLoadFailure(errorMessage: "未能获取K线数据")
+                return
+            }
+
+            // Success — reset retry state and display data
+            self.klineRetryCount = 0
+            self.klineRetryTimer?.invalidate()
+            self.klineRetryTimer = nil
+            self.klineData = result.points
+            self.isLoadingKline = false
+
+            // Generate AI analysis only for daily data
+            if self.selectedPeriod == .d1 {
+                self.analysisItems = Self.generateAnalysis(stock: self.displayStock, klineData: result.points)
+            }
+            // Background preload: immediately request more history data
+            if result.points.count > 0 {
+                self.backgroundPreloadKLineData()
+            }
+        }
+    }
+
+    /// Handle a K-line load failure: either schedule a retry or show the error to the user.
+    private func handleKLineLoadFailure(errorMessage: String) {
+        if klineRetryCount < klineMaxClientRetries {
+            // Schedule a retry with exponential backoff: 2s, 4s, 8s
+            klineRetryCount += 1
+            let delay = pow(2.0, Double(klineRetryCount)) // 2, 4, 8
+            klineRetryTimer?.invalidate()
+            klineRetryTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { _ in
+                // Only retry if we're still loading and view hasn't disappeared
+                if self.isLoadingKline {
+                    self.performKLineLoad()
+                }
+            }
+        } else {
+            // All retries exhausted — show error alert to user
+            // Don't set isLoadingKline = false so skeleton stays visible (user can retry via alert)
+            self.timeoutAlertMessage = errorMessage
+            self.showTimeoutAlert = true
+        }
+    }
+
+    /// Background preload more historical K-line data. Called once after initial load.
+    /// Does NOT show loading indicator — runs silently in the background.
+    private func backgroundPreloadKLineData() {
+        let currentCount = klineData.count
+        // Request a large batch (current + 500 more) to build up a comfortable scroll buffer
+        stockService.loadMoreKLineData(for: stock, period: selectedPeriod, currentCount: currentCount) { result in
+            if result.points.count > self.klineData.count {
+                self.klineData = result.points
+            }
+        }
+    }
+
+    /// Load more historical K-line data (pagination). Merges with existing data.
+    /// Runs silently without loading indicator for seamless infinite scroll.
+    private func loadMoreKLineData() {
+        guard !isLoadingMore else { return }
+        isLoadingMore = true
+        stockService.loadMoreKLineData(for: stock, period: selectedPeriod, currentCount: klineData.count) { result in
+            if result.points.count > self.klineData.count {
+                self.klineData = result.points
+            }
+            // Reset flag after a short delay to allow next request but prevent hammering
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.isLoadingMore = false
+            }
+        }
+    }
+
+    // MARK: - Period Selector
+
+    private var periodSelector: some View {
+        HStack(spacing: 0) {
+            ForEach(StockDataService.KLinePeriod.allCases, id: \.rawValue) { period in
+                Button(action: {
+                    guard selectedPeriod != period else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedPeriod = period
+                    }
+                    loadKLineData()
+                }) {
+                    Text(period.label)
+                        .font(.system(size: 12, weight: selectedPeriod == period ? .semibold : .regular))
+                        .foregroundColor(selectedPeriod == period ? .white : .textSecondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 7)
+                        .background(
+                            selectedPeriod == period
+                                ? AnyView(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(market.accentColor)
+                                  )
+                                : AnyView(Color.clear)
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(3)
+        .background(Color.primaryBackground)
+        .cornerRadius(10)
     }
 
     // MARK: - Auto Refresh
@@ -334,7 +575,7 @@ struct StockDetailView: View {
         refreshTimer = nil
     }
 
-    /// Lightweight refresh: only update the real-time stock quote (no loading skeleton).
+    /// Lightweight refresh: update real-time stock quote AND sync the last K-line candle.
     /// Uses high-water-mark to discard stale responses — any response with seq > current
     /// high-water mark is accepted, advancing the mark. Multiple requests can be in-flight;
     /// whichever arrives with a higher seq wins.
@@ -356,8 +597,57 @@ struct StockDetailView: View {
             self.quoteHighWaterMark = capturedSeq
             if let updated = updated {
                 self.liveStock = updated
+                // Sync K-line last candle with real-time price data
+                self.syncKLineWithRealtimePrice(updated)
             }
         }
+    }
+
+    /// Update the last K-line candle with real-time price data so the chart
+    /// stays in sync with the live quote.
+    ///
+    /// **CRITICAL**: Only the `close` price is updated from the real-time quote.
+    /// The `high` and `low` values are NEVER overwritten from `stock.high`/`stock.low`,
+    /// because those represent the **full-day** high/low from the quote API, which is
+    /// a different data source than the K-line API. Using them would cause the latest
+    /// candle to "jump" — the backend K-line data returns one set of high/low values,
+    /// and the quote API returns a different set, leading to visual inconsistency.
+    ///
+    /// Instead, high/low are only expanded **naturally**: if the new close price
+    /// exceeds the candle's existing high or falls below its existing low, only then
+    /// are they adjusted. This ensures the K-line chart is always consistent with
+    /// the backend-returned K-line data, with no forced corrections.
+    ///
+    /// Volume is also kept as-is from the K-line data — the quote API's volume
+    /// represents the full-day cumulative volume, not per-candle volume.
+    private func syncKLineWithRealtimePrice(_ stock: Stock) {
+        guard !klineData.isEmpty, stock.currentPrice > 0 else { return }
+
+        let lastIdx = klineData.count - 1
+        let lastPoint = klineData[lastIdx]
+
+        let newClose = stock.currentPrice
+
+        // High/low: only expand if the current price naturally exceeds the candle's range.
+        // NEVER use stock.high/stock.low — they are full-day values from the quote API,
+        // not from the K-line data source. Applying them would cause candle jumps.
+        let newHigh = max(lastPoint.high, newClose)
+        let newLow = min(lastPoint.low, newClose)
+
+        // Volume: keep the K-line data's volume — the quote API volume is full-day
+        // cumulative, not per-candle. Using it would misrepresent intraday candles.
+        let newVolume = lastPoint.volume
+
+        let updatedPoint = KLinePoint(
+            date: lastPoint.date,
+            open: lastPoint.open,
+            close: newClose,
+            high: newHigh,
+            low: newLow,
+            volume: newVolume
+        )
+
+        klineData[lastIdx] = updatedPoint
     }
 
     private var tradingStatusColor: Color {

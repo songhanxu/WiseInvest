@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -1415,7 +1416,8 @@ func (h *StockHandler) GetStockQuote(c *gin.Context) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// K-Line Data — GET /api/v1/stocks/kline?code=600519&market=a_share&days=60
+// K-Line Data — GET /api/v1/stocks/kline?code=600519&market=a_share&period=1d&limit=60
+// Supported periods: 5m, 15m, 30m, 1h, 4h, 1d, 1w
 // ──────────────────────────────────────────────────────────────────────────────
 
 type KLineResponse struct {
@@ -1427,43 +1429,164 @@ type KLineResponse struct {
 	Volume float64 `json:"volume"`
 }
 
+// sinaScaleMap maps our unified period strings to Sina Finance API scale values (minutes).
+var sinaScaleMap = map[string]string{
+	"5m":  "5",
+	"15m": "15",
+	"30m": "30",
+	"1h":  "60",
+	"4h":  "240",
+	"1d":  "240",
+	"1w":  "1680",
+}
+
+// binanceIntervalMap maps our unified period strings to Binance API interval values.
+var binanceIntervalMap = map[string]string{
+	"5m":  "5m",
+	"15m": "15m",
+	"30m": "30m",
+	"1h":  "1h",
+	"4h":  "4h",
+	"1d":  "1d",
+	"1w":  "1w",
+}
+
+// defaultLimitForPeriod returns a sensible default number of candles for each period.
+// Initial load provides 120-180 candles for a good visual experience.
+func defaultLimitForPeriod(period string) int {
+	switch period {
+	case "5m":
+		return 120 // ~2.5 trading days
+	case "15m":
+		return 160 // ~10 trading days
+	case "30m":
+		return 120 // ~7.5 trading days
+	case "1h":
+		return 120 // ~5 weeks
+	case "4h":
+		return 120 // ~2.5 months
+	case "1d":
+		return 150 // ~7.5 months
+	case "1w":
+		return 120 // ~2.3 years
+	default:
+		return 150
+	}
+}
+
 func (h *StockHandler) GetKLineData(c *gin.Context) {
 	code := c.Query("code")
 	market := c.DefaultQuery("market", "a_share")
-	days := c.DefaultQuery("days", "60")
+	period := c.DefaultQuery("period", "1d")
+
+	// Backward compatibility: if old "days" param is supplied, use it for daily data
+	if c.Query("period") == "" && c.Query("days") != "" {
+		period = "1d"
+	}
+
+	// Validate period
+	validPeriods := map[string]bool{"5m": true, "15m": true, "30m": true, "1h": true, "4h": true, "1d": true, "1w": true}
+	if !validPeriods[period] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid period, supported: 5m, 15m, 30m, 1h, 4h, 1d, 1w"})
+		return
+	}
 
 	if code == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "code is required"})
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	// Determine limit (number of candles)
+	limit := defaultLimitForPeriod(period)
+	if c.Query("limit") != "" {
+		if d := parseFloat(c.Query("limit")); d > 0 {
+			limit = int(d)
+		}
+	} else if c.Query("days") != "" {
+		if d := parseFloat(c.Query("days")); d > 0 {
+			limit = int(d)
+		}
+	}
+
+	// Overall timeout for the entire request (including retries)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
 	defer cancel()
 
+	// Exponential backoff retry: up to 3 retries with delays of 500ms, 1s, 2s
+	const maxRetries = 3
 	var klines []KLineResponse
-	var err error
+	var lastErr error
 
-	switch market {
-	case "a_share":
-		klines, err = h.fetchAShareKLine(ctx, code, days)
-	case "us_stock":
-		klines, err = h.fetchUSStockKLine(ctx, code, days)
-	case "crypto":
-		klines, err = h.fetchCryptoKLine(ctx, code, days)
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// Wait before retrying (exponential backoff: 500ms * 2^attempt)
+		if attempt > 0 {
+			backoff := time.Duration(float64(500*time.Millisecond) * math.Pow(2, float64(attempt-1)))
+			h.logger.WithField("code", code).WithField("market", market).WithField("period", period).
+				WithField("attempt", attempt).WithField("backoff_ms", backoff.Milliseconds()).
+				Info("Retrying K-line fetch")
+
+			select {
+			case <-ctx.Done():
+				// Overall timeout expired — stop retrying
+				lastErr = fmt.Errorf("获取数据超时")
+				goto respond
+			case <-time.After(backoff):
+				// Continue with retry
+			}
+		}
+
+		// Create a per-attempt timeout context (5s per attempt)
+		attemptCtx, attemptCancel := context.WithTimeout(ctx, 5*time.Second)
+
+		var err error
+		switch market {
+		case "a_share":
+			klines, err = h.fetchAShareKLine(attemptCtx, code, period, limit)
+		case "us_stock":
+			klines, err = h.fetchUSStockKLine(attemptCtx, code, period, limit)
+		case "crypto":
+			klines, err = h.fetchCryptoKLine(attemptCtx, code, period, limit)
+		}
+		attemptCancel()
+
+		if err != nil {
+			lastErr = err
+			h.logger.WithField("code", code).WithField("market", market).WithField("period", period).
+				WithField("attempt", attempt).WithField("error", err).Warn("K-line fetch attempt failed")
+			continue
+		}
+
+		if len(klines) > 0 {
+			// Success — return data
+			c.JSON(http.StatusOK, klines)
+			return
+		}
+
+		// Got empty result but no error — treat as retriable
+		lastErr = fmt.Errorf("upstream returned empty data")
 	}
 
-	if err != nil {
-		h.logger.WithField("code", code).WithField("market", market).WithField("error", err).Warn("Failed to fetch K-line data")
-	}
-	// Ensure we never return null — always return [] for JSON
-	if klines == nil {
-		klines = []KLineResponse{}
+respond:
+	// All retries exhausted — return error information to the client
+	if lastErr != nil {
+		h.logger.WithField("code", code).WithField("market", market).WithField("period", period).
+			WithField("error", lastErr).Error("K-line fetch failed after all retries")
 	}
 
-	c.JSON(http.StatusOK, klines)
+	// Return a structured error response with HTTP 200 but an error field,
+	// so the client can distinguish between "no data" and "error"
+	errMsg := "获取数据超时"
+	if lastErr != nil && !strings.Contains(lastErr.Error(), "超时") {
+		errMsg = "获取K线数据失败，请稍后重试"
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"error":   errMsg,
+		"data":    []KLineResponse{},
+		"retries": maxRetries,
+	})
 }
 
-func (h *StockHandler) fetchAShareKLine(ctx context.Context, code string, days string) ([]KLineResponse, error) {
+func (h *StockHandler) fetchAShareKLine(ctx context.Context, code string, period string, limit int) ([]KLineResponse, error) {
 	// Use Sina Finance K-line API (more reliable than Eastmoney)
 	// If code already has sh/sz prefix, use it directly; otherwise infer
 	var prefix, pureCode string
@@ -1479,15 +1602,18 @@ func (h *StockHandler) fetchAShareKLine(ctx context.Context, code string, days s
 		}
 	}
 
-	klineCount := 60
-	if d := parseFloat(days); d > 0 {
-		klineCount = int(d)
+	// Map period to Sina scale (minutes).
+	// Sina supports: 5, 15, 30, 60, 240 for intraday; for weekly we use
+	// scale=1680 (7 days × 240 min) which Sina treats as weekly.
+	scale := "240" // default daily
+	if s, ok := sinaScaleMap[period]; ok {
+		scale = s
 	}
 
 	symbol := prefix + pureCode
 	apiURL := fmt.Sprintf(
-		"https://quotes.sina.cn/cn/api/jsonp_v2.php/var%%20_%s=/CN_MarketDataService.getKLineData?symbol=%s&scale=240&ma=no&datalen=%d",
-		symbol, symbol, klineCount,
+		"https://quotes.sina.cn/cn/api/jsonp_v2.php/var%%20_%s=/CN_MarketDataService.getKLineData?symbol=%s&scale=%s&ma=no&datalen=%d",
+		symbol, symbol, scale, limit,
 	)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
@@ -1551,24 +1677,20 @@ var usIndexTencentCode = map[string]string{
 	"IXIC": "us.IXIC",
 }
 
-func (h *StockHandler) fetchUSStockKLine(ctx context.Context, symbol string, days string) ([]KLineResponse, error) {
-	daysInt := 60
-	if d := parseFloat(days); d > 0 {
-		daysInt = int(d)
-	}
-
+func (h *StockHandler) fetchUSStockKLine(ctx context.Context, symbol string, period string, limit int) ([]KLineResponse, error) {
 	// Check if the symbol is a US index — use Tencent Finance kline API for indices
 	// (Sina API returns null for US indices like DJI/INX/IXIC)
 	sym := strings.TrimSpace(symbol)
 	if tencentCode, ok := usIndexTencentCode[strings.ToUpper(sym)]; ok {
-		return h.fetchTencentKLine(ctx, tencentCode, daysInt)
+		return h.fetchTencentKLine(ctx, tencentCode, period, limit)
 	}
 
-	// For individual stocks, use Sina Finance US stock K-line API
+	// For individual US stocks: Sina only provides daily data.
+	// For sub-daily periods, we fall back to daily data.
 	lowerSym := strings.ToLower(sym)
 	apiURL := fmt.Sprintf(
 		"https://stock.finance.sina.com.cn/usstock/api/jsonp_v2.php/var%%20_gb_%s=/US_MinKService.getDailyK?symbol=%s&type=daily&num=%d",
-		lowerSym, lowerSym, daysInt,
+		lowerSym, lowerSym, limit,
 	)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
@@ -1611,9 +1733,9 @@ func (h *StockHandler) fetchUSStockKLine(ctx context.Context, symbol string, day
 		return nil, fmt.Errorf("failed to parse Sina US kline JSON: %w", err)
 	}
 
-	// Only take the last N days
-	if len(items) > daysInt {
-		items = items[len(items)-daysInt:]
+	// Only take the last N items
+	if len(items) > limit {
+		items = items[len(items)-limit:]
 	}
 
 	var klines []KLineResponse
@@ -1632,10 +1754,16 @@ func (h *StockHandler) fetchUSStockKLine(ctx context.Context, symbol string, day
 
 // fetchTencentKLine fetches K-line data from Tencent Finance web API.
 // Works for US indices (us.DJI, us.INX, us.IXIC) and individual US stocks.
-func (h *StockHandler) fetchTencentKLine(ctx context.Context, tencentCode string, days int) ([]KLineResponse, error) {
+// Tencent API supports "day" (daily) and "week" (weekly) periods.
+func (h *StockHandler) fetchTencentKLine(ctx context.Context, tencentCode string, period string, limit int) ([]KLineResponse, error) {
+	// Tencent only supports day / week; for sub-daily periods fall back to day
+	tqPeriod := "day"
+	if period == "1w" {
+		tqPeriod = "week"
+	}
 	apiURL := fmt.Sprintf(
-		"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?_var=kline_dayqfq&param=%s,day,,,%d,qfq",
-		tencentCode, days,
+		"https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?_var=kline_dayqfq&param=%s,%s,,,%d,qfq",
+		tencentCode, tqPeriod, limit,
 	)
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
@@ -1709,7 +1837,7 @@ var cryptoIndexToSymbol = map[string]string{
 	"eth_price": "ETH",
 }
 
-func (h *StockHandler) fetchCryptoKLine(ctx context.Context, coinID string, days string) ([]KLineResponse, error) {
+func (h *StockHandler) fetchCryptoKLine(ctx context.Context, coinID string, period string, limit int) ([]KLineResponse, error) {
 	rawID := strings.TrimSpace(coinID)
 
 	// Handle special IDs: fear_greed index has no K-line data
@@ -1728,17 +1856,19 @@ func (h *StockHandler) fetchCryptoKLine(ctx context.Context, coinID string, days
 		sym = sym + "USDT"
 	}
 
-	limit := 60
-	if d := parseFloat(days); d > 0 {
-		limit = int(d)
-	}
 	if limit > 1000 {
 		limit = 1000 // Binance API max
 	}
 
+	// Map our unified period to Binance interval
+	interval := "1d"
+	if bi, ok := binanceIntervalMap[period]; ok {
+		interval = bi
+	}
+
 	apiURL := fmt.Sprintf(
-		"https://data-api.binance.vision/api/v3/klines?symbol=%s&interval=1d&limit=%d",
-		sym, limit,
+		"https://data-api.binance.vision/api/v3/klines?symbol=%s&interval=%s&limit=%d",
+		sym, interval, limit,
 	)
 	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
 	if err != nil {
@@ -1758,6 +1888,12 @@ func (h *StockHandler) fetchCryptoKLine(ctx context.Context, coinID string, days
 		return nil, fmt.Errorf("failed to decode Binance kline: %w", err)
 	}
 
+	// Choose date format based on period — include time for intraday
+	dateFormat := "2006-01-02"
+	if period != "1d" && period != "1w" {
+		dateFormat = "2006-01-02 15:04"
+	}
+
 	var klines []KLineResponse
 	for _, k := range rawKlines {
 		if len(k) < 6 {
@@ -1773,7 +1909,7 @@ func (h *StockHandler) fetchCryptoKLine(ctx context.Context, coinID string, days
 		vol, _ := k[5].(string)
 
 		klines = append(klines, KLineResponse{
-			Date:   t.Format("2006-01-02"),
+			Date:   t.Format(dateFormat),
 			Open:   parseFloat(open),
 			Close:  parseFloat(closeP),
 			High:   parseFloat(high),

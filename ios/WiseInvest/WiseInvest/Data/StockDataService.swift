@@ -231,42 +231,170 @@ class StockDataService: ObservableObject {
 
     // MARK: - K-Line Data
 
-    func getKLineData(for stock: Stock, days: Int = 60, completion: @escaping ([KLinePoint]) -> Void) {
+    /// Supported K-line periods
+    enum KLinePeriod: String, CaseIterable {
+        case m5 = "5m"
+        case m15 = "15m"
+        case m30 = "30m"
+        case h1 = "1h"
+        case h4 = "4h"
+        case d1 = "1d"
+        case w1 = "1w"
+
+        var label: String {
+            switch self {
+            case .m5: return "5分"
+            case .m15: return "15分"
+            case .m30: return "30分"
+            case .h1: return "1时"
+            case .h4: return "4时"
+            case .d1: return "日K"
+            case .w1: return "周K"
+            }
+        }
+    }
+
+    /// Default initial candle count per period
+    static func defaultLimit(for period: KLinePeriod) -> Int {
+        switch period {
+        case .m5:  return 120
+        case .m15: return 160
+        case .m30: return 120
+        case .h1:  return 120
+        case .h4:  return 120
+        case .d1:  return 150
+        case .w1:  return 120
+        }
+    }
+
+    /// Parse K-line API response items into KLinePoint array
+    private func parseKLineItems(_ items: [KLineAPIResponse]) -> [KLinePoint] {
+        let dayFormatter = DateFormatter()
+        dayFormatter.dateFormat = "yyyy-MM-dd"
+        let minuteFormatter = DateFormatter()
+        minuteFormatter.dateFormat = "yyyy-MM-dd HH:mm"
+        let sinaMinuteFormatter = DateFormatter()
+        sinaMinuteFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+
+        return items.compactMap { item -> KLinePoint? in
+            let date = minuteFormatter.date(from: item.date)
+                ?? sinaMinuteFormatter.date(from: item.date)
+                ?? dayFormatter.date(from: item.date)
+            guard let parsedDate = date else { return nil }
+            return KLinePoint(
+                date: parsedDate,
+                open: item.open,
+                close: item.close,
+                high: item.high,
+                low: item.low,
+                volume: item.volume
+            )
+        }
+    }
+
+    /// Result type for K-line data fetch — includes optional error message from backend
+    struct KLineResult {
+        let points: [KLinePoint]
+        let errorMessage: String?
+
+        var isEmpty: Bool { points.isEmpty }
+        var hasError: Bool { errorMessage != nil }
+    }
+
+    func getKLineData(for stock: Stock, period: KLinePeriod = .d1, limit: Int? = nil, completion: @escaping (KLineResult) -> Void) {
         let market = stock.market
-        let urlString = "\(baseURL)/api/v1/stocks/kline?code=\(stock.id)&market=\(market)&days=\(days)"
+        let effectiveLimit = limit ?? Self.defaultLimit(for: period)
+        let urlString = "\(baseURL)/api/v1/stocks/kline?code=\(stock.id)&market=\(market)&period=\(period.rawValue)&limit=\(effectiveLimit)"
         guard let url = URL(string: urlString) else {
-            completion([])
+            completion(KLineResult(points: [], errorMessage: "无效的请求地址"))
             return
         }
 
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
 
-        session.dataTask(with: request) { data, response, error in
-            guard let data = data, error == nil else {
-                DispatchQueue.main.async { completion([]) }
+        session.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else {
+                DispatchQueue.main.async { completion(KLineResult(points: [], errorMessage: "服务不可用")) }
+                return
+            }
+
+            if let error = error {
+                let msg = (error as? URLError)?.code == .timedOut ? "网络请求超时" : "网络连接失败"
+                DispatchQueue.main.async { completion(KLineResult(points: [], errorMessage: msg)) }
+                return
+            }
+
+            guard let data = data else {
+                DispatchQueue.main.async { completion(KLineResult(points: [], errorMessage: "未收到数据")) }
+                return
+            }
+
+            // First try to decode as structured error response from backend
+            // Format: {"error": "获取数据超时", "data": [], "retries": 3}
+            if let errorResp = try? JSONDecoder().decode(KLineErrorResponse.self, from: data),
+               errorResp.error != nil {
+                DispatchQueue.main.async {
+                    completion(KLineResult(points: [], errorMessage: errorResp.error))
+                }
+                return
+            }
+
+            // Normal response: array of K-line items
+            do {
+                let items = try JSONDecoder().decode([KLineAPIResponse].self, from: data)
+                let points = self.parseKLineItems(items)
+                DispatchQueue.main.async { completion(KLineResult(points: points, errorMessage: nil)) }
+            } catch {
+                DispatchQueue.main.async { completion(KLineResult(points: [], errorMessage: "数据解析失败")) }
+            }
+        }.resume()
+    }
+
+    /// Load more historical K-line data (larger limit). Returns ALL data from API.
+    /// Caller is responsible for merging with existing data and deduplicating.
+    func loadMoreKLineData(for stock: Stock, period: KLinePeriod, currentCount: Int, completion: @escaping (KLineResult) -> Void) {
+        let market = stock.market
+        // Request significantly more data than currently loaded (500 more for a large scroll buffer)
+        let newLimit = currentCount + 500
+        let urlString = "\(baseURL)/api/v1/stocks/kline?code=\(stock.id)&market=\(market)&period=\(period.rawValue)&limit=\(newLimit)"
+        guard let url = URL(string: urlString) else {
+            completion(KLineResult(points: [], errorMessage: "无效的请求地址"))
+            return
+        }
+
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+
+        session.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else {
+                DispatchQueue.main.async { completion(KLineResult(points: [], errorMessage: nil)) }
+                return
+            }
+
+            if error != nil {
+                DispatchQueue.main.async { completion(KLineResult(points: [], errorMessage: nil)) }
+                return
+            }
+
+            guard let data = data else {
+                DispatchQueue.main.async { completion(KLineResult(points: [], errorMessage: nil)) }
+                return
+            }
+
+            // Check for backend error response
+            if let errorResp = try? JSONDecoder().decode(KLineErrorResponse.self, from: data),
+               errorResp.error != nil {
+                DispatchQueue.main.async { completion(KLineResult(points: [], errorMessage: errorResp.error)) }
                 return
             }
 
             do {
                 let items = try JSONDecoder().decode([KLineAPIResponse].self, from: data)
-                let formatter = DateFormatter()
-                formatter.dateFormat = "yyyy-MM-dd"
-
-                let points = items.compactMap { item -> KLinePoint? in
-                    guard let date = formatter.date(from: item.date) else { return nil }
-                    return KLinePoint(
-                        date: date,
-                        open: item.open,
-                        close: item.close,
-                        high: item.high,
-                        low: item.low,
-                        volume: item.volume
-                    )
-                }
-                DispatchQueue.main.async { completion(points) }
+                let points = self.parseKLineItems(items)
+                DispatchQueue.main.async { completion(KLineResult(points: points, errorMessage: nil)) }
             } catch {
-                DispatchQueue.main.async { completion([]) }
+                DispatchQueue.main.async { completion(KLineResult(points: [], errorMessage: nil)) }
             }
         }.resume()
     }
@@ -376,6 +504,13 @@ private struct KLineAPIResponse: Decodable {
     let high: Double
     let low: Double
     let volume: Double
+}
+
+/// Backend error response for K-line data
+/// Format: {"error": "获取数据超时", "data": [], "retries": 3}
+private struct KLineErrorResponse: Decodable {
+    let error: String?
+    let retries: Int?
 }
 
 private struct NewsAPIResponse: Decodable {
