@@ -1,0 +1,16 @@
+# Docker
+*.log
+logs/
+server
+bin/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env (本地开发配置不打包)
+.env

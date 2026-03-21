@@ -12,6 +12,8 @@ backend/.env
 # ── Environment / Secrets ────────────────────────────────────────
 .env
 *.env.local
+*.env.production
+certbot/
 
 # ── macOS ───────────────────────────────────────────────────────
 .DS_Store

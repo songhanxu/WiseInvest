@@ -1,0 +1,95 @@
+# ============================================================
+# Docker Compose - WiseInvest 一体化部署
+# 包含：Go 后端 + PostgreSQL + Redis + Nginx
+# ============================================================
+
+version: "3.8"
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: wiseinvest-db
+    restart: always
+    environment:
+      POSTGRES_USER: wiseinvest
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-wiseinvest}
+      POSTGRES_DB: wiseinvest
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"    # 仅本机访问
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wiseinvest"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Redis ───────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: wiseinvest-redis
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"    # 仅本机访问
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Go Backend ──────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: wiseinvest-api
+    restart: always
+    env_file:
+      - ./backend/.env.production
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "127.0.0.1:8080:8080"    # 仅 Nginx 反代访问
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Nginx 反向代理 + SSL ────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: wiseinvest-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    depends_on:
+      - backend
+
+  # ── Certbot（SSL 自动续期）──────────────────────────────
+  certbot:
+    image: certbot/certbot
+    container_name: wiseinvest-certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt
+      - ./certbot/www:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
