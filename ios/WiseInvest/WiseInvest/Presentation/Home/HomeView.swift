@@ -6,6 +6,7 @@ struct HomeView: View {
     @EnvironmentObject var authState: AuthState
     @StateObject private var viewModel = HomeViewModel()
     @State private var sheetItem: ConversationSheetItem?
+    @State private var marketSheetItem: Market?
     @State private var showAccountMenu = false
 
     var body: some View {
@@ -24,6 +25,9 @@ struct HomeView: View {
                 }
             }
             .navigationBarHidden(true)
+        }
+        .sheet(item: $marketSheetItem) { market in
+            MarketDetailView(market: market, coordinator: coordinator)
         }
         .sheet(item: $sheetItem, onDismiss: {
             viewModel.loadRecentConversations()
@@ -125,7 +129,7 @@ struct HomeView: View {
             VStack(spacing: 12) {
                 ForEach(Market.allCases) { market in
                     MarketCard(market: market) {
-                        sheetItem = ConversationSheetItem(market: market)
+                        marketSheetItem = market
                     }
                     .padding(.horizontal, 20)
                 }

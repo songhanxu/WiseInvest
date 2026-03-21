@@ -7,19 +7,22 @@ struct Message: Identifiable, Codable, Equatable {
     var content: String  // Changed to var to support streaming updates
     let timestamp: Date
     var isStreaming: Bool
+    var thinkingLines: [String]
     
     init(
         id: String = UUID().uuidString,
         role: MessageRole,
         content: String,
         timestamp: Date = Date(),
-        isStreaming: Bool = false
+        isStreaming: Bool = false,
+        thinkingLines: [String] = []
     ) {
         self.id = id
         self.role = role
         self.content = content
         self.timestamp = timestamp
         self.isStreaming = isStreaming
+        self.thinkingLines = Array(thinkingLines.prefix(4))
     }
 }
 

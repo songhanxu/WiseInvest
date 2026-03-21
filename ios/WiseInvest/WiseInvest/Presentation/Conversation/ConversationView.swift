@@ -8,6 +8,9 @@ struct ConversationView: View {
     @StateObject private var viewModel: ConversationViewModel
     @Environment(\.dismiss) private var dismiss
     @FocusState private var isInputFocused: Bool
+    /// Tracks whether the list bottom anchor is visible.
+    /// Auto-scroll during streaming is skipped when the user has scrolled up.
+    @State private var isAtBottom = true
 
     init(
         agentType: AgentType,
@@ -47,8 +50,12 @@ struct ConversationView: View {
                                 )
                                 .id(message.id)
                             }
-                            // Invisible anchor for scroll-to-bottom
+                            // Invisible anchor for scroll-to-bottom.
+                            // onAppear/onDisappear tells us whether the user has scrolled
+                            // the view so that the bottom is no longer visible.
                             Color.clear.frame(height: 1).id("__bottom__")
+                                .onAppear  { isAtBottom = true  }
+                                .onDisappear { isAtBottom = false }
                         }
                         .padding()
                     }
@@ -58,15 +65,16 @@ struct ConversationView: View {
                     .onTapGesture {
                         isInputFocused = false
                     }
-                    // Scroll when a new message is added
+                    // Scroll when a new message is added (user sent something — always follow)
                     .onChange(of: viewModel.messages.count) { _ in
+                        isAtBottom = true
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo("__bottom__", anchor: .bottom)
                         }
                     }
-                    // Scroll while streaming content grows
+                    // Scroll while streaming content grows — only if user hasn't scrolled up
                     .onChange(of: viewModel.messages.last?.content) { _ in
-                        guard viewModel.isLoading else { return }
+                        guard viewModel.isLoading && isAtBottom else { return }
                         proxy.scrollTo("__bottom__", anchor: .bottom)
                     }
                 }

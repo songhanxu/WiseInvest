@@ -42,6 +42,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.Message{},
 		&model.AgentSession{},
 		&model.DeviceToken{},
+		&model.WatchlistItem{},
 	)
 }
 

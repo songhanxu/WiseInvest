@@ -1,0 +1,23 @@
+<view class="bubble-row {{message.role === 'user' ? 'row-user' : 'row-assistant'}}">
+  <view class="bubble-wrap">
+    <view class="bubble {{message.role === 'user' ? 'bubble-user' : 'bubble-assistant'}}">
+      <view wx:if="{{message.role === 'assistant' && message.thinkingLines && message.thinkingLines.length}}" class="thinking-box">
+        <view wx:for="{{message.thinkingLines}}" wx:key="index" class="thinking-line">{{item}}</view>
+      </view>
+      <view class="content">{{message.content}}</view>
+      <view wx:if="{{message.isStreaming}}" class="streaming">
+        <text class="dot">●</text>
+        <text class="dot">●</text>
+        <text class="dot">●</text>
+      </view>
+    </view>
+
+    <view wx:if="{{!message.isStreaming}}" class="meta {{message.role === 'user' ? 'meta-user' : 'meta-assistant'}}">
+      <text class="time">{{timeText}}</text>
+      <view wx:if="{{message.role === 'assistant'}}" class="actions">
+        <text class="action" bindtap="copyContent">复制</text>
+        <text wx:if="{{showRegenerate}}" class="action" bindtap="regenerate">重试</text>
+      </view>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,36 @@
+:root {
+  --color-bg-primary: #0A0E27;
+  --color-bg-secondary: #1A1F3A;
+  --color-text-primary: #FFFFFF;
+  --color-text-secondary: #A0A0A0;
+  --color-text-tertiary: #666666;
+  --color-accent-blue: #4A90E2;
+  --color-user-msg: #4A90E2;
+  --color-assistant-msg: #2C3E50;
+}
+
+page {
+  background-color: #081227;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  min-height: 100%;
+  height: 100%;
+  font-size: 28rpx;
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.card {
+  background: var(--color-bg-secondary);
+  border-radius: 24rpx;
+}
+
+.text-secondary {
+  color: var(--color-text-secondary);
+}
+
+.text-tertiary {
+  color: var(--color-text-tertiary);
+}

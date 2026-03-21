@@ -1,0 +1,48 @@
+<view class="home-page safe-area-bottom">
+  <view class="home-glow home-glow-1"></view>
+  <view class="home-glow home-glow-2"></view>
+
+  <view class="content">
+    <view class="header">
+      <view>
+        <view class="title-cn">慧投</view>
+        <view class="title-en">WiseInvest</view>
+      </view>
+      <view class="avatar-btn" bindtap="openAccountMenu">
+        <view class="avatar-glyph">
+          <view class="avatar-head"></view>
+          <view class="avatar-body"></view>
+        </view>
+      </view>
+    </view>
+
+    <view class="section">
+      <view class="section-title">选择市场</view>
+      <view class="section-subtitle">选择你的分析场景，进入专属对话</view>
+    </view>
+
+    <view class="markets">
+      <market-card wx:for="{{markets}}" wx:key="id" market="{{item}}" bindtapcard="onTapMarket"></market-card>
+    </view>
+
+    <view class="section recent-title-wrap">
+      <view class="section-title">最近对话</view>
+      <view class="section-subtitle">可长按记录进行删除</view>
+    </view>
+
+    <view wx:if="{{recentConversations.length}}" class="recent-list">
+      <recent-row
+        wx:for="{{recentConversations}}"
+        wx:key="id"
+        conversation="{{item}}"
+        bindtaprow="onTapRecentConversation"
+        binddelete="onDeleteRecentConversation"
+      ></recent-row>
+    </view>
+
+    <view wx:else class="recent-empty">
+      <view class="empty-title">还没有最近对话</view>
+      <view class="empty-desc">从上方任一市场入口开始你的第一段分析</view>
+    </view>
+  </view>
+</view>

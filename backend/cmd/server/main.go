@@ -79,6 +79,7 @@ func main() {
 	conversationRepo := repository.NewConversationRepository(db)
 	messageRepo := repository.NewMessageRepository(db)
 	deviceTokenRepo := repository.NewDeviceTokenRepository(db)
+	watchlistRepo := repository.NewWatchlistRepository(db)
 
 	// Initialize web searcher (enabled when SEARCH_API_KEY is set in .env)
 	searcher := search.New(cfg.Search.Provider, cfg.Search.APIKey)
@@ -155,6 +156,7 @@ func main() {
 	}
 
 	deviceHandler := handler.NewDeviceHandler(deviceTokenRepo, log)
+	stockHandler := handler.NewStockHandler(watchlistRepo, log)
 
 	// ── Scheduler ────────────────────────────────────────────────────────────
 	dailyTask := scheduler.NewDailyReportTask(agentFactory, wxClient, apnsClient, deviceTokenRepo, log)
@@ -163,7 +165,7 @@ func main() {
 	defer sched.Stop()
 
 	// Initialize HTTP server
-	router := api.NewRouter(conversationService, authHandler, deviceHandler, jwtSvc, log)
+	router := api.NewRouter(conversationService, authHandler, deviceHandler, stockHandler, jwtSvc, log)
 	
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.Server.Port),

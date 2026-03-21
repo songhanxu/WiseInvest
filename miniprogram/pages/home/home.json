@@ -1,0 +1,9 @@
+{
+  "navigationBarTitleText": "慧投",
+  "backgroundColor": "#081227",
+  "backgroundTextStyle": "light",
+  "usingComponents": {
+    "market-card": "/components/market-card/market-card",
+    "recent-row": "/components/recent-conversation-row/recent-conversation-row"
+  }
+}

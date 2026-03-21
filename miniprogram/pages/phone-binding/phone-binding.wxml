@@ -1,0 +1,27 @@
+<view class="phone-page">
+  <view class="header-icon">📱</view>
+  <view class="title">绑定手机号</view>
+  <view class="subtitle">绑定手机号后可用于账号安全验证</view>
+
+  <view class="form-card">
+    <view class="field-title">手机号</view>
+    <view class="phone-row">
+      <view class="code">+86</view>
+      <input class="phone-input" type="number" maxlength="11" placeholder="请输入手机号" value="{{phone}}" bindinput="onPhoneInput" />
+    </view>
+
+    <view wx:if="{{codeSent}}" class="code-wrap">
+      <view class="field-title">验证码</view>
+      <view class="code-row">
+        <input class="code-input" type="number" maxlength="6" placeholder="请输入验证码" value="{{code}}" bindinput="onCodeInput" />
+        <button class="resend" disabled="{{countdown>0}}" bindtap="sendCode">{{countdown>0 ? countdown + 's' : '重新发送'}}</button>
+      </view>
+    </view>
+
+    <button class="primary" loading="{{isLoading}}" disabled="{{disabledSubmit}}" bindtap="handlePrimaryTap">
+      {{codeSent ? '确认绑定' : '发送验证码'}}
+    </button>
+
+    <view class="skip" bindtap="skip">暂时跳过</view>
+  </view>
+</view>

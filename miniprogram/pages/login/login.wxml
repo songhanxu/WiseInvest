@@ -1,0 +1,38 @@
+<view class="login-page">
+  <view class="aurora aurora-1"></view>
+  <view class="aurora aurora-2"></view>
+
+  <view class="content safe-area-bottom">
+    <view class="brand-block">
+      <view class="brand-cn">慧投</view>
+      <view class="brand-en">WiseInvest</view>
+      <view class="brand-desc">你的 AI 投资研究助手</view>
+    </view>
+
+    <view class="login-card">
+      <view class="card-title">欢迎登录</view>
+      <view class="card-subtitle">使用微信一键登录，继续你的投资对话</view>
+
+      <button class="wechat-btn" loading="{{isLoading}}" disabled="{{isLoading}}" bindtap="loginWithWeChat">
+        {{isLoading ? '登录中...' : '微信一键登录'}}
+      </button>
+
+      <view class="tips">安全登录 · 仅用于账号识别</view>
+
+      <view class="feature-row">
+        <view class="feature-item">
+          <text class="feature-icon">🔐</text>
+          <text class="feature-text">数据安全</text>
+        </view>
+        <view class="feature-item">
+          <text class="feature-icon">📈</text>
+          <text class="feature-text">实时行情</text>
+        </view>
+        <view class="feature-item">
+          <text class="feature-icon">🧠</text>
+          <text class="feature-text">AI 分析</text>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

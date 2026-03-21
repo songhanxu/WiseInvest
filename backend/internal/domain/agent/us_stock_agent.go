@@ -109,7 +109,9 @@ func (a *USStockAgent) ProcessStream(ctx context.Context, req ProcessRequest, ca
 		)
 	}
 
+	_ = callback(llm.ThoughtChunk("正在获取美股实时行情与相关新闻"))
 	messages := a.buildMessages(ctx, req)
+	_ = callback(llm.ThoughtChunk("实时数据已就绪，正在生成分析结论"))
 	stream, err := a.llmClient.CreateChatCompletionStream(ctx, llm.ChatCompletionRequest{
 		Messages: messages, Temperature: 0.7, MaxTokens: 4000, Stream: true,
 	})

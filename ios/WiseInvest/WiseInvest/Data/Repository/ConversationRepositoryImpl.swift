@@ -31,7 +31,7 @@ class ConversationRepositoryImpl: ConversationRepository {
     func sendMessage(
         conversationId: UInt,
         message: String
-    ) -> AnyPublisher<String, Error> {
+    ) -> AnyPublisher<StreamChunk, Error> {
         return apiClient.sendChatMessage(
             conversationId: conversationId,
             message: message

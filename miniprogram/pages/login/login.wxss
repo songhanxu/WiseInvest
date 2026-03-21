@@ -1,0 +1,147 @@
+.login-page {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(1100rpx 620rpx at 50% -120rpx, rgba(72, 126, 255, 0.35) 0%, rgba(72, 126, 255, 0) 68%),
+    radial-gradient(800rpx 800rpx at 100% 10%, rgba(26, 80, 200, 0.24) 0%, rgba(26, 80, 200, 0) 74%),
+    linear-gradient(180deg, #081229 0%, #090f1f 44%, #080d18 100%);
+}
+
+.aurora {
+  position: absolute;
+  border-radius: 999rpx;
+  filter: blur(90rpx);
+  opacity: 0.36;
+  pointer-events: none;
+}
+
+.aurora-1 {
+  width: 520rpx;
+  height: 520rpx;
+  left: -180rpx;
+  top: 180rpx;
+  background: #3971ff;
+}
+
+.aurora-2 {
+  width: 560rpx;
+  height: 560rpx;
+  right: -220rpx;
+  top: 80rpx;
+  background: #0ea5e9;
+}
+
+.content {
+  position: relative;
+  z-index: 2;
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 112rpx 44rpx calc(56rpx + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.brand-block {
+  margin-top: 104rpx;
+  text-align: center;
+}
+
+.brand-cn {
+  font-size: 106rpx;
+  line-height: 1.1;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 0 10rpx 30rpx rgba(51, 102, 255, 0.35);
+}
+
+.brand-en {
+  margin-top: 8rpx;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 40rpx;
+  letter-spacing: 1.4rpx;
+}
+
+.brand-desc {
+  margin-top: 12rpx;
+  color: rgba(196, 211, 255, 0.72);
+  font-size: 25rpx;
+}
+
+.login-card {
+  border-radius: 34rpx;
+  padding: 42rpx;
+  border: 1rpx solid rgba(144, 177, 255, 0.22);
+  background: linear-gradient(180deg, rgba(14, 26, 52, 0.88) 0%, rgba(9, 17, 34, 0.86) 100%);
+  box-shadow: 0 24rpx 54rpx rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(12rpx);
+}
+
+.card-title {
+  color: #f8fbff;
+  font-size: 34rpx;
+  font-weight: 600;
+}
+
+.card-subtitle {
+  margin-top: 10rpx;
+  color: rgba(197, 214, 255, 0.72);
+  font-size: 24rpx;
+}
+
+.wechat-btn {
+  margin-top: 34rpx;
+  width: 100%;
+  height: 96rpx;
+  line-height: 96rpx;
+  border-radius: 20rpx;
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: linear-gradient(90deg, #22c55e 0%, #16a34a 100%);
+  color: #ffffff;
+  font-size: 32rpx;
+  font-weight: 600;
+  box-shadow: 0 14rpx 28rpx rgba(34, 197, 94, 0.35);
+}
+
+.wechat-btn::after {
+  border: none;
+}
+
+.tips {
+  margin: 24rpx 0 18rpx;
+  text-align: center;
+  color: rgba(166, 186, 228, 0.72);
+  font-size: 23rpx;
+}
+
+.feature-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.feature-item {
+  flex: 1;
+  padding: 16rpx 8rpx;
+  border-radius: 16rpx;
+  background: rgba(28, 46, 84, 0.42);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.feature-icon {
+  font-size: 30rpx;
+}
+
+.feature-text {
+  margin-top: 4rpx;
+  color: rgba(196, 211, 255, 0.86);
+  font-size: 22rpx;
+}

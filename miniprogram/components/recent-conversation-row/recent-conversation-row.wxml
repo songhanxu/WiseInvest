@@ -1,0 +1,8 @@
+<view class="row" bindtap="handleTap" bindlongpress="handleLongPress">
+  <view class="icon-box" style="background: {{marketColor}}26; color: {{marketColor}};">{{marketIcon}}</view>
+  <view class="meta">
+    <view class="title">{{displayTitle}}</view>
+    <view class="time">{{timeText}}</view>
+  </view>
+  <view class="arrow">›</view>
+</view>
