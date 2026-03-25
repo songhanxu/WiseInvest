@@ -58,6 +58,9 @@ func NewRouter(
 			stocks.GET("/quote", stockHandler.GetStockQuote)
 			stocks.GET("/kline", stockHandler.GetKLineData)
 			stocks.GET("/news", stockHandler.GetStockNews)
+			stocks.GET("/news/enhance", stockHandler.EnhanceNewsItem)
+			stocks.POST("/news/enhance/batch", stockHandler.EnhanceBatchNews)
+			stocks.POST("/news/batch", stockHandler.GetBatchNews)
 		}
 
 		// ── Protected API ─────────────────────────────────────────────────

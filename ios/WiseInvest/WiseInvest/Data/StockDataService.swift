@@ -9,6 +9,8 @@ class StockDataService: ObservableObject {
 
     private let baseURL: String
     private let session: URLSession
+    /// Longer-timeout session for slow endpoints (news with LLM enhancement, etc.)
+    private let longSession: URLSession
 
     private init() {
         self.baseURL = APIConfig.baseURL
@@ -16,6 +18,11 @@ class StockDataService: ObservableObject {
         config.timeoutIntervalForRequest = 3
         config.timeoutIntervalForResource = 6
         self.session = URLSession(configuration: config)
+
+        let longConfig = URLSessionConfiguration.default
+        longConfig.timeoutIntervalForRequest = 30
+        longConfig.timeoutIntervalForResource = 60
+        self.longSession = URLSession(configuration: longConfig)
     }
 
     // MARK: - Auth Header
@@ -252,6 +259,28 @@ class StockDataService: ObservableObject {
             case .w1: return "周K"
             }
         }
+        
+        /// Returns available periods for a specific market
+        /// - US stocks only support daily and weekly data due to API limitations
+        /// - A-share: no 4h period (A-share trading hours = 4h/day, so 4h = 1d)
+        /// - Crypto supports all periods including 4h
+        static func availablePeriods(for market: String) -> [KLinePeriod] {
+            switch market.lowercased() {
+            case "us_stock":
+                // US stocks: Sina API only provides daily data for individual stocks
+                // US indices (via Tencent API) support daily and weekly
+                return [.d1, .w1]
+            case "a_share":
+                // A-share: Sina API supports intraday periods but not 4h
+                // (4h K-line = daily K-line due to 4h trading day)
+                return [.m5, .m15, .m30, .h1, .d1, .w1]
+            case "crypto":
+                // Crypto (Binance) supports all periods including 4h
+                return allCases
+            default:
+                return allCases
+            }
+        }
     }
 
     /// Default initial candle count per period
@@ -413,7 +442,7 @@ class StockDataService: ObservableObject {
         var request = URLRequest(url: url)
         addAuthHeader(to: &request)
 
-        session.dataTask(with: request) { data, response, error in
+        longSession.dataTask(with: request) { data, response, error in
             guard let data = data, error == nil else {
                 DispatchQueue.main.async { completion([]) }
                 return
@@ -428,12 +457,143 @@ class StockDataService: ObservableObject {
                         source: item.source,
                         time: item.time,
                         summary: item.summary,
-                        sentiment: NewsSentiment(rawValue: item.sentiment) ?? .neutral
+                        analysis: item.analysis ?? "",
+                        sentiment: NewsSentiment(rawValue: item.sentiment) ?? .neutral,
+                        url: item.url ?? ""
                     )
                 }
                 DispatchQueue.main.async { completion(news) }
             } catch {
                 DispatchQueue.main.async { completion([]) }
+            }
+        }.resume()
+    }
+
+    // MARK: - News AI Enhancement (on-demand, called when user opens detail page)
+
+    /// Fetches AI-enhanced summary + analysis for a single news item.
+    /// Called when user taps into NewsDetailView.
+    func enhanceNewsItem(newsID: String, code: String, market: String, name: String,
+                         title: String, summary: String, source: String,
+                         completion: @escaping (String, String, String) -> Void) {
+        var components = URLComponents(string: "\(baseURL)/api/v1/stocks/news/enhance")
+        components?.queryItems = [
+            URLQueryItem(name: "news_id", value: newsID),
+            URLQueryItem(name: "code", value: code),
+            URLQueryItem(name: "market", value: market),
+            URLQueryItem(name: "name", value: name),
+            URLQueryItem(name: "title", value: title),
+            URLQueryItem(name: "summary", value: summary),
+            URLQueryItem(name: "source", value: source),
+        ]
+        guard let url = components?.url else {
+            completion(summary, "", "neutral")
+            return
+        }
+
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+
+        longSession.dataTask(with: request) { data, response, error in
+            guard let data = data, error == nil else {
+                DispatchQueue.main.async { completion(summary, "", "neutral") }
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    let enhancedSummary = json["summary"] as? String ?? summary
+                    let analysis = json["analysis"] as? String ?? ""
+                    let sentiment = json["sentiment"] as? String ?? "neutral"
+                    DispatchQueue.main.async { completion(enhancedSummary, analysis, sentiment) }
+                } else {
+                    DispatchQueue.main.async { completion(summary, "", "neutral") }
+                }
+            } catch {
+                DispatchQueue.main.async { completion(summary, "", "neutral") }
+            }
+        }.resume()
+    }
+
+    // MARK: - Batch News AI Enhancement (triggered when entering a market section)
+
+    /// Triggers batch AI summary+analysis enhancement for all watchlist stocks in a market.
+    /// Called after news list returns when user enters a market section (e.g. A股).
+    /// This is fire-and-forget — results are cached server-side and available on next fetch.
+    func batchEnhanceNews(stocks: [(code: String, name: String, market: String)],
+                          completion: (() -> Void)? = nil) {
+        let urlString = "\(baseURL)/api/v1/stocks/news/enhance/batch"
+        guard let url = URL(string: urlString) else {
+            completion?()
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        addAuthHeader(to: &request)
+
+        let body: [String: Any] = [
+            "stocks": stocks.map { ["code": $0.code, "name": $0.name, "market": $0.market] }
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        longSession.dataTask(with: request) { _, _, _ in
+            DispatchQueue.main.async { completion?() }
+        }.resume()
+    }
+
+    // MARK: - Batch News (parallel fetch for multiple stocks in one request)
+
+    /// Fetches news for multiple stocks in a single batch request.
+    /// The backend processes them in parallel and returns results for each stock.
+    /// Completion is called with a dictionary keyed by "\(market)_\(code)".
+    func getBatchNews(stocks: [(code: String, name: String, market: String)],
+                      completion: @escaping ([String: [NewsItem]]) -> Void) {
+        let urlString = "\(baseURL)/api/v1/stocks/news/batch"
+        guard let url = URL(string: urlString) else {
+            completion([:])
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        addAuthHeader(to: &request)
+
+        let body: [String: Any] = [
+            "stocks": stocks.map { ["code": $0.code, "name": $0.name, "market": $0.market] }
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        longSession.dataTask(with: request) { data, response, error in
+            guard let data = data, error == nil else {
+                DispatchQueue.main.async { completion([:]) }
+                return
+            }
+
+            do {
+                let items = try JSONDecoder().decode([BatchNewsAPIResponse].self, from: data)
+                var result: [String: [NewsItem]] = [:]
+                for item in items {
+                    let key = "\(item.market)_\(item.code)"
+                    let news = item.news.map { n in
+                        NewsItem(
+                            id: n.id,
+                            title: n.title,
+                            source: n.source,
+                            time: n.time,
+                            summary: n.summary,
+                            analysis: n.analysis ?? "",
+                            sentiment: NewsSentiment(rawValue: n.sentiment) ?? .neutral,
+                            url: n.url ?? ""
+                        )
+                    }
+                    result[key] = news
+                }
+                DispatchQueue.main.async { completion(result) }
+            } catch {
+                DispatchQueue.main.async { completion([:]) }
             }
         }.resume()
     }
@@ -519,7 +679,15 @@ private struct NewsAPIResponse: Decodable {
     let source: String
     let time: String
     let summary: String
+    let analysis: String?
     let sentiment: String
+    let url: String?
+}
+
+private struct BatchNewsAPIResponse: Decodable {
+    let code: String
+    let market: String
+    let news: [NewsAPIResponse]
 }
 
 // MARK: - AI Analysis Item (generated client-side from stock data — no separate API needed)

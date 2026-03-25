@@ -159,7 +159,7 @@ func main() {
 
 	// Initialize quote cache for high-frequency market data
 	quoteCache := cache.NewQuoteCache(redisClient, log)
-	stockHandler := handler.NewStockHandler(watchlistRepo, log, quoteCache)
+	stockHandler := handler.NewStockHandler(watchlistRepo, log, quoteCache, searcher, llmClient)
 	defer stockHandler.Stop() // gracefully stop background tickers
 
 	// ── Scheduler ────────────────────────────────────────────────────────────

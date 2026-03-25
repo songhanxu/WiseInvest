@@ -30,12 +30,15 @@ struct StockDetailView: View {
     @State private var klineTimeoutTimer: Timer?
     /// Timer for detecting news data load timeout
     @State private var newsTimeoutTimer: Timer?
+    /// Selected news item for detail view
+    @State private var selectedNewsItem: NewsItem?
     /// Client-side K-line retry state (with exponential backoff)
     @State private var klineRetryCount: Int = 0
     @State private var klineRetryTimer: Timer?
     private let klineMaxClientRetries = 3
 
     private let stockService = StockDataService.shared
+    private let preloadManager = PreloadManager.shared
 
     /// Use liveStock if available (refreshed from API), fallback to initial stock
     private var displayStock: Stock { liveStock ?? stock }
@@ -44,72 +47,75 @@ struct StockDetailView: View {
         ZStack {
             Color.primaryBackground.ignoresSafeArea()
 
-            VStack(spacing: 0) {
-                headerSection
+            GeometryReader { geometry in
+                VStack(spacing: 0) {
+                    headerSection
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
-                        // Stock price overview
-                        priceSection
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 20) {
+                            // Stock price overview
+                            priceSection
 
-                        // K-Line chart with period selector
-                        VStack(spacing: 0) {
-                            // Period selector
-                            periodSelector
-                                .padding(.horizontal, 16)
-                                .padding(.bottom, 8)
-
-                            if isLoadingKline {
-                                KLineChartSkeleton()
+                            // K-Line chart with period selector
+                            VStack(spacing: 0) {
+                                // Period selector
+                                periodSelector
                                     .padding(.horizontal, 16)
-                            } else if !klineData.isEmpty {
-                                KLineChartView(
-                                    data: klineData,
-                                    accentColor: market.accentColor,
-                                    onLoadMore: { loadMoreKLineData() },
-                                    period: selectedPeriod.rawValue
-                                )
-                                .padding(.horizontal, 16)
-                            } else {
-                                // Empty state — data failed to load, user can tap to retry
-                                VStack(spacing: 12) {
-                                    Image(systemName: "chart.xyaxis.line")
-                                        .font(.system(size: 32))
-                                        .foregroundColor(.textTertiary)
-                                    Text("暂无K线数据")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.textSecondary)
-                                    Button(action: {
-                                        klineRetryCount = 0
-                                        loadKLineData()
-                                    }) {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "arrow.clockwise")
-                                                .font(.system(size: 12))
-                                            Text("点击重试")
-                                                .font(.system(size: 13, weight: .medium))
+                                    .padding(.bottom, 8)
+
+                                if isLoadingKline {
+                                    KLineChartSkeleton()
+                                        .padding(.horizontal, 16)
+                                } else if !klineData.isEmpty {
+                                    KLineChartView(
+                                        data: klineData,
+                                        accentColor: market.accentColor,
+                                        onLoadMore: { loadMoreKLineData() },
+                                        period: selectedPeriod.rawValue
+                                    )
+                                    .padding(.horizontal, 16)
+                                } else {
+                                    // Empty state — data failed to load, user can tap to retry
+                                    VStack(spacing: 12) {
+                                        Image(systemName: "chart.xyaxis.line")
+                                            .font(.system(size: 32))
+                                            .foregroundColor(.textTertiary)
+                                        Text("暂无K线数据")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.textSecondary)
+                                        Button(action: {
+                                            klineRetryCount = 0
+                                            loadKLineData()
+                                        }) {
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "arrow.clockwise")
+                                                    .font(.system(size: 12))
+                                                Text("点击重试")
+                                                    .font(.system(size: 13, weight: .medium))
+                                            }
+                                            .foregroundColor(market.accentColor)
                                         }
-                                        .foregroundColor(market.accentColor)
                                     }
+                                    .frame(height: 200)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.horizontal, 16)
                                 }
-                                .frame(height: 200)
-                                .frame(maxWidth: .infinity)
-                                .padding(.horizontal, 16)
                             }
+
+                            // AI Analysis
+                            aiAnalysisSection
+
+                            // News
+                            newsSection
+
+                            // Bottom spacer for the floating button
+                            Spacer().frame(height: 80)
                         }
-
-                        // AI Analysis
-                        aiAnalysisSection
-
-                        // News
-                        newsSection
-
-                        // Bottom spacer for the floating button
-                        Spacer().frame(height: 80)
+                        .frame(width: geometry.size.width)
                     }
-                }
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 0)
+                }
             }
 
             // Floating "问问慧投" button
@@ -130,6 +136,13 @@ struct StockDetailView: View {
             klineRetryTimer = nil
             newsTimeoutTimer?.invalidate()
             newsTimeoutTimer = nil
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .newsEnhancementDidComplete)) { _ in
+            // Background AI enhancement finished — refresh newsItems from cache
+            // so that when user taps a NewsCard, the passed NewsItem already has analysis.
+            if let cached = preloadManager.getCachedNews(stockId: stock.id, market: market), !cached.isEmpty {
+                self.newsItems = cached
+            }
         }
         .alert("数据加载失败", isPresented: $showTimeoutAlert) {
             Button("重试") {
@@ -161,6 +174,9 @@ struct StockDetailView: View {
                 klineData: klineData,
                 coordinator: coordinator
             )
+        }
+        .sheet(item: $selectedNewsItem) { news in
+            NewsDetailView(news: news, stockCode: stock.id, stockName: stock.name, stockMarket: market.rawValue, accentColor: market.accentColor)
         }
     }
 
@@ -222,7 +238,8 @@ struct StockDetailView: View {
                 RollingNumberText(
                     text: displayStock.priceText,
                     font: .system(size: 36, weight: .bold, design: .monospaced),
-                    color: displayStock.isUp ? .accentGreen : Color(hex: "E53935")
+                    color: displayStock.isUp ? .accentGreen : Color(hex: "E53935"),
+                    minimumScaleFactor: 0.6
                 )
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -306,11 +323,20 @@ struct StockDetailView: View {
                 Text("相关资讯")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.textPrimary)
+                Spacer()
+                if !newsItems.isEmpty {
+                    Text("AI 摘要")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.accentBlue.opacity(0.8))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.accentBlue.opacity(0.12))
+                        .cornerRadius(4)
+                }
             }
             .padding(.horizontal, 20)
 
             if isLoadingNews {
-                // Skeleton placeholders for news cards
                 VStack(spacing: 8) {
                     ForEach(0..<3, id: \.self) { _ in
                         NewsCardSkeleton()
@@ -318,15 +344,32 @@ struct StockDetailView: View {
                 }
                 .padding(.horizontal, 16)
             } else if newsItems.isEmpty {
-                Text("暂无相关资讯")
-                    .font(.system(size: 13))
-                    .foregroundColor(.textTertiary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
+                VStack(spacing: 8) {
+                    Image(systemName: "newspaper")
+                        .font(.system(size: 28))
+                        .foregroundColor(.textTertiary.opacity(0.5))
+                    Text("暂无相关资讯")
+                        .font(.system(size: 13))
+                        .foregroundColor(.textTertiary)
+                    Button(action: { loadNewsData() }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 11))
+                            Text("重新加载")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(.accentBlue)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
             } else {
                 VStack(spacing: 8) {
                     ForEach(newsItems) { news in
-                        NewsCard(news: news)
+                        NewsCard(news: news, accentColor: market.accentColor)
+                            .onTapGesture {
+                                selectedNewsItem = news
+                            }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -363,6 +406,11 @@ struct StockDetailView: View {
     // MARK: - Data Loading
 
     private func loadData() {
+        // Try cached quote first for instant display
+        if let cachedQuote = preloadManager.getCachedQuote(stockId: stock.id, market: market) {
+            self.liveStock = cachedQuote
+        }
+
         // Refresh real-time stock quote (with high-water-mark protection)
         quoteCounter &+= 1
         let capturedSeq = quoteCounter
@@ -371,30 +419,61 @@ struct StockDetailView: View {
             self.quoteHighWaterMark = capturedSeq
             if let updated = updated {
                 self.liveStock = updated
+                self.preloadManager.updateQuoteCache(stock: updated, market: self.market)
             }
         }
 
         // Load K-line with selected period
         loadKLineData()
 
-        // Load news
+        // Load news (try cache first)
         loadNewsData()
 
         // Check watchlist status from the parent view's watchlist data
         isInWatchlist = watchlistIDs.contains(stock.id)
     }
 
-    /// Load news data with timeout protection. The skeleton screen only dismisses
-    /// when valid data arrives; on empty/error, it stays.
+    /// Load news data with smart preload-aware strategy:
+    /// 1. If cached news exists → instant display, no skeleton
+    /// 2. If a batch preload is in-flight → wait for it (no extra request)
+    /// 3. Otherwise → fetch from network as fallback
     private func loadNewsData() {
-        isLoadingNews = true
+        // Use getOrWaitForNews which handles cache + in-flight preload detection
+        let isWaiting = preloadManager.getOrWaitForNews(stockId: stock.id, market: market) { [self] result in
+            if let news = result, !news.isEmpty {
+                self.newsItems = news
+                self.isLoadingNews = false
+                self.newsTimeoutTimer?.invalidate()
+                self.newsTimeoutTimer = nil
+                return
+            }
+            // Preload finished but returned empty / no preload was in-flight — fetch directly
+            self.fetchNewsFromNetwork()
+        }
 
-        // Start timeout timer
+        if isWaiting {
+            // A preload is in-flight — show skeleton and wait
+            isLoadingNews = true
+            // Safety timeout in case preload takes too long
+            newsTimeoutTimer?.invalidate()
+            newsTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 20.0, repeats: false) { _ in
+                if self.isLoadingNews && self.newsItems.isEmpty {
+                    // Preload is taking too long — fall back to direct fetch
+                    self.fetchNewsFromNetwork()
+                }
+            }
+        }
+        // If not waiting, getOrWaitForNews already called the callback synchronously
+        // (either with cache or nil). If cache hit, isLoadingNews was set to false.
+        // If nil, fetchNewsFromNetwork was called.
+    }
+
+    /// Fetch news directly from network (fallback when no cache and no in-flight preload)
+    private func fetchNewsFromNetwork() {
+        isLoadingNews = true
         newsTimeoutTimer?.invalidate()
-        newsTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 8.0, repeats: false) { _ in
+        newsTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 16.0, repeats: false) { _ in
             if self.isLoadingNews {
-                // On timeout, dismiss the news skeleton and show empty state
-                // (news is less critical, just show "暂无资讯" rather than blocking)
                 self.isLoadingNews = false
             }
         }
@@ -404,6 +483,9 @@ struct StockDetailView: View {
             self.newsTimeoutTimer = nil
             self.newsItems = news
             self.isLoadingNews = false
+            if !news.isEmpty {
+                self.preloadManager.updateNewsCache(stockId: self.stock.id, market: self.market, data: news)
+            }
         }
     }
 
@@ -525,8 +607,10 @@ struct StockDetailView: View {
     // MARK: - Period Selector
 
     private var periodSelector: some View {
-        HStack(spacing: 0) {
-            ForEach(StockDataService.KLinePeriod.allCases, id: \.rawValue) { period in
+        let availablePeriods = StockDataService.KLinePeriod.availablePeriods(for: stock.market)
+        
+        return HStack(spacing: 0) {
+            ForEach(availablePeriods, id: \.rawValue) { period in
                 Button(action: {
                     guard selectedPeriod != period else { return }
                     withAnimation(.easeInOut(duration: 0.2)) {
@@ -745,36 +829,66 @@ private struct AnalysisCard: View {
     }
 }
 
-// MARK: - News Card
+// MARK: - News Card (AI Summary Style)
 
 private struct NewsCard: View {
     let news: NewsItem
+    var accentColor: Color = .accentBlue
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        VStack(alignment: .leading, spacing: 10) {
+            // Top row: sentiment badge + source + time
+            HStack(spacing: 6) {
                 sentimentBadge
+                Text(news.source)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.textSecondary)
                 Spacer()
                 Text(news.time)
                     .font(.system(size: 11))
                     .foregroundColor(.textTertiary)
             }
 
+            // Title
             Text(news.title)
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(.textPrimary)
                 .lineLimit(2)
 
+            // AI Summary
+            if !news.summary.isEmpty {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 10))
+                        .foregroundColor(accentColor.opacity(0.7))
+                        .padding(.top, 2)
+                    Text(news.summary)
+                        .font(.system(size: 12))
+                        .foregroundColor(.textSecondary)
+                        .lineSpacing(3)
+                        .lineLimit(3)
+                }
+                .padding(10)
+                .background(accentColor.opacity(0.06))
+                .cornerRadius(8)
+            }
+
+            // Bottom: tap hint
             HStack {
-                Text(news.source)
-                    .font(.system(size: 11))
-                    .foregroundColor(.textTertiary)
                 Spacer()
+                HStack(spacing: 3) {
+                    Text("查看详情")
+                        .font(.system(size: 11))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .foregroundColor(.textTertiary)
             }
         }
         .padding(14)
         .background(Color.secondaryBackground)
         .cornerRadius(14)
+        .contentShape(Rectangle())
     }
 
     private var sentimentBadge: some View {
@@ -794,4 +908,367 @@ private struct NewsCard: View {
         case .neutral:  return .textSecondary
         }
     }
+}
+
+// MARK: - News Detail View (Full Screen)
+
+struct NewsDetailView: View {
+    let news: NewsItem
+    let stockCode: String
+    let stockName: String
+    let stockMarket: String
+    var accentColor: Color = .accentBlue
+    @Environment(\.dismiss) private var dismiss
+    @State private var showSafari = false
+    @State private var isLoadingAI = false
+    @State private var enhancedSummary: String
+    @State private var enhancedAnalysis: String = ""
+    @State private var enhancedSentiment: NewsSentiment
+
+    init(news: NewsItem, stockCode: String, stockName: String, stockMarket: String, accentColor: Color = .accentBlue) {
+        self.news = news
+        self.stockCode = stockCode
+        self.stockName = stockName
+        self.stockMarket = stockMarket
+        self.accentColor = accentColor
+        // Initialize sentiment and summary directly from news data so
+        // they are correct on the very first frame (no flash from neutral → actual)
+        _enhancedSentiment = State(initialValue: news.sentiment)
+        _enhancedSummary = State(initialValue: news.summary)
+    }
+
+    var body: some View {
+        ZStack {
+            Color.primaryBackground.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Header — consistent with StockDetailView / MarketDetailView
+                HStack(spacing: 12) {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(.textPrimary)
+                    }
+
+                    Text("资讯详情")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.textPrimary)
+
+                    Spacer()
+
+                    sentimentBadge
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Color.secondaryBackground)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Title
+                        Text(news.title)
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundColor(.textPrimary)
+                            .lineSpacing(4)
+
+                        // Meta info
+                        HStack(spacing: 12) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "building.2")
+                                    .font(.system(size: 11))
+                                Text(news.source)
+                                    .font(.system(size: 13, weight: .medium))
+                            }
+                            .foregroundColor(.textSecondary)
+
+                            HStack(spacing: 4) {
+                                Image(systemName: "clock")
+                                    .font(.system(size: 11))
+                                Text(news.time)
+                                    .font(.system(size: 13))
+                            }
+                            .foregroundColor(.textTertiary)
+
+                            Spacer()
+                        }
+
+                        // Divider
+                        Rectangle()
+                            .fill(Color.white.opacity(0.08))
+                            .frame(height: 1)
+
+                        // AI Summary section
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(accentColor)
+                                Text("AI 摘要分析")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.textPrimary)
+                            }
+
+                            if isLoadingAI {
+                                // Loading skeleton — matches the actual two-section layout
+                                VStack(alignment: .leading, spacing: 12) {
+                                    // Skeleton for AI Summary text (3 lines)
+                                    ForEach(0..<3, id: \.self) { _ in
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .fill(Color.white.opacity(0.06))
+                                            .frame(height: 14)
+                                            .shimmer()
+                                    }
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(Color.white.opacity(0.06))
+                                        .frame(width: 180, height: 14)
+                                        .shimmer()
+
+                                    // Divider skeleton
+                                    Rectangle()
+                                        .fill(accentColor.opacity(0.08))
+                                        .frame(height: 1)
+                                        .padding(.vertical, 4)
+
+                                    // Skeleton for 深度分析 header
+                                    HStack(spacing: 6) {
+                                        RoundedRectangle(cornerRadius: 3)
+                                            .fill(Color.white.opacity(0.06))
+                                            .frame(width: 14, height: 14)
+                                            .shimmer()
+                                        RoundedRectangle(cornerRadius: 3)
+                                            .fill(Color.white.opacity(0.06))
+                                            .frame(width: 64, height: 14)
+                                            .shimmer()
+                                    }
+
+                                    // Skeleton for analysis text (5 lines)
+                                    ForEach(0..<5, id: \.self) { _ in
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .fill(Color.white.opacity(0.06))
+                                            .frame(height: 13)
+                                            .shimmer()
+                                    }
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(Color.white.opacity(0.06))
+                                        .frame(width: 140, height: 13)
+                                        .shimmer()
+                                }
+                            } else {
+                                // Short summary
+                                Text(enhancedSummary.isEmpty ? news.summary : enhancedSummary)
+                                    .font(.system(size: 15, weight: .medium))
+                                    .foregroundColor(.textPrimary)
+                                    .lineSpacing(6)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                // Detailed analysis (if available)
+                                if !enhancedAnalysis.isEmpty {
+                                    Rectangle()
+                                        .fill(accentColor.opacity(0.15))
+                                        .frame(height: 1)
+
+                                    HStack(spacing: 6) {
+                                        Image(systemName: "text.magnifyingglass")
+                                            .font(.system(size: 13))
+                                            .foregroundColor(accentColor.opacity(0.8))
+                                        Text("深度分析")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundColor(.textPrimary.opacity(0.85))
+                                    }
+
+                                    Text(enhancedAnalysis)
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.textSecondary)
+                                        .lineSpacing(6)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(accentColor.opacity(0.06))
+                        .cornerRadius(14)
+
+                        // Sentiment analysis — always visible since sentiment is set in the first round
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "chart.bar.xaxis")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(accentColor)
+                                Text("情绪研判")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.textPrimary)
+                            }
+
+                            HStack(spacing: 12) {
+                                sentimentIndicator
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("AI 判断该新闻对标的影响为")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(.textSecondary)
+                                    Text(sentimentDescription)
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(sentimentColor)
+                                }
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.secondaryBackground)
+                        .cornerRadius(14)
+
+                        // Open source link button
+                        if !news.url.isEmpty, let _ = URL(string: news.url) {
+                            Button(action: { showSafari = true }) {
+                                HStack {
+                                    Image(systemName: "safari")
+                                        .font(.system(size: 16))
+                                    Text("阅读原文")
+                                        .font(.system(size: 15, weight: .medium))
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right.square")
+                                        .font(.system(size: 14))
+                                }
+                                .foregroundColor(accentColor)
+                                .padding(16)
+                                .background(Color.secondaryBackground)
+                                .cornerRadius(14)
+                            }
+                        }
+
+                        Spacer().frame(height: 40)
+                    }
+                    .padding(.horizontal, 20)
+                }
+            }
+        }
+        .sheet(isPresented: $showSafari) {
+            if let url = URL(string: news.url) {
+                SafariView(url: url)
+                    .ignoresSafeArea()
+            }
+        }
+        .onAppear {
+            // Sentiment and summary are initialized in init() — always correct from frame 1.
+            // Only need to load AI analysis if not already available.
+            if !news.analysis.isEmpty {
+                enhancedAnalysis = news.analysis
+                return
+            }
+
+            // Check if PreloadManager has updated news with analysis since view was created
+            let market = Market(rawValue: stockMarket) ?? .aShare
+            if let cachedNews = PreloadManager.shared.getCachedNews(stockId: stockCode, market: market) {
+                if let updatedItem = cachedNews.first(where: { $0.id == news.id }), !updatedItem.analysis.isEmpty {
+                    enhancedSummary = updatedItem.summary.isEmpty ? news.summary : updatedItem.summary
+                    enhancedAnalysis = updatedItem.analysis
+                    enhancedSentiment = updatedItem.sentiment
+                    return
+                }
+            }
+
+            // Not in cache yet — fetch individually (enhancement may still be in-flight in background)
+            fetchEnhancementFromNetwork()
+        }
+    }
+
+    /// Fetch AI enhancement for this single news item from network (fallback)
+    private func fetchEnhancementFromNetwork() {
+        isLoadingAI = true
+        StockDataService.shared.enhanceNewsItem(
+            newsID: news.id,
+            code: stockCode,
+            market: stockMarket,
+            name: stockName,
+            title: news.title,
+            summary: news.summary,
+            source: news.source
+        ) { summary, analysis, _ in
+            withAnimation(.easeInOut(duration: 0.3)) {
+                self.enhancedSummary = summary
+                self.enhancedAnalysis = analysis
+                self.isLoadingAI = false
+            }
+        }
+    }
+
+    private var sentimentBadge: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(sentimentColor)
+                .frame(width: 6, height: 6)
+            Text(enhancedSentiment.label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(sentimentColor)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(sentimentColor.opacity(0.12))
+        .cornerRadius(8)
+    }
+
+    private var sentimentIndicator: some View {
+        ZStack {
+            Circle()
+                .stroke(sentimentColor.opacity(0.3), lineWidth: 3)
+                .frame(width: 48, height: 48)
+            Circle()
+                .trim(from: 0, to: sentimentProgress)
+                .stroke(sentimentColor, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .frame(width: 48, height: 48)
+                .rotationEffect(.degrees(-90))
+            Image(systemName: sentimentIcon)
+                .font(.system(size: 18))
+                .foregroundColor(sentimentColor)
+        }
+    }
+
+    private var sentimentColor: Color {
+        switch enhancedSentiment {
+        case .positive: return .accentGreen
+        case .negative: return Color(hex: "E53935")
+        case .neutral:  return .textSecondary
+        }
+    }
+
+    private var sentimentProgress: CGFloat {
+        switch enhancedSentiment {
+        case .positive: return 0.85
+        case .negative: return 0.75
+        case .neutral:  return 0.5
+        }
+    }
+
+    private var sentimentIcon: String {
+        switch enhancedSentiment {
+        case .positive: return "arrow.up.right"
+        case .negative: return "arrow.down.right"
+        case .neutral:  return "minus"
+        }
+    }
+
+    private var sentimentDescription: String {
+        switch enhancedSentiment {
+        case .positive: return "利好 — 正面影响"
+        case .negative: return "利空 — 负面影响"
+        case .neutral:  return "中性 — 影响有限"
+        }
+    }
+}
+
+// MARK: - Safari View (for opening original article)
+
+import SafariServices
+
+struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        let config = SFSafariViewController.Configuration()
+        config.entersReaderIfAvailable = false
+        let safari = SFSafariViewController(url: url, configuration: config)
+        safari.preferredControlTintColor = UIColor(Color.accentBlue)
+        return safari
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }

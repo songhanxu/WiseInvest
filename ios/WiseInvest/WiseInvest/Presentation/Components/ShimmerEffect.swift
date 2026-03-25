@@ -192,25 +192,39 @@ struct AnalysisCardSkeleton: View {
 
 // MARK: - News Card Skeleton
 
-/// Skeleton placeholder for a NewsCard while loading
+/// Skeleton placeholder for a NewsCard (AI summary style) while loading
 struct NewsCardSkeleton: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Top row: sentiment badge + time
+        VStack(alignment: .leading, spacing: 10) {
+            // Top row: sentiment badge + source + time
             HStack {
                 SkeletonBox(width: 36, height: 18, cornerRadius: 4)
-                Spacer()
                 SkeletonBox(width: 50, height: 11, cornerRadius: 4)
+                Spacer()
+                SkeletonBox(width: 60, height: 11, cornerRadius: 4)
             }
 
             // Title lines
             SkeletonBox(height: 14, cornerRadius: 4)
-            SkeletonBox(width: UIScreen.main.bounds.width * 0.6, height: 14, cornerRadius: 4)
+            SkeletonBox(width: UIScreen.main.bounds.width * 0.7, height: 14, cornerRadius: 4)
 
-            // Source
+            // AI Summary block
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    SkeletonBox(width: 10, height: 10, cornerRadius: 3)
+                    SkeletonBox(height: 12, cornerRadius: 4)
+                }
+                SkeletonBox(width: UIScreen.main.bounds.width * 0.65, height: 12, cornerRadius: 4)
+                SkeletonBox(width: UIScreen.main.bounds.width * 0.5, height: 12, cornerRadius: 4)
+            }
+            .padding(10)
+            .background(Color.white.opacity(0.04))
+            .cornerRadius(8)
+
+            // Bottom hint
             HStack {
-                SkeletonBox(width: 60, height: 11, cornerRadius: 4)
                 Spacer()
+                SkeletonBox(width: 50, height: 11, cornerRadius: 4)
             }
         }
         .padding(14)

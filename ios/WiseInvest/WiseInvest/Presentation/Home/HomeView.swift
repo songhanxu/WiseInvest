@@ -41,6 +41,9 @@ struct HomeView: View {
             MarketDetailView(market: market, coordinator: coordinator)
                 .id(market)  // Force SwiftUI to recreate View + @StateObject when market changes
         }
+        .onAppear {
+            PreloadManager.shared.preloadAllMarkets()
+        }
         .sheet(item: $sheetItem, onDismiss: {
             viewModel.loadRecentConversations()
         }) { item in

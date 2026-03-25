@@ -76,6 +76,7 @@ type ChatCompletionRequest struct {
 	Temperature float32
 	MaxTokens   int
 	Stream      bool
+	Model       string // Optional: override the default model for this request
 }
 
 // ChatCompletionResponse represents a chat completion response
@@ -204,8 +205,13 @@ func (c *OpenAIClient) CreateChatCompletion(ctx context.Context, req ChatComplet
 		messages[i] = toOpenAIMessage(msg)
 	}
 
+	model := c.model
+	if req.Model != "" {
+		model = req.Model
+	}
+
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-		Model:       c.model,
+		Model:       model,
 		Messages:    messages,
 		Temperature: req.Temperature,
 		MaxTokens:   req.MaxTokens,

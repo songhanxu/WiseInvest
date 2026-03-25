@@ -16,17 +16,24 @@ struct Stock: Identifiable, Codable, Hashable {
     var open: Double
     var previousClose: Double
     var isIndex: Bool        // 是否为大盘指数（指数不可加入自选）
+    // Extended hours trading (US stocks only)
+    var extendedPrice: Double?   // 盘前或盘后价格
+    var extendedChange: Double?  // 相对昨收的变化
+    var priceStatus: String?     // "live", "pre_market", "after_hours", "closed"
 
     enum CodingKeys: String, CodingKey {
         case id, symbol, name, market, currentPrice, change, changePercent
         case volume, high, low, open, previousClose, isIndex
+        case extendedPrice, extendedChange, priceStatus
     }
 
     /// Default initializer with isIndex defaulting to false
     init(id: String, symbol: String, name: String, market: String,
          currentPrice: Double, change: Double, changePercent: Double,
          volume: Double, high: Double, low: Double, open: Double,
-         previousClose: Double, isIndex: Bool = false) {
+         previousClose: Double, isIndex: Bool = false,
+         extendedPrice: Double? = nil, extendedChange: Double? = nil,
+         priceStatus: String? = nil) {
         self.id = id
         self.symbol = symbol
         self.name = name
@@ -40,6 +47,9 @@ struct Stock: Identifiable, Codable, Hashable {
         self.open = open
         self.previousClose = previousClose
         self.isIndex = isIndex
+        self.extendedPrice = extendedPrice
+        self.extendedChange = extendedChange
+        self.priceStatus = priceStatus
     }
 
     init(from decoder: Decoder) throws {
@@ -57,6 +67,9 @@ struct Stock: Identifiable, Codable, Hashable {
         open = try c.decode(Double.self, forKey: .open)
         previousClose = try c.decode(Double.self, forKey: .previousClose)
         isIndex = try c.decodeIfPresent(Bool.self, forKey: .isIndex) ?? false
+        extendedPrice = try c.decodeIfPresent(Double.self, forKey: .extendedPrice)
+        extendedChange = try c.decodeIfPresent(Double.self, forKey: .extendedChange)
+        priceStatus = try c.decodeIfPresent(String.self, forKey: .priceStatus)
     }
 
     var isUp: Bool { change >= 0 }
@@ -127,7 +140,9 @@ struct NewsItem: Identifiable {
     let source: String
     let time: String
     let summary: String
+    let analysis: String  // Detailed AI analysis for detail page
     let sentiment: NewsSentiment
+    let url: String
 }
 
 enum NewsSentiment: String {

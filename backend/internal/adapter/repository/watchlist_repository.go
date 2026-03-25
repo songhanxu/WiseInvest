@@ -47,6 +47,7 @@ func (r *WatchlistRepository) Add(item *model.WatchlistItem) error {
 }
 
 // Remove removes a stock from the user's watchlist.
+// Returns nil even if no rows were affected (idempotent).
 func (r *WatchlistRepository) Remove(userID uint, market string, stockCode string) error {
 	return r.db.Where("user_id = ? AND market = ? AND stock_code = ?", userID, market, stockCode).
 		Delete(&model.WatchlistItem{}).Error

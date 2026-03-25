@@ -25,6 +25,7 @@ type Result struct {
 	Title   string `json:"title"`
 	URL     string `json:"url"`
 	Snippet string `json:"snippet"`
+	Date    string `json:"date,omitempty"` // Publication date from search engine (e.g. "2026-03-23", "3 hours ago")
 }
 
 // Searcher is the interface for performing web searches.
@@ -63,8 +64,24 @@ type SerperSearcher struct {
 }
 
 func (s *SerperSearcher) Search(ctx context.Context, query string, maxResults int) ([]Result, error) {
+	// Try past week first; if too few results, fall back to past month
+	results, err := s.searchWithTbs(ctx, query, maxResults, "qdr:w")
+	if err != nil {
+		return nil, err
+	}
+	if len(results) < 3 {
+		expanded, err2 := s.searchWithTbs(ctx, query, maxResults, "qdr:m")
+		if err2 == nil && len(expanded) > len(results) {
+			return expanded, nil
+		}
+	}
+	return results, nil
+}
+
+func (s *SerperSearcher) searchWithTbs(ctx context.Context, query string, maxResults int, tbs string) ([]Result, error) {
 	body, _ := json.Marshal(map[string]interface{}{
 		"q": query, "num": maxResults, "hl": "zh-cn", "gl": "cn",
+		"tbs": tbs,
 	})
 	req, _ := http.NewRequestWithContext(ctx, "POST", "https://google.serper.dev/search", bytes.NewReader(body))
 	req.Header.Set("X-API-KEY", s.apiKey)
@@ -82,6 +99,7 @@ func (s *SerperSearcher) Search(ctx context.Context, query string, maxResults in
 			Title   string `json:"title"`
 			Link    string `json:"link"`
 			Snippet string `json:"snippet"`
+			Date    string `json:"date"`
 		} `json:"organic"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
@@ -90,7 +108,7 @@ func (s *SerperSearcher) Search(ctx context.Context, query string, maxResults in
 
 	results := make([]Result, 0, len(data.Organic))
 	for _, item := range data.Organic {
-		results = append(results, Result{Title: item.Title, URL: item.Link, Snippet: item.Snippet})
+		results = append(results, Result{Title: item.Title, URL: item.Link, Snippet: item.Snippet, Date: item.Date})
 	}
 	return results, nil
 }
@@ -102,9 +120,24 @@ type BraveSearcher struct {
 }
 
 func (b *BraveSearcher) Search(ctx context.Context, query string, maxResults int) ([]Result, error) {
+	// Try past week first; if too few results, fall back to past month
+	results, err := b.searchWithFreshness(ctx, query, maxResults, "pw")
+	if err != nil {
+		return nil, err
+	}
+	if len(results) < 3 {
+		expanded, err2 := b.searchWithFreshness(ctx, query, maxResults, "pm")
+		if err2 == nil && len(expanded) > len(results) {
+			return expanded, nil
+		}
+	}
+	return results, nil
+}
+
+func (b *BraveSearcher) searchWithFreshness(ctx context.Context, query string, maxResults int, freshness string) ([]Result, error) {
 	endpoint := fmt.Sprintf(
-		"https://api.search.brave.com/res/v1/web/search?q=%s&count=%d",
-		url.QueryEscape(query), maxResults,
+		"https://api.search.brave.com/res/v1/web/search?q=%s&count=%d&freshness=%s",
+		url.QueryEscape(query), maxResults, freshness,
 	)
 	req, _ := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	req.Header.Set("Accept", "application/json")
@@ -123,6 +156,8 @@ func (b *BraveSearcher) Search(ctx context.Context, query string, maxResults int
 				Title       string `json:"title"`
 				URL         string `json:"url"`
 				Description string `json:"description"`
+				PageAge     string `json:"page_age"`
+				Age         string `json:"age"`
 			} `json:"results"`
 		} `json:"web"`
 	}
@@ -132,7 +167,11 @@ func (b *BraveSearcher) Search(ctx context.Context, query string, maxResults int
 
 	results := make([]Result, 0, len(data.Web.Results))
 	for _, item := range data.Web.Results {
-		results = append(results, Result{Title: item.Title, URL: item.URL, Snippet: item.Description})
+		date := item.PageAge
+		if date == "" {
+			date = item.Age
+		}
+		results = append(results, Result{Title: item.Title, URL: item.URL, Snippet: item.Description, Date: date})
 	}
 	return results, nil
 }

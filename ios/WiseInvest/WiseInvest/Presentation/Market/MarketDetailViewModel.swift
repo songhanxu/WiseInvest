@@ -47,11 +47,19 @@ class MarketDetailViewModel: ObservableObject {
     /// Whether the initial data has been loaded (set to true after first `onAppear`).
     private var hasAppeared = false
 
+    private let preloadManager = PreloadManager.shared
+
     init(market: Market) {
         self.market = market
-        // NOTE: Do NOT load data or start timers here.
-        // Data loading is deferred to `onViewAppear()` so that resources
-        // are only consumed when the user actually enters this screen.
+
+        // Instantly populate from preload cache (no network wait)
+        if let cachedIndices = preloadManager.getCachedIndices(for: market) {
+            self.indices = cachedIndices
+        }
+        if let cachedWatchlist = preloadManager.getCachedWatchlist(for: market) {
+            self.watchlist = cachedWatchlist
+            self.watchlistIDs = Set(cachedWatchlist.map { $0.id })
+        }
 
         // Debounced search
         $searchText
@@ -144,6 +152,7 @@ class MarketDetailViewModel: ObservableObject {
             self.indicesHighWaterMark = idxSeq
             if !indices.isEmpty {
                 self.indices = indices
+                self.preloadManager.updateIndicesCache(for: self.market, data: indices)
             }
         }
 
@@ -158,6 +167,7 @@ class MarketDetailViewModel: ObservableObject {
                 if !stocks.isEmpty || self.watchlist.isEmpty {
                     self.watchlist = stocks
                     self.watchlistIDs = Set(stocks.map { $0.id })
+                    self.preloadManager.updateWatchlistCache(for: self.market, data: stocks)
                 }
             }
         }
@@ -169,7 +179,8 @@ class MarketDetailViewModel: ObservableObject {
     }
 
     private func loadIndices() {
-        isLoadingIndices = true
+        // If we already have cached data, skip showing skeleton
+        isLoadingIndices = indices.isEmpty
         indicesCounter &+= 1
         let capturedSeq = indicesCounter
         stockService.getIndices(for: market) { [weak self] indices in
@@ -178,6 +189,10 @@ class MarketDetailViewModel: ObservableObject {
             self.indicesHighWaterMark = capturedSeq
             self.indices = indices
             self.isLoadingIndices = false
+            // Update preload cache
+            if !indices.isEmpty {
+                self.preloadManager.updateIndicesCache(for: self.market, data: indices)
+            }
         }
     }
 
@@ -198,7 +213,8 @@ class MarketDetailViewModel: ObservableObject {
     }
 
     private func forceLoadWatchlist() {
-        isLoadingWatchlist = true
+        // If we already have cached data, skip showing skeleton
+        isLoadingWatchlist = watchlist.isEmpty
         watchlistCounter &+= 1
         let capturedSeq = watchlistCounter
         stockService.getWatchlist(for: market) { [weak self] stocks in
@@ -220,6 +236,11 @@ class MarketDetailViewModel: ObservableObject {
             self.watchlist = stocks
             self.watchlistIDs = Set(stocks.map { $0.id })
             self.isLoadingWatchlist = false
+            // Update preload cache and preload stock details
+            self.preloadManager.updateWatchlistCache(for: self.market, data: stocks)
+            self.preloadManager.preloadWatchlistQuotes(stocks: stocks, market: self.market)
+            // Batch preload news for ALL watchlist stocks (backend processes in parallel)
+            self.preloadManager.batchPreloadNews(stocks: stocks, market: self.market)
         }
     }
 
@@ -231,6 +252,7 @@ class MarketDetailViewModel: ObservableObject {
         }
         pendingMutations += 1
         hasPendingChanges = true
+        preloadManager.invalidateWatchlistCache(for: market)
         stockService.addToWatchlist(stock, for: market) { [weak self] success in
             guard let self = self else { return }
             self.pendingMutations = max(0, self.pendingMutations - 1)
@@ -248,6 +270,7 @@ class MarketDetailViewModel: ObservableObject {
         watchlistIDs.remove(stockId)
         pendingMutations += 1
         hasPendingChanges = true
+        preloadManager.invalidateWatchlistCache(for: market)
         stockService.removeFromWatchlist(stockId, for: market) { [weak self] success in
             guard let self = self else { return }
             self.pendingMutations = max(0, self.pendingMutations - 1)

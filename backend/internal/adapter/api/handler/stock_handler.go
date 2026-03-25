@@ -8,6 +8,8 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +18,9 @@ import (
 	"github.com/songhanxu/wiseinvest/internal/adapter/repository"
 	"github.com/songhanxu/wiseinvest/internal/domain/model"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/cache"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/llm"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/logger"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/search"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
 )
@@ -28,17 +32,23 @@ type StockHandler struct {
 	httpClient    *http.Client
 	cache         *cache.QuoteCache // Redis-backed quote cache (may be nil if cache is disabled)
 	stopTicker    context.CancelFunc
+	searcher      search.Searcher      // Web search for news (may be NoopSearcher)
+	llmClient     *llm.OpenAIClient    // LLM client for AI summaries (may be nil)
+	fmpAPIKey     string               // FMP (Financial Modeling Prep) API key
 }
 
 // NewStockHandler creates a new StockHandler.
 // If quoteCache is non-nil, background tickers will be started to pre-populate
 // Redis with fresh market data; HTTP handlers will read from the cache first.
-func NewStockHandler(watchlistRepo *repository.WatchlistRepository, logger *logger.Logger, quoteCache *cache.QuoteCache) *StockHandler {
+func NewStockHandler(watchlistRepo *repository.WatchlistRepository, logger *logger.Logger, quoteCache *cache.QuoteCache, searcher search.Searcher, llmClient *llm.OpenAIClient) *StockHandler {
 	h := &StockHandler{
 		watchlistRepo: watchlistRepo,
 		logger:        logger,
 		httpClient:    &http.Client{Timeout: 10 * time.Second},
 		cache:         quoteCache,
+		searcher:      searcher,
+		llmClient:     llmClient,
+		fmpAPIKey:     os.Getenv("FMP_API_KEY"),
 	}
 	if quoteCache != nil {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -271,9 +281,36 @@ func (h *StockHandler) fetchTencentQuotes(ctx context.Context, codes string, sho
 	return results, nil
 }
 
-// fetchMinuteData fetches minute-level price data for sparkline charts via Eastmoney.
+// fetchMinuteData fetches minute-level price data for sparkline charts.
+// Primary: Eastmoney trends2 API. Fallback: Sina 5-minute K-line API.
 func (h *StockHandler) fetchTencentMinuteData(ctx context.Context, code string) ([]float64, error) {
-	// Convert tencent-style code (sh000001) to eastmoney secid (1.000001)
+	// Try Eastmoney first
+	prices, err := h.fetchEastmoneySparkline(ctx, code)
+	if err == nil && len(prices) > 0 {
+		return h.downsampleSparkline(prices), nil
+	}
+
+	// Fallback: Sina 5-minute K-line
+	prices, err = h.fetchSinaSparkline(ctx, code)
+	if err == nil && len(prices) > 0 {
+		return h.downsampleSparkline(prices), nil
+	}
+	return nil, fmt.Errorf("all sparkline sources failed for %s", code)
+}
+
+func (h *StockHandler) downsampleSparkline(prices []float64) []float64 {
+	if len(prices) > 20 {
+		step := len(prices) / 20
+		var sampled []float64
+		for i := 0; i < len(prices); i += step {
+			sampled = append(sampled, prices[i])
+		}
+		return sampled
+	}
+	return prices
+}
+
+func (h *StockHandler) fetchEastmoneySparkline(ctx context.Context, code string) ([]float64, error) {
 	secid := ""
 	if strings.HasPrefix(code, "sh") {
 		secid = "1." + code[2:]
@@ -311,24 +348,61 @@ func (h *StockHandler) fetchTencentMinuteData(ctx context.Context, code string) 
 
 	var prices []float64
 	for _, line := range result.Data.Trends {
-		// Format: "2026-03-20 09:30,open,close,high,low,volume,amount,avg"
 		parts := strings.Split(line, ",")
 		if len(parts) >= 3 {
-			p := parseFloat(parts[2]) // close price
+			p := parseFloat(parts[2])
 			if p > 0 {
 				prices = append(prices, p)
 			}
 		}
 	}
+	return prices, nil
+}
 
-	// Downsample to ~20 points for sparkline
-	if len(prices) > 20 {
-		step := len(prices) / 20
-		var sampled []float64
-		for i := 0; i < len(prices); i += step {
-			sampled = append(sampled, prices[i])
+// fetchSinaSparkline fetches recent 5-minute K-line close prices from Sina Finance.
+func (h *StockHandler) fetchSinaSparkline(ctx context.Context, code string) ([]float64, error) {
+	apiURL := fmt.Sprintf(
+		"https://quotes.sina.cn/cn/api/jsonp_v2.php/var%%20_%s_spark=/CN_MarketDataService.getKLineData?symbol=%s&scale=5&ma=no&datalen=48",
+		code, code,
+	)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+	req.Header.Set("Referer", "https://finance.sina.com.cn")
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	bodyStr := string(body)
+	start := strings.Index(bodyStr, "(")
+	end := strings.LastIndex(bodyStr, ")")
+	if start == -1 || end <= start {
+		return nil, fmt.Errorf("invalid Sina sparkline JSONP")
+	}
+
+	var items []struct {
+		Close string `json:"close"`
+	}
+	if err := json.Unmarshal([]byte(bodyStr[start+1:end]), &items); err != nil {
+		return nil, err
+	}
+
+	var prices []float64
+	for _, item := range items {
+		p := parseFloat(item.Close)
+		if p > 0 {
+			prices = append(prices, p)
 		}
-		return sampled, nil
 	}
 	return prices, nil
 }
@@ -837,6 +911,15 @@ func (h *StockHandler) fetchAShareStocksByCode(ctx context.Context, codes string
 		if line == "" {
 			continue
 		}
+
+		// Extract exchange prefix from the line header: v_sh000001="..." or v_sz000001="..."
+		linePrefix := ""
+		if strings.Contains(line, "v_sh") {
+			linePrefix = "SH"
+		} else if strings.Contains(line, "v_sz") {
+			linePrefix = "SZ"
+		}
+
 		start := strings.Index(line, "\"")
 		end := strings.LastIndex(line, "\"")
 		if start == -1 || end <= start {
@@ -866,14 +949,18 @@ func (h *StockHandler) fetchAShareStocksByCode(ctx context.Context, codes string
 		changeAmt := parseFloat(fields[31])
 		changePct := parseFloat(fields[32])
 
-		// Determine symbol prefix
-		prefix := "SH"
-		if strings.HasPrefix(code, "0") || strings.HasPrefix(code, "3") {
-			prefix = "SZ"
+		// Determine symbol prefix: prefer the prefix from the line header (v_shXXXXXX / v_szXXXXXX)
+		// which is authoritative, fall back to guessing from code digits only if header is missing
+		prefix := linePrefix
+		if prefix == "" {
+			prefix = "SH"
+			if strings.HasPrefix(code, "0") || strings.HasPrefix(code, "3") {
+				prefix = "SZ"
+			}
 		}
 
 		stocks = append(stocks, StockResponse{
-			ID:            code,
+			ID:            strings.ToLower(prefix) + code,
 			Symbol:        prefix + code,
 			Name:          name,
 			Market:        "a_share",
@@ -1195,9 +1282,20 @@ func (h *StockHandler) GetWatchlist(c *gin.Context) {
 			if strings.HasPrefix(strings.ToLower(code), "sh") || strings.HasPrefix(strings.ToLower(code), "sz") {
 				codes = append(codes, strings.ToLower(code))
 			} else {
-				prefix := "sh"
-				if strings.HasPrefix(code, "0") || strings.HasPrefix(code, "3") {
+				// Prefer extracting prefix from the stored Symbol field (e.g. "SH000001" → "sh")
+				// This avoids ambiguity for codes like 000001 which is both SH (上证指数) and SZ (平安银行)
+				prefix := ""
+				sym := strings.ToLower(strings.TrimSpace(item.Symbol))
+				if strings.HasPrefix(sym, "sh") {
+					prefix = "sh"
+				} else if strings.HasPrefix(sym, "sz") {
 					prefix = "sz"
+				} else {
+					// Fallback: guess from code digits
+					prefix = "sh"
+					if strings.HasPrefix(code, "0") || strings.HasPrefix(code, "3") {
+						prefix = "sz"
+					}
 				}
 				codes = append(codes, prefix+code)
 			}
@@ -1304,6 +1402,15 @@ func (h *StockHandler) AddToWatchlist(c *gin.Context) {
 		}
 	}
 
+	// For A-shares: clean up any old-format record (without prefix) to avoid duplicates
+	if req.Market == "a_share" {
+		lc := strings.ToLower(stockCode)
+		if strings.HasPrefix(lc, "sh") || strings.HasPrefix(lc, "sz") {
+			bareCode := lc[2:]
+			_ = h.watchlistRepo.Remove(userID, req.Market, bareCode)
+		}
+	}
+
 	item := &model.WatchlistItem{
 		UserID:    userID,
 		Market:    req.Market,
@@ -1335,10 +1442,30 @@ func (h *StockHandler) RemoveFromWatchlist(c *gin.Context) {
 		return
 	}
 
-	if err := h.watchlistRepo.Remove(userID, req.Market, req.StockCode); err != nil {
+	code := req.StockCode
+
+	// Try removing with the exact code first
+	if err := h.watchlistRepo.Remove(userID, req.Market, code); err != nil {
 		h.logger.WithField("error", err).Error("Failed to remove from watchlist")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove from watchlist"})
 		return
+	}
+
+	// Also try the other format for backward compatibility:
+	// If code has sh/sz prefix (new format), also try without prefix (old format)
+	// If code has no prefix (old format), also try with prefix (new format)
+	if req.Market == "a_share" {
+		lc := strings.ToLower(code)
+		if strings.HasPrefix(lc, "sh") || strings.HasPrefix(lc, "sz") {
+			bareCode := lc[2:]
+			_ = h.watchlistRepo.Remove(userID, req.Market, bareCode)
+		} else if len(code) == 6 {
+			prefix := "sh"
+			if strings.HasPrefix(code, "0") || strings.HasPrefix(code, "3") {
+				prefix = "sz"
+			}
+			_ = h.watchlistRepo.Remove(userID, req.Market, prefix+code)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Removed from watchlist"})
@@ -1430,13 +1557,16 @@ type KLineResponse struct {
 }
 
 // sinaScaleMap maps our unified period strings to Sina Finance API scale values (minutes).
+// Note: Sina's scale parameter represents the time window in minutes for each candle.
+// For daily K-line (1d), we still use scale=240 but with special handling in fetchAShareKLine
+// to ensure we get proper daily data, not 4-hour intraday data.
 var sinaScaleMap = map[string]string{
 	"5m":  "5",
 	"15m": "15",
 	"30m": "30",
 	"1h":  "60",
 	"4h":  "240",
-	"1d":  "240",
+	"1d":  "240", // Daily uses same scale but different datalen and aggregation logic
 	"1w":  "1680",
 }
 
@@ -1667,10 +1797,111 @@ func (h *StockHandler) fetchAShareKLine(ctx context.Context, code string, period
 			Volume: parseFloat(item.Volume),
 		})
 	}
+
+	// For daily K-line: Sina scale=240 doesn't return today's incomplete bar during trading hours.
+	// Fetch today's hourly bars (scale=60) and aggregate them into a single daily bar.
+	if period == "1d" && len(klines) > 0 {
+		todayStr := time.Now().In(time.FixedZone("CST", 8*3600)).Format("2006-01-02")
+		lastDate := klines[len(klines)-1].Date
+		if len(lastDate) >= 10 {
+			lastDate = lastDate[:10]
+		}
+		if lastDate != todayStr {
+			todayBar := h.aggregateTodayBar(ctx, symbol, todayStr)
+			if todayBar != nil {
+				klines = append(klines, *todayBar)
+			}
+		}
+	}
+
 	return klines, nil
 }
 
-// usIndexTencentCode maps index IDs used by the iOS app to Tencent Finance kline codes.
+// aggregateTodayBar fetches today's hourly bars from Sina (scale=60) and aggregates
+// them into a single daily K-line bar for the current trading day.
+func (h *StockHandler) aggregateTodayBar(ctx context.Context, symbol, todayStr string) *KLineResponse {
+	apiURL := fmt.Sprintf(
+		"https://quotes.sina.cn/cn/api/jsonp_v2.php/var%%20_%s_60=/CN_MarketDataService.getKLineData?symbol=%s&scale=60&ma=no&datalen=8",
+		symbol, symbol,
+	)
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+	req.Header.Set("Referer", "https://finance.sina.com.cn")
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+
+	bodyStr := string(body)
+	hStart := strings.Index(bodyStr, "(")
+	hEnd := strings.LastIndex(bodyStr, ")")
+	if hStart == -1 || hEnd <= hStart {
+		return nil
+	}
+
+	var hourItems []struct {
+		Day    string `json:"day"`
+		Open   string `json:"open"`
+		High   string `json:"high"`
+		Low    string `json:"low"`
+		Close  string `json:"close"`
+		Volume string `json:"volume"`
+	}
+	if err := json.Unmarshal([]byte(bodyStr[hStart+1:hEnd]), &hourItems); err != nil {
+		return nil
+	}
+
+	// Filter only bars from today and aggregate into a single daily bar
+	var todayOpen, todayClose, todayHigh, todayLow, todayVolume float64
+	first := true
+	for _, item := range hourItems {
+		if len(item.Day) >= 10 && item.Day[:10] == todayStr {
+			o := parseFloat(item.Open)
+			c := parseFloat(item.Close)
+			hi := parseFloat(item.High)
+			lo := parseFloat(item.Low)
+			v := parseFloat(item.Volume)
+			if first {
+				todayOpen = o
+				todayHigh = hi
+				todayLow = lo
+				first = false
+			} else {
+				if hi > todayHigh {
+					todayHigh = hi
+				}
+				if lo < todayLow {
+					todayLow = lo
+				}
+			}
+			todayClose = c
+			todayVolume += v
+		}
+	}
+
+	if first {
+		return nil // no today data found
+	}
+
+	return &KLineResponse{
+		Date:   todayStr,
+		Open:   todayOpen,
+		Close:  todayClose,
+		High:   todayHigh,
+		Low:    todayLow,
+		Volume: todayVolume,
+	}
+}
 var usIndexTencentCode = map[string]string{
 	"DJI":  "us.DJI",
 	"GSPC": "us.INX",
@@ -1837,6 +2068,41 @@ var cryptoIndexToSymbol = map[string]string{
 	"eth_price": "ETH",
 }
 
+// cryptoIndexNameMap maps Chinese index names to the canonical English display names.
+// This ensures that market-overview (大盘) and watchlist (自选) use the same code/name
+// for the same asset, producing identical search queries and sharing the same cache key.
+var cryptoIndexNameMap = map[string]string{
+	"比特币":  "Bitcoin",
+	"以太坊":  "Ethereum",
+	"币安币":  "BNB",
+	"索拉纳":  "Solana",
+	"瑞波币":  "XRP",
+	"卡尔达诺": "Cardano",
+	"狗狗币":  "Dogecoin",
+	"雪崩":   "Avalanche",
+	"波卡":   "Polkadot",
+	"链环":   "Chainlink",
+	"莱特币":  "Litecoin",
+	"宇宙币":  "Cosmos",
+	"波场":   "TRON",
+	"以太经典": "Ethereum Classic",
+}
+
+// normalizeCryptoParams ensures that regardless of whether the request comes from
+// the market overview (code="btc_price", name="比特币") or the watchlist
+// (code="BTC", name="Bitcoin"), we always use the same canonical code and name.
+func normalizeCryptoParams(code, name string) (string, string) {
+	// Step 1: Map index IDs like "btc_price" → "BTC"
+	if mapped, ok := cryptoIndexToSymbol[strings.ToLower(code)]; ok {
+		code = mapped
+	}
+	// Step 2: Map Chinese names like "比特币" → "Bitcoin"
+	if mapped, ok := cryptoIndexNameMap[name]; ok {
+		name = mapped
+	}
+	return code, name
+}
+
 func (h *StockHandler) fetchCryptoKLine(ctx context.Context, coinID string, period string, limit int) ([]KLineResponse, error) {
 	rawID := strings.TrimSpace(coinID)
 
@@ -1930,8 +2196,312 @@ type NewsResponse struct {
 	Source    string `json:"source"`
 	Time      string `json:"time"`
 	Summary   string `json:"summary"`
-	Sentiment string `json:"sentiment"` // positive, negative, neutral
+	Analysis  string `json:"analysis,omitempty"` // Detailed AI analysis (200-300 chars) for detail page
+	Sentiment string `json:"sentiment"`          // positive, negative, neutral
 	URL       string `json:"url"`
+}
+
+// ── Server-side news cache (5 min TTL) ──────────────────────────────────────
+
+type newsCacheEntry struct {
+	data      []NewsResponse
+	timestamp time.Time
+}
+
+var (
+	newsMemCache   = make(map[string]*newsCacheEntry)
+	newsMemCacheMu sync.RWMutex
+	newsCacheTTL   = 5 * time.Minute
+)
+
+func getNewsCacheKey(code, market string) string {
+	return market + "_" + code
+}
+
+func getNewsFromMemCache(code, market string) ([]NewsResponse, bool) {
+	key := getNewsCacheKey(code, market)
+	newsMemCacheMu.RLock()
+	defer newsMemCacheMu.RUnlock()
+	entry, ok := newsMemCache[key]
+	if !ok || time.Since(entry.timestamp) > newsCacheTTL {
+		return nil, false
+	}
+	return entry.data, true
+}
+
+func setNewsToMemCache(code, market string, data []NewsResponse) {
+	key := getNewsCacheKey(code, market)
+	newsMemCacheMu.Lock()
+	newsMemCache[key] = &newsCacheEntry{data: data, timestamp: time.Now()}
+	newsMemCacheMu.Unlock()
+}
+
+// cryptoChineseNames maps crypto display names (English) to Chinese names for better
+// search relevance on Chinese news sites and for title matching.
+var cryptoChineseNames = map[string]string{
+	"Bitcoin":          "比特币",
+	"BTC":              "比特币",
+	"Ethereum":         "以太坊",
+	"ETH":              "以太坊",
+	"BNB":              "币安币",
+	"Solana":           "索拉纳",
+	"SOL":              "索拉纳",
+	"XRP":              "瑞波币",
+	"Cardano":          "卡尔达诺",
+	"ADA":              "卡尔达诺",
+	"Dogecoin":         "狗狗币",
+	"DOGE":             "狗狗币",
+	"Avalanche":        "雪崩",
+	"AVAX":             "雪崩",
+	"Polkadot":         "波卡",
+	"DOT":              "波卡",
+	"Chainlink":        "链环",
+	"LINK":             "链环",
+	"Litecoin":         "莱特币",
+	"LTC":              "莱特币",
+	"Cosmos":           "宇宙币",
+	"ATOM":             "宇宙币",
+	"Uniswap":          "Uniswap",
+	"UNI":              "Uniswap",
+	"Polygon":          "Polygon",
+	"MATIC":            "Polygon",
+	"NEAR":             "NEAR",
+	"TRON":             "波场",
+	"TRX":              "波场",
+	"Ethereum Classic": "以太经典",
+	"ETC":              "以太经典",
+	"Bitcoin Cash":     "比特现金",
+	"BCH":              "比特现金",
+	"Sui":              "Sui",
+	"Aptos":            "Aptos",
+	"APT":              "Aptos",
+	"Arbitrum":         "Arbitrum",
+	"ARB":              "Arbitrum",
+	"Optimism":         "Optimism",
+	"OP":               "Optimism",
+	"Toncoin":          "TON币",
+	"TON":              "TON币",
+	"Pepe":             "Pepe",
+	"PEPE":             "Pepe",
+	"Shiba Inu":        "柴犬币",
+	"SHIB":             "柴犬币",
+}
+
+// qualityDomains are curated financial news sources with real stock-specific content.
+// Search queries are restricted to these domains to avoid homepage links and irrelevant results.
+var qualityDomains = map[string][]string{
+	"a_share": {
+		"finance.sina.com.cn", "stock.eastmoney.com", "xueqiu.com",
+		"cls.cn", "wallstreetcn.com", "10jqka.com.cn",
+		"stcn.com", "cs.com.cn", "nbd.com.cn", "yicai.com",
+		"jin10.com", "cninfo.com.cn", "ssrn.com",
+	},
+	"us_stock": {
+		"xueqiu.com", "wallstreetcn.com", "finance.sina.com.cn",
+		"cnbc.com", "bloomberg.com", "reuters.com",
+		"wsj.com", "eastmoney.com", "jin10.com", "cls.cn",
+		"36kr.com", "yicai.com",
+	},
+	"crypto": {
+		"jinse.cn", "jinse.com", "8btc.com", "theblockbeats.info",
+		"wallstreetcn.com", "xueqiu.com", "cls.cn", "36kr.com",
+		"odaily.news", "panewslab.com", "techflowpost.com",
+		"jin10.com", "foresightnews.pro", "marsbit.co",
+	},
+}
+
+// normalizeSearchDate converts various date formats from search engines into "2006-01-02".
+// Brave returns page_age as ISO 8601 (e.g. "2025-12-17T08:35:00Z") or relative like "3 hours ago".
+// Serper returns date like "Dec 17, 2025", "3 days ago", "17 hours ago".
+// Falls back to today's date if parsing fails or date is empty.
+func normalizeSearchDate(raw string) string {
+	if raw == "" {
+		return time.Now().Format("2006-01-02")
+	}
+
+	raw = strings.TrimSpace(raw)
+
+	// --- Try common absolute date formats ---
+	formats := []string{
+		time.RFC3339,                // 2025-12-17T08:35:00Z
+		"2006-01-02T15:04:05Z0700", // 2025-12-17T08:35:00+0800
+		"2006-01-02T15:04:05",      // 2025-12-17T08:35:00
+		"2006-01-02",               // 2025-12-17
+		"Jan 2, 2006",              // Dec 17, 2025
+		"January 2, 2006",          // December 17, 2025
+		"Jan 02, 2006",             // Dec 17, 2025
+		"2 Jan 2006",               // 17 Dec 2025
+		"02 Jan 2006",              // 17 Dec 2025
+	}
+	for _, layout := range formats {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t.Format("2006-01-02")
+		}
+	}
+
+	// --- Handle relative time expressions ---
+	rawLower := strings.ToLower(raw)
+
+	// Chinese relative: "3小时前", "2天前", "1周前"
+	// English relative: "3 hours ago", "2 days ago", "1 week ago"
+	type relPattern struct {
+		keywords []string
+		unit     time.Duration
+	}
+	patterns := []relPattern{
+		{[]string{"小时前", "hour"}, time.Hour},
+		{[]string{"分钟前", "minute"}, time.Minute},
+		{[]string{"天前", "day"}, 24 * time.Hour},
+		{[]string{"周前", "week"}, 7 * 24 * time.Hour},
+	}
+
+	for _, p := range patterns {
+		for _, kw := range p.keywords {
+			if strings.Contains(rawLower, kw) {
+				// Extract the number
+				num := 1
+				for _, ch := range raw {
+					if ch >= '0' && ch <= '9' {
+						num = int(ch - '0')
+						break
+					}
+				}
+				// For multi-digit numbers, parse more carefully
+				numStr := ""
+				for _, ch := range raw {
+					if ch >= '0' && ch <= '9' {
+						numStr += string(ch)
+					} else if numStr != "" {
+						break
+					}
+				}
+				if numStr != "" {
+					parsed := 0
+					for _, ch := range numStr {
+						parsed = parsed*10 + int(ch-'0')
+					}
+					if parsed > 0 {
+						num = parsed
+					}
+				}
+
+				t := time.Now().Add(-time.Duration(num) * p.unit)
+				return t.Format("2006-01-02")
+			}
+		}
+	}
+
+	// Fallback: today
+	return time.Now().Format("2006-01-02")
+}
+
+// isNonArticleURL checks if a URL is a homepage, category page, or stock quote/profile page
+// rather than an actual news article. This filters out URLs like:
+//   - xueqiu.com/S/SZ300750 (stock profile)
+//   - xueqiu.com/k?q=SZ300750 (stock quote)
+//   - finance.sina.com.cn/realstock/company/sz300750/nc.shtml (stock page)
+//   - stock.eastmoney.com/a/cSZ300750.html (stock page)
+//   - 10jqka.com.cn/300750/ (stock page)
+func isNonArticleURL(rawURL string, stockCode string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return true
+	}
+	host := strings.ToLower(u.Hostname())
+	path := strings.TrimRight(u.Path, "/")
+	pathLower := strings.ToLower(path)
+	queryStr := strings.ToLower(u.RawQuery)
+
+	// --- 1. Homepage / category page detection ---
+	if path == "" || strings.Count(path, "/") <= 1 {
+		pathPart := strings.TrimPrefix(path, "/")
+		if len(pathPart) < 15 && !strings.ContainsAny(pathPart, "0123456789") {
+			return true
+		}
+	}
+
+	// --- 2. Known stock quote/profile page patterns ---
+
+	// Xueqiu: /S/SZ300750, /S/SH600519, /S/AAPL, /k?q=...
+	if strings.Contains(host, "xueqiu.com") {
+		if strings.HasPrefix(pathLower, "/s/") || strings.HasPrefix(pathLower, "/k") {
+			return true
+		}
+	}
+
+	// Sina Finance: /realstock/company/sz300750/..., /stock/hkstock/..., /corp/go.php/stockIndustryNews/..., quote pages
+	if strings.Contains(host, "sina.com.cn") {
+		if strings.Contains(pathLower, "/realstock/") || strings.Contains(pathLower, "/stock/") {
+			return true
+		}
+		// /corp/go.php/... are stock profile / industry aggregate pages, not articles
+		if strings.Contains(pathLower, "/corp/") {
+			return true
+		}
+		if strings.Contains(pathLower, "quote") {
+			return true
+		}
+	}
+
+	// Eastmoney stock pages: /a/cSZ300750.html, /stockpage/...
+	if strings.Contains(host, "eastmoney.com") {
+		if strings.Contains(pathLower, "stockpage") || strings.Contains(pathLower, "quote") {
+			return true
+		}
+		// /a/cSZ300750.html or /a/csh600519.html — these are stock profile, not articles
+		// Eastmoney article URLs look like: /a/202403231234567890.html (long numeric ID)
+		if strings.HasPrefix(pathLower, "/a/c") && len(path) < 25 {
+			return true
+		}
+	}
+
+	// 10jqka: /300750/ or /stock/... — stock profile pages
+	if strings.Contains(host, "10jqka.com.cn") {
+		// Pure numeric path = stock page (e.g. /300750/)
+		trimmed := strings.Trim(path, "/")
+		if len(trimmed) > 0 && len(trimmed) <= 10 {
+			allDigit := true
+			for _, c := range trimmed {
+				if c < '0' || c > '9' {
+					allDigit = false
+					break
+				}
+			}
+			if allDigit {
+				return true
+			}
+		}
+	}
+
+	// --- 3. Generic quote/profile page path patterns (any domain) ---
+	if strings.Contains(pathLower, "/quotes/") || strings.Contains(pathLower, "/quote/") ||
+		strings.Contains(pathLower, "/quote.") {
+		return true
+	}
+	if stockCode != "" {
+		codeLower := strings.ToLower(stockCode)
+		// Match code with common prefixes: sz300750, sh600519, SZ.300750, etc.
+		codeVariants := []string{
+			codeLower,
+			"sz" + codeLower, "sh" + codeLower,
+			"sz." + codeLower, "sh." + codeLower,
+		}
+		for _, variant := range codeVariants {
+			// Check if the URL path is essentially just the stock code (not part of a longer article slug)
+			if pathLower == "/"+variant || pathLower == "/s/"+variant ||
+				strings.HasSuffix(pathLower, "/"+variant) {
+				return true
+			}
+		}
+		// Also check query parameters for stock code (e.g. ?q=SZ300750)
+		for _, variant := range codeVariants {
+			if strings.Contains(queryStr, variant) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 func (h *StockHandler) GetStockNews(c *gin.Context) {
@@ -1939,27 +2509,876 @@ func (h *StockHandler) GetStockNews(c *gin.Context) {
 	name := c.Query("name")
 	market := c.DefaultQuery("market", "a_share")
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Second)
+	// Normalize crypto params so market-overview and watchlist share the same code/name/cache
+	if market == "crypto" {
+		code, name = normalizeCryptoParams(code, name)
+	}
+
+	// Check server-side cache first
+	if cached, ok := getNewsFromMemCache(code, market); ok {
+		c.JSON(http.StatusOK, cached)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 18*time.Second)
 	defer cancel()
 
-	var news []NewsResponse
-	var err error
-
-	switch market {
-	case "a_share":
-		news, err = h.fetchAShareNews(ctx, code, name)
-	case "us_stock":
-		news, err = h.fetchUSStockNews(ctx, code, name)
-	case "crypto":
-		news, err = h.fetchCryptoNews(ctx, code, name)
+	// Try search-based news first (multi-round Serper/Brave search)
+	news, err := h.fetchNewsViaSearch(ctx, code, name, market)
+	if err != nil || len(news) == 0 {
+		// Fallback to legacy API for markets that have dedicated sources
+		switch market {
+		case "a_share":
+			news, err = h.fetchAShareNews(ctx, code, name)
+		case "us_stock":
+			news, err = h.fetchUSStockNews(ctx, code, name)
+		}
 	}
 
 	if err != nil {
 		h.logger.WithField("error", err).Warn("Failed to fetch news")
 		news = []NewsResponse{}
 	}
+	if news == nil {
+		news = []NewsResponse{}
+	}
+
+	// Cache non-empty results
+	if len(news) > 0 {
+		setNewsToMemCache(code, market, news)
+	}
 
 	c.JSON(http.StatusOK, news)
+}
+
+// ── Enhance Single News — GET /api/v1/stocks/news/enhance ───────────────────
+// Called when user opens a news detail page. Returns AI summary + analysis
+// for a specific news item identified by news_id within a stock's cached news.
+// If the cached entry already has AI analysis, returns it immediately.
+// Otherwise, calls LLM synchronously for just that one news item.
+
+func (h *StockHandler) EnhanceNewsItem(c *gin.Context) {
+	newsID := c.Query("news_id")
+	code := c.Query("code")
+	market := c.DefaultQuery("market", "a_share")
+	name := c.Query("name")
+
+	if newsID == "" || code == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "news_id and code are required"})
+		return
+	}
+
+	// Check if cached news already has AI enhancement for this item
+	if cached, ok := getNewsFromMemCache(code, market); ok {
+		for _, n := range cached {
+			if n.ID == newsID && n.Analysis != "" {
+				c.JSON(http.StatusOK, gin.H{
+					"summary":   n.Summary,
+					"analysis":  n.Analysis,
+					"sentiment": n.Sentiment,
+				})
+				return
+			}
+		}
+		// Found the item but no analysis yet — enhance just this one
+		for _, n := range cached {
+			if n.ID == newsID {
+				enhanced := h.enhanceSingleNews(c.Request.Context(), n, name, code)
+				// Update the cached entry
+				h.updateCachedNewsItem(code, market, newsID, enhanced)
+				c.JSON(http.StatusOK, enhanced)
+				return
+			}
+		}
+	}
+
+	// No cache hit — caller should provide title+summary as fallback
+	title := c.Query("title")
+	summary := c.Query("summary")
+	source := c.Query("source")
+	if title == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "news item not found in cache and no title provided"})
+		return
+	}
+
+	fakeNews := NewsResponse{
+		ID:      newsID,
+		Title:   title,
+		Summary: summary,
+		Source:  source,
+	}
+	enhanced := h.enhanceSingleNews(c.Request.Context(), fakeNews, name, code)
+	c.JSON(http.StatusOK, enhanced)
+}
+
+// enhanceSingleNews calls LLM to generate summary + analysis for a single news item.
+// NOTE: Does NOT generate sentiment — sentiment is already set during the initial news fetch.
+func (h *StockHandler) enhanceSingleNews(ctx context.Context, news NewsResponse, stockName, stockCode string) gin.H {
+	if h.llmClient == nil {
+		return gin.H{
+			"summary":   news.Summary,
+			"analysis":  "",
+			"sentiment": news.Sentiment,
+		}
+	}
+
+	prompt := fmt.Sprintf(`你是专业金融新闻分析师。对以下与"%s"（%s）相关的新闻进行深度分析。
+
+新闻标题：%s
+新闻摘要：%s
+新闻来源：%s
+
+请提供：
+1. summary（80-150字中文）：核心信息概括，包含事件主体、关键数据、直接影响
+2. analysis（150-250字中文）：深度解读，包含背景原因、对该标的短中期影响、风险提示
+
+严格按JSON格式返回：
+{"summary":"...","analysis":"..."}`, stockName, stockCode, news.Title, news.Summary, news.Source)
+
+	aiCtx, aiCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer aiCancel()
+
+	resp, err := h.llmClient.CreateChatCompletion(aiCtx, llm.ChatCompletionRequest{
+		Model: "deepseek-chat",
+		Messages: []llm.ChatMessage{
+			{Role: "system", Content: "你是金融新闻分析助手，只返回JSON格式数据，尽量精炼。"},
+			{Role: "user", Content: prompt},
+		},
+		Temperature: 0.3,
+		MaxTokens:   1500,
+	})
+	if err != nil {
+		h.logger.WithField("error", err).Warn("LLM enhancement failed for single news")
+		return gin.H{
+			"summary":   news.Summary,
+			"analysis":  "",
+			"sentiment": news.Sentiment,
+		}
+	}
+
+	content := strings.TrimSpace(resp.Content)
+	content = strings.TrimPrefix(content, "```json")
+	content = strings.TrimPrefix(content, "```")
+	content = strings.TrimSuffix(content, "```")
+	content = strings.TrimSpace(content)
+
+	var result struct {
+		Summary  string `json:"summary"`
+		Analysis string `json:"analysis"`
+	}
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		h.logger.WithField("error", err).Warn("Failed to parse single news enhancement")
+		return gin.H{
+			"summary":   news.Summary,
+			"analysis":  "",
+			"sentiment": news.Sentiment,
+		}
+	}
+
+	return gin.H{
+		"summary":   result.Summary,
+		"analysis":  result.Analysis,
+		"sentiment": news.Sentiment, // Preserve original sentiment from classifySentiments()
+	}
+}
+
+// updateCachedNewsItem updates a single news item in the cache with AI enhancement.
+func (h *StockHandler) updateCachedNewsItem(code, market, newsID string, enhanced gin.H) {
+	key := getNewsCacheKey(code, market)
+	newsMemCacheMu.Lock()
+	defer newsMemCacheMu.Unlock()
+	entry, ok := newsMemCache[key]
+	if !ok {
+		return
+	}
+	for i := range entry.data {
+		if entry.data[i].ID == newsID {
+			if s, ok := enhanced["summary"].(string); ok && s != "" {
+				entry.data[i].Summary = s
+			}
+			if a, ok := enhanced["analysis"].(string); ok && a != "" {
+				entry.data[i].Analysis = a
+			}
+			if s, ok := enhanced["sentiment"].(string); ok && s != "" {
+				entry.data[i].Sentiment = s
+			}
+			break
+		}
+	}
+}
+
+// ── Batch News — POST /api/v1/stocks/news/batch ─────────────────────────────
+
+type batchNewsRequest struct {
+	Stocks []struct {
+		Code   string `json:"code"`
+		Name   string `json:"name"`
+		Market string `json:"market"`
+	} `json:"stocks"`
+}
+
+type batchNewsResponseItem struct {
+	Code   string         `json:"code"`
+	Market string         `json:"market"`
+	News   []NewsResponse `json:"news"`
+}
+
+// GetBatchNews fetches news for multiple stocks in parallel.
+// Already-cached stocks are served from memory; only uncached ones hit the network.
+func (h *StockHandler) GetBatchNews(c *gin.Context) {
+	var req batchNewsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if len(req.Stocks) == 0 {
+		c.JSON(http.StatusOK, []batchNewsResponseItem{})
+		return
+	}
+	// Cap at 30 stocks per batch to avoid overloading
+	if len(req.Stocks) > 30 {
+		req.Stocks = req.Stocks[:30]
+	}
+
+	results := make([]batchNewsResponseItem, len(req.Stocks))
+	var wg sync.WaitGroup
+
+	// Limit concurrency to 6 parallel fetches
+	sem := make(chan struct{}, 6)
+
+	for i, s := range req.Stocks {
+		code := s.Code
+		name := s.Name
+		market := s.Market
+		if market == "" {
+			market = "a_share"
+		}
+
+		// Normalize crypto params so market-overview and watchlist share the same code/name/cache
+		if market == "crypto" {
+			code, name = normalizeCryptoParams(code, name)
+		}
+
+		// Check server-side cache first
+		if cached, ok := getNewsFromMemCache(code, market); ok {
+			results[i] = batchNewsResponseItem{Code: code, Market: market, News: cached}
+			continue
+		}
+
+		wg.Add(1)
+		idx := i
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 18*time.Second)
+			defer cancel()
+
+			news, err := h.fetchNewsViaSearch(ctx, code, name, market)
+			if err != nil || len(news) == 0 {
+				switch market {
+				case "a_share":
+					news, _ = h.fetchAShareNews(ctx, code, name)
+				case "us_stock":
+					news, _ = h.fetchUSStockNews(ctx, code, name)
+				}
+			}
+			if news == nil {
+				news = []NewsResponse{}
+			}
+			if len(news) > 0 {
+				setNewsToMemCache(code, market, news)
+			}
+			results[idx] = batchNewsResponseItem{Code: code, Market: market, News: news}
+		}()
+	}
+
+	wg.Wait()
+	c.JSON(http.StatusOK, results)
+}
+
+// fetchNewsViaSearch uses the web search engine (Serper/Brave) to find recent news,
+// then uses the LLM to generate AI summaries with sentiment analysis.
+// It performs multiple search rounds to ensure 5-10 results:
+//  1. Site-restricted search for the specific stock/coin
+//  2. Broader market news search (for US stocks and crypto, captures policy/macro events)
+//  3. Unrestricted search as fallback if still under 5 results
+func (h *StockHandler) fetchNewsViaSearch(ctx context.Context, code, name, market string) ([]NewsResponse, error) {
+	if h.searcher == nil {
+		return nil, fmt.Errorf("searcher not configured")
+	}
+
+	displayName := name
+	if displayName == "" {
+		displayName = code
+	}
+
+	// Build site clause for quality domains
+	domains, hasDomains := qualityDomains[market]
+	siteClause := ""
+	if hasDomains && len(domains) > 0 {
+		parts := make([]string, len(domains))
+		for i, d := range domains {
+			parts[i] = "site:" + d
+		}
+		siteClause = " (" + strings.Join(parts, " OR ") + ")"
+	}
+
+	// --- Build search queries ---
+	type searchRound struct {
+		query       string
+		maxResults  int
+		allowBroad  bool // if true, relax title-match filter to allow market-wide news
+	}
+	var rounds []searchRound
+
+	switch market {
+	case "a_share":
+		rounds = append(rounds, searchRound{
+			query:      fmt.Sprintf("%s 最新新闻 公告 分析", displayName) + siteClause,
+			maxResults: 15,
+		})
+		// Supplementary: company announcements from cninfo
+		rounds = append(rounds, searchRound{
+			query:      fmt.Sprintf("%s 公告 财报 site:cninfo.com.cn OR site:eastmoney.com OR site:10jqka.com.cn", displayName),
+			maxResults: 8,
+		})
+
+	case "us_stock":
+		rounds = append(rounds, searchRound{
+			query:      fmt.Sprintf("%s 美股 最新新闻 分析", displayName) + siteClause,
+			maxResults: 15,
+		})
+		// Supplementary: broad market/policy news from jin10 + wallstreetcn that affects this stock
+		rounds = append(rounds, searchRound{
+			query:      fmt.Sprintf("%s 最新消息 (site:jin10.com OR site:wallstreetcn.com OR site:cls.cn OR site:xueqiu.com)", displayName),
+			maxResults: 10,
+			allowBroad: true,
+		})
+
+	case "crypto":
+		// Use Chinese name for better search relevance
+		cnName := displayName
+		if cn, ok := cryptoChineseNames[displayName]; ok {
+			cnName = cn
+		}
+		if cn, ok := cryptoChineseNames[code]; ok && cnName == displayName {
+			cnName = cn
+		}
+		rounds = append(rounds, searchRound{
+			query:      fmt.Sprintf("%s %s 最新新闻动态", cnName, displayName) + siteClause,
+			maxResults: 15,
+		})
+		// Supplementary: broad crypto market news (policy, regulation, macro)
+		rounds = append(rounds, searchRound{
+			query:      fmt.Sprintf("%s 加密货币 最新消息 (site:jin10.com OR site:wallstreetcn.com OR site:cls.cn OR site:jinse.cn OR site:theblockbeats.info)", cnName),
+			maxResults: 10,
+			allowBroad: true,
+		})
+
+	default:
+		rounds = append(rounds, searchRound{
+			query:      fmt.Sprintf("%s 最新新闻报道", displayName) + siteClause,
+			maxResults: 15,
+		})
+	}
+
+	// --- Execute search rounds concurrently ---
+	type roundResult struct {
+		results    []search.Result
+		allowBroad bool
+	}
+	roundResults := make([]roundResult, len(rounds))
+	var wg sync.WaitGroup
+	for i, round := range rounds {
+		wg.Add(1)
+		go func(idx int, r searchRound) {
+			defer wg.Done()
+			res, err := h.searcher.Search(ctx, r.query, r.maxResults)
+			if err != nil {
+				h.logger.WithField("error", err).WithField("query", r.query).Debug("Search round failed")
+				return
+			}
+			roundResults[idx] = roundResult{results: res, allowBroad: r.allowBroad}
+		}(i, round)
+	}
+	wg.Wait()
+
+	// --- Merge & deduplicate results, applying filters ---
+	const maxNews = 10
+	seen := make(map[string]bool) // deduplicate by URL
+	news := make([]NewsResponse, 0, maxNews)
+
+	// Crypto Chinese name for title matching
+	cryptoCNName := ""
+	if market == "crypto" {
+		if cn, ok := cryptoChineseNames[displayName]; ok {
+			cryptoCNName = cn
+		}
+		if cryptoCNName == "" {
+			if cn, ok := cryptoChineseNames[code]; ok {
+				cryptoCNName = cn
+			}
+		}
+	}
+
+	for _, rr := range roundResults {
+		for ri, r := range rr.results {
+			if len(news) >= maxNews {
+				break
+			}
+			// Deduplicate
+			urlKey := strings.ToLower(r.URL)
+			if seen[urlKey] {
+				continue
+			}
+			// Skip homepage/category/stock-quote URLs
+			if isNonArticleURL(r.URL, code) {
+				continue
+			}
+			titleLower := strings.ToLower(r.Title)
+			// Skip stock quote/profile page titles
+			if isQuotePageTitle(titleLower) {
+				continue
+			}
+			// Title relevance check
+			if !h.isTitleRelevant(titleLower, displayName, code, market, cryptoCNName, rr.allowBroad) {
+				continue
+			}
+
+			seen[urlKey] = true
+			source := extractDomain(r.URL)
+			newsDate := normalizeSearchDate(r.Date)
+			news = append(news, NewsResponse{
+				ID:        fmt.Sprintf("%s_search_%d_%d", code, len(news), ri),
+				Title:     r.Title,
+				Source:    source,
+				Time:      newsDate,
+				Summary:   r.Snippet,
+				Sentiment: "neutral",
+				URL:       r.URL,
+			})
+		}
+	}
+
+	// --- Fallback: if still under 5 results, do an unrestricted search ---
+	if len(news) < 5 && h.searcher != nil {
+		var fallbackQuery string
+		switch market {
+		case "a_share":
+			fallbackQuery = fmt.Sprintf("%s 股票 最新新闻", displayName)
+		case "us_stock":
+			fallbackQuery = fmt.Sprintf("%s 美股 新闻 最新", displayName)
+		case "crypto":
+			cnName := displayName
+			if cn, ok := cryptoChineseNames[displayName]; ok {
+				cnName = cn
+			}
+			fallbackQuery = fmt.Sprintf("%s %s 新闻 最新", cnName, displayName)
+		default:
+			fallbackQuery = fmt.Sprintf("%s 最新新闻", displayName)
+		}
+		fbResults, fbErr := h.searcher.Search(ctx, fallbackQuery, 15)
+		if fbErr == nil {
+			for ri, r := range fbResults {
+				if len(news) >= maxNews {
+					break
+				}
+				urlKey := strings.ToLower(r.URL)
+				if seen[urlKey] {
+					continue
+				}
+				if isNonArticleURL(r.URL, code) {
+					continue
+				}
+				if isQuotePageTitle(strings.ToLower(r.Title)) {
+					continue
+				}
+				// Fallback round: relaxed title matching — allow broader results
+				if !h.isTitleRelevant(strings.ToLower(r.Title), displayName, code, market, cryptoCNName, true) {
+					continue
+				}
+				seen[urlKey] = true
+				source := extractDomain(r.URL)
+				newsDate := normalizeSearchDate(r.Date)
+				news = append(news, NewsResponse{
+					ID:        fmt.Sprintf("%s_fb_%d_%d", code, len(news), ri),
+					Title:     r.Title,
+					Source:    source,
+					Time:      newsDate,
+					Summary:   r.Snippet,
+					Sentiment: "neutral",
+					URL:       r.URL,
+				})
+			}
+		}
+	}
+
+	// Sort news by date descending (newest first)
+	sort.Slice(news, func(i, j int) bool {
+		return news[i].Time > news[j].Time
+	})
+
+	// Synchronous lightweight sentiment classification — so the first response already
+	// has accurate sentiment (positive/negative/neutral) for each news item.
+	// This prevents the UI from showing "neutral" initially and then flipping to "positive"
+	// when the user opens the detail page.
+	if h.llmClient != nil && len(news) > 0 {
+		sentCtx, sentCancel := context.WithTimeout(ctx, 12*time.Second)
+		defer sentCancel()
+		h.classifySentiments(sentCtx, news, name, code)
+	}
+
+	return news, nil
+}
+
+// isQuotePageTitle checks if a news title is actually a stock quote/profile page.
+func isQuotePageTitle(titleLower string) bool {
+	quotePageKeywords := []string{
+		"股票价格", "股价", "实时行情", "今日行情", "stock price",
+		"实时股价", "股票行情", "即时行情", "个股主页", "行情走势",
+		"行情数据", "实时数据", "交易数据", "行情中心",
+	}
+	for _, kw := range quotePageKeywords {
+		if strings.Contains(titleLower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+// isTitleRelevant checks if a news title is relevant to the given stock/coin.
+// When allowBroad is true, it also accepts general market/policy news.
+func (h *StockHandler) isTitleRelevant(titleLower, displayName, code, market, cryptoCNName string, allowBroad bool) bool {
+	nameLower := strings.ToLower(displayName)
+	codeLower := strings.ToLower(code)
+
+	// Direct match: title contains stock name or code
+	if strings.Contains(titleLower, nameLower) || strings.Contains(titleLower, codeLower) {
+		return true
+	}
+
+	// For short names (<=2 chars), always allow through
+	if len([]rune(displayName)) <= 2 {
+		return true
+	}
+
+	// Crypto: check Chinese name
+	if market == "crypto" && cryptoCNName != "" {
+		if strings.Contains(titleLower, strings.ToLower(cryptoCNName)) {
+			return true
+		}
+	}
+
+	// Crypto: general crypto keywords always pass
+	if market == "crypto" {
+		cryptoGenericKeywords := []string{"加密货币", "币圈", "数字货币", "虚拟货币", "crypto", "web3", "defi"}
+		for _, kw := range cryptoGenericKeywords {
+			if strings.Contains(titleLower, kw) {
+				return true
+			}
+		}
+	}
+
+	// Broad mode: accept market-wide news (policy, macro events)
+	if allowBroad {
+		broadKeywords := []string{
+			// Political / policy figures
+			"特朗普", "trump", "拜登", "biden", "美联储", "fed ", "sec ",
+			"鲍威尔", "powell", "耶伦", "yellen",
+			// Market-wide events
+			"关税", "tariff", "制裁", "sanction", "贸易战",
+			"降息", "加息", "利率", "通胀", "cpi", "非农",
+			// Market indices
+			"纳斯达克", "nasdaq", "标普", "s&p", "道琼斯", "dow jones",
+			"大涨", "大跌", "暴涨", "暴跌", "崩盘", "飙升", "熔断",
+		}
+		if market == "crypto" {
+			broadKeywords = append(broadKeywords,
+				"监管", "etf", "合规", "交易所", "binance", "coinbase",
+				"稳定币", "usdt", "usdc", "挖矿", "减半", "halving",
+			)
+		}
+		if market == "us_stock" {
+			broadKeywords = append(broadKeywords,
+				"财报", "earnings", "科技股", "芯片", "ai ", "人工智能",
+				"美股", "华尔街", "wall street",
+			)
+		}
+		for _, kw := range broadKeywords {
+			if strings.Contains(titleLower, kw) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// classifySentiments is a lightweight LLM call that only classifies sentiment for news items.
+// It runs synchronously before the news list is returned so sentiment is accurate from the start.
+// Token usage is minimal (~200-400 tokens) because it only outputs sentiment labels.
+func (h *StockHandler) classifySentiments(ctx context.Context, news []NewsResponse, stockName, stockCode string) {
+	if h.llmClient == nil || len(news) == 0 {
+		return
+	}
+
+	var sb strings.Builder
+	for i, n := range news {
+		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, n.Title))
+	}
+
+	prompt := fmt.Sprintf(`对以下与"%s"（%s）相关的新闻标题进行情绪分类。
+每条只需判断：positive（利好）、negative（利空）或 neutral（中性）。
+
+新闻标题：
+%s
+严格按JSON数组格式返回，例如：["positive","neutral","negative",...]
+数组长度必须等于新闻数量（%d条）。`, stockName, stockCode, sb.String(), len(news))
+
+	resp, err := h.llmClient.CreateChatCompletion(ctx, llm.ChatCompletionRequest{
+		Model: "deepseek-chat",
+		Messages: []llm.ChatMessage{
+			{Role: "system", Content: "你是金融新闻情绪分析助手，只返回JSON数组。"},
+			{Role: "user", Content: prompt},
+		},
+		Temperature: 0.1,
+		MaxTokens:   200,
+	})
+	if err != nil {
+		h.logger.WithField("error", err).Debug("Sentiment classification failed")
+		return
+	}
+
+	content := strings.TrimSpace(resp.Content)
+	content = strings.TrimPrefix(content, "```json")
+	content = strings.TrimPrefix(content, "```")
+	content = strings.TrimSuffix(content, "```")
+	content = strings.TrimSpace(content)
+
+	var sentiments []string
+	if err := json.Unmarshal([]byte(content), &sentiments); err != nil {
+		h.logger.WithField("error", err).Debug("Failed to parse sentiment classification")
+		return
+	}
+
+	for i, s := range sentiments {
+		if i < len(news) && (s == "positive" || s == "negative" || s == "neutral") {
+			news[i].Sentiment = s
+		}
+	}
+}
+
+// ── Batch Enhance News — POST /api/v1/stocks/news/enhance/batch ─────────────
+// Called when user enters a market section (e.g. A股). Triggers AI summary+analysis
+// for all watchlist stocks' news in that market. Does NOT change sentiment (already set).
+
+type batchEnhanceRequest struct {
+	Stocks []struct {
+		Code   string `json:"code"`
+		Name   string `json:"name"`
+		Market string `json:"market"`
+	} `json:"stocks"`
+}
+
+func (h *StockHandler) EnhanceBatchNews(c *gin.Context) {
+	var req batchEnhanceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if len(req.Stocks) == 0 {
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "enhanced": 0})
+		return
+	}
+	if len(req.Stocks) > 30 {
+		req.Stocks = req.Stocks[:30]
+	}
+
+	// Count how many stocks need enhancement
+	type enhanceJob struct {
+		code, name, market string
+		cached             []NewsResponse
+	}
+	var jobs []enhanceJob
+
+	for _, s := range req.Stocks {
+		code := s.Code
+		name := s.Name
+		market := s.Market
+		if market == "" {
+			market = "a_share"
+		}
+		if market == "crypto" {
+			code, name = normalizeCryptoParams(code, name)
+		}
+
+		cached, ok := getNewsFromMemCache(code, market)
+		if !ok || len(cached) == 0 {
+			continue
+		}
+
+		// Check if already enhanced (first item has analysis)
+		if cached[0].Analysis != "" {
+			continue
+		}
+
+		jobs = append(jobs, enhanceJob{code: code, name: name, market: market, cached: cached})
+	}
+
+	// Return immediately — enhancement runs asynchronously in the background.
+	// Each stock's cache is updated as soon as its LLM call completes,
+	// so the client can poll via GetBatchNews to pick up results incrementally.
+	h.logger.Info("BatchEnhance: accepted %d jobs, starting async processing", len(jobs))
+	c.JSON(http.StatusAccepted, gin.H{"status": "accepted", "pending": len(jobs)})
+
+	// Fire-and-forget: process all jobs in background goroutines
+	batchStart := time.Now()
+	sem := make(chan struct{}, 6) // Limit concurrency for LLM calls
+	for _, job := range jobs {
+		go func(j enhanceJob) {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			jobStart := time.Now()
+			enhCtx, enhCancel := context.WithTimeout(context.Background(), 65*time.Second)
+			defer enhCancel()
+
+			// Make a copy to avoid race conditions
+			newsCopy := make([]NewsResponse, len(j.cached))
+			copy(newsCopy, j.cached)
+
+			h.enhanceNewsWithAI(enhCtx, newsCopy, j.name, j.code)
+			setNewsToMemCache(j.code, j.market, newsCopy)
+			h.logger.Info("BatchEnhance: completed %s (%s) in %.1fs (total elapsed %.1fs)",
+				j.code, j.name, time.Since(jobStart).Seconds(), time.Since(batchStart).Seconds())
+		}(job)
+	}
+}
+
+// enhanceNewsWithAI uses the LLM to generate summaries and analysis for news items.
+// NOTE: This does NOT update sentiment — sentiment is already set by classifySentiments()
+// during the initial news fetch.
+func (h *StockHandler) enhanceNewsWithAI(ctx context.Context, news []NewsResponse, stockName, stockCode string) {
+	// Build context for LLM
+	var sb strings.Builder
+	for i, n := range news {
+		sb.WriteString(fmt.Sprintf("【新闻%d】标题：%s\n摘要：%s\n来源：%s\n\n", i+1, n.Title, n.Summary, n.Source))
+	}
+
+	prompt := fmt.Sprintf(`你是专业金融新闻分析师。对以下与"%s"（%s）相关的新闻进行分析。
+
+每条新闻请提供：
+1. summary（80-150字中文）：核心信息概括，包含事件主体、关键数据、直接影响
+2. analysis（150-250字中文）：深度解读，包含背景原因、对该标的短中期影响、风险提示
+
+严格按JSON格式返回：
+[{"index":0,"summary":"...","analysis":"..."}, ...]
+
+%s`, stockName, stockCode, sb.String())
+
+	aiCtx, aiCancel := context.WithTimeout(ctx, 60*time.Second)
+	defer aiCancel()
+
+	resp, err := h.llmClient.CreateChatCompletion(aiCtx, llm.ChatCompletionRequest{
+		Model: "deepseek-chat",
+		Messages: []llm.ChatMessage{
+			{Role: "system", Content: "你是金融新闻分析助手，只返回JSON格式数据，尽量精炼。"},
+			{Role: "user", Content: prompt},
+		},
+		Temperature: 0.3,
+		MaxTokens:   3000,
+	})
+	if err != nil {
+		h.logger.WithField("error", err).Warn("LLM enhancement failed for news")
+		return
+	}
+
+	content := strings.TrimSpace(resp.Content)
+	content = strings.TrimPrefix(content, "```json")
+	content = strings.TrimPrefix(content, "```")
+	content = strings.TrimSuffix(content, "```")
+	content = strings.TrimSpace(content)
+
+	var enhancements []struct {
+		Index    int    `json:"index"`
+		Summary  string `json:"summary"`
+		Analysis string `json:"analysis"`
+	}
+	if err := json.Unmarshal([]byte(content), &enhancements); err != nil {
+		h.logger.WithField("error", err).WithField("content", content).Warn("Failed to parse LLM news enhancement")
+		return
+	}
+
+	for _, e := range enhancements {
+		if e.Index >= 0 && e.Index < len(news) {
+			if e.Summary != "" {
+				news[e.Index].Summary = e.Summary
+			}
+			if e.Analysis != "" {
+				news[e.Index].Analysis = e.Analysis
+			}
+			// NOTE: Do NOT overwrite Sentiment — it was already set by classifySentiments()
+		}
+	}
+}
+
+// extractDomain extracts a readable domain name from a URL.
+func extractDomain(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "网络"
+	}
+	host := u.Hostname()
+	// Remove www. prefix
+	host = strings.TrimPrefix(host, "www.")
+
+	// Map common domains to Chinese names
+	domainMap := map[string]string{
+		"finance.sina.com.cn":    "新浪财经",
+		"finance.qq.com":         "腾讯财经",
+		"stock.eastmoney.com":    "东方财富",
+		"eastmoney.com":          "东方财富",
+		"xueqiu.com":             "雪球",
+		"wallstreetcn.com":       "华尔街见闻",
+		"cls.cn":                 "财联社",
+		"caixin.com":             "财新",
+		"36kr.com":               "36氪",
+		"jinse.cn":               "金色财经",
+		"jinse.com":              "金色财经",
+		"8btc.com":               "巴比特",
+		"theblockbeats.info":     "BlockBeats",
+		"odaily.news":            "Odaily星球日报",
+		"panewslab.com":          "PANews",
+		"techflowpost.com":       "深潮TechFlow",
+		"bloomberg.com":          "Bloomberg",
+		"reuters.com":            "Reuters",
+		"cnbc.com":               "CNBC",
+		"wsj.com":                "华尔街日报",
+		"nbd.com.cn":             "每日经济新闻",
+		"stcn.com":               "证券时报",
+		"cs.com.cn":              "中证网",
+		"10jqka.com.cn":          "同花顺",
+		"yicai.com":              "第一财经",
+		"thepaper.cn":            "澎湃新闻",
+		"techcrunch.com":         "TechCrunch",
+		"jin10.com":              "金十数据",
+		"cninfo.com.cn":          "巨潮资讯",
+		"foresightnews.pro":      "Foresight News",
+		"marsbit.co":             "MarsBit",
+	}
+
+	for domain, cnName := range domainMap {
+		if strings.Contains(host, domain) {
+			return cnName
+		}
+	}
+
+	// Return the domain itself for unknown sources
+	return host
 }
 
 func (h *StockHandler) fetchAShareNews(ctx context.Context, code string, name string) ([]NewsResponse, error) {
@@ -2122,11 +3541,6 @@ func (h *StockHandler) fetchUSStockNews(ctx context.Context, symbol string, name
 		})
 	}
 	return news, nil
-}
-
-func (h *StockHandler) fetchCryptoNews(ctx context.Context, coinID string, name string) ([]NewsResponse, error) {
-	// No free crypto news API available; return empty placeholder
-	return []NewsResponse{}, nil
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
