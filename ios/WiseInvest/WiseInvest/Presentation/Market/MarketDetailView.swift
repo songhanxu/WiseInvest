@@ -23,11 +23,13 @@ struct MarketDetailView: View {
 
                 VStack(spacing: 0) {
                     headerSection
+                    indicesSection
                     
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
-                            indicesSection
-                            watchlistSection
+                        LazyVStack(alignment: .leading, spacing: 20, pinnedViews: [.sectionHeaders]) {
+                            Section(header: watchlistHeader) {
+                                watchlistContent
+                            }
                         }
                         .padding(.bottom, 32)
                     }
@@ -183,37 +185,44 @@ struct MarketDetailView: View {
             }
         }
         .padding(.top, 16)
+        .padding(.bottom, 8)
+        .background(Color.primaryBackground)
     }
 
-    // MARK: - Watchlist Section
+    // MARK: - Watchlist Header (sticky)
 
-    private var watchlistSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("自选股")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.textPrimary)
+    private var watchlistHeader: some View {
+        HStack {
+            Text("自选股")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.textPrimary)
 
-                Text("\(viewModel.watchlist.count)")
-                    .font(.system(size: 13))
-                    .foregroundColor(.textTertiary)
+            Text("\(viewModel.watchlist.count)")
+                .font(.system(size: 13))
+                .foregroundColor(.textTertiary)
 
-                Spacer()
+            Spacer()
 
-                Button(action: { showSearch = true }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text("添加")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .foregroundColor(.accentBlue)
+            Button(action: { showSearch = true }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("添加")
+                        .font(.system(size: 13, weight: .medium))
                 }
+                .foregroundColor(.accentBlue)
             }
-            .padding(.horizontal, 20)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(Color.primaryBackground)
+    }
 
+    // MARK: - Watchlist Content
+
+    private var watchlistContent: some View {
+        Group {
             if viewModel.isLoadingWatchlist && viewModel.watchlist.isEmpty {
-                // Skeleton placeholders (3 rows) with shimmer animation
                 VStack(spacing: 2) {
                     ForEach(0..<3, id: \.self) { _ in
                         StockRowSkeleton()

@@ -16,12 +16,19 @@ struct HomeView: View {
             ZStack {
                 Color.primaryBackground.ignoresSafeArea()
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        headerSection
-                        marketSection
-                        if !viewModel.recentConversations.isEmpty {
-                            recentSection
+                VStack(spacing: 0) {
+                    headerSection
+
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                            Section(header: marketSectionHeader) {
+                                marketSectionContent
+                            }
+                            if !viewModel.recentConversations.isEmpty {
+                                Section(header: recentSectionHeader) {
+                                    recentSectionContent
+                                }
+                            }
                         }
                     }
                 }
@@ -73,7 +80,8 @@ struct HomeView: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 20)
-        .padding(.bottom, 28)
+        .padding(.bottom, 16)
+        .background(Color.primaryBackground)
     }
 
     // MARK: - Avatar Button
@@ -134,23 +142,28 @@ struct HomeView: View {
         return "账号管理"
     }
 
-    // MARK: - Market Cards
+    // MARK: - Market Section Header (sticky)
 
-    private var marketSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "选择市场", subtitle: "进入对话，开始分析")
-                .padding(.horizontal, 20)
+    private var marketSectionHeader: some View {
+        SectionHeader(title: "选择市场", subtitle: "进入对话，开始分析")
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primaryBackground)
+    }
 
-            VStack(spacing: 12) {
-                ForEach(Market.allCases) { market in
-                    MarketCard(market: market) {
-                        openMarketSheet(market)
-                    }
-                    .padding(.horizontal, 20)
+    // MARK: - Market Section Content
+
+    private var marketSectionContent: some View {
+        VStack(spacing: 12) {
+            ForEach(Market.allCases) { market in
+                MarketCard(market: market) {
+                    openMarketSheet(market)
                 }
+                .padding(.horizontal, 20)
             }
-            .padding(.bottom, 8)
         }
+        .padding(.bottom, 8)
     }
 
     // MARK: - Open Market Sheet (handles dismiss-animation race)
@@ -171,33 +184,37 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Recent Conversations
+    // MARK: - Recent Section Header (sticky)
 
-    private var recentSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "最近对话", subtitle: nil)
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
+    private var recentSectionHeader: some View {
+        SectionHeader(title: "最近对话", subtitle: nil)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primaryBackground)
+    }
 
-            VStack(spacing: 8) {
-                ForEach(viewModel.recentConversations) { conversation in
-                    RecentConversationRow(conversation: conversation) {
-                        if let market = Market(rawValue: conversation.agentType.rawValue) {
-                            sheetItem = ConversationSheetItem(market: market, existingConversation: conversation)
-                        }
+    // MARK: - Recent Section Content
+
+    private var recentSectionContent: some View {
+        VStack(spacing: 8) {
+            ForEach(viewModel.recentConversations) { conversation in
+                RecentConversationRow(conversation: conversation) {
+                    if let market = Market(rawValue: conversation.agentType.rawValue) {
+                        sheetItem = ConversationSheetItem(market: market, existingConversation: conversation)
                     }
-                    .padding(.horizontal, 20)
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            viewModel.deleteConversation(id: conversation.id)
-                        } label: {
-                            Label("删除", systemImage: "trash")
-                        }
+                }
+                .padding(.horizontal, 20)
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        viewModel.deleteConversation(id: conversation.id)
+                    } label: {
+                        Label("删除", systemImage: "trash")
                     }
                 }
             }
-            .padding(.bottom, 32)
         }
+        .padding(.bottom, 32)
     }
 }
 

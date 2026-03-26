@@ -47,75 +47,37 @@ struct StockDetailView: View {
         ZStack {
             Color.primaryBackground.ignoresSafeArea()
 
-            GeometryReader { geometry in
-                VStack(spacing: 0) {
-                    headerSection
+            VStack(spacing: 0) {
+                headerSection
+                priceSection
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 8)
+                    .background(Color.primaryBackground)
 
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 20) {
-                            // Stock price overview
-                            priceSection
-
-                            // K-Line chart with period selector
-                            VStack(spacing: 0) {
-                                // Period selector
-                                periodSelector
-                                    .padding(.horizontal, 16)
-                                    .padding(.bottom, 8)
-
-                                if isLoadingKline {
-                                    KLineChartSkeleton()
-                                        .padding(.horizontal, 16)
-                                } else if !klineData.isEmpty {
-                                    KLineChartView(
-                                        data: klineData,
-                                        accentColor: market.accentColor,
-                                        onLoadMore: { loadMoreKLineData() },
-                                        period: selectedPeriod.rawValue
-                                    )
-                                    .padding(.horizontal, 16)
-                                } else {
-                                    // Empty state — data failed to load, user can tap to retry
-                                    VStack(spacing: 12) {
-                                        Image(systemName: "chart.xyaxis.line")
-                                            .font(.system(size: 32))
-                                            .foregroundColor(.textTertiary)
-                                        Text("暂无K线数据")
-                                            .font(.system(size: 14))
-                                            .foregroundColor(.textSecondary)
-                                        Button(action: {
-                                            klineRetryCount = 0
-                                            loadKLineData()
-                                        }) {
-                                            HStack(spacing: 4) {
-                                                Image(systemName: "arrow.clockwise")
-                                                    .font(.system(size: 12))
-                                                Text("点击重试")
-                                                    .font(.system(size: 13, weight: .medium))
-                                            }
-                                            .foregroundColor(market.accentColor)
-                                        }
-                                    }
-                                    .frame(height: 200)
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.horizontal, 16)
-                                }
-                            }
-
-                            // AI Analysis
-                            aiAnalysisSection
-
-                            // News
-                            newsSection
-
-                            // Bottom spacer for the floating button
-                            Spacer().frame(height: 80)
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        // K-Line section with sticky header
+                        Section(header: klineSectionHeader) {
+                            klineSectionContent
                         }
-                        .frame(width: geometry.size.width)
-                    }
 
-                    Spacer(minLength: 0)
+                        // AI Analysis section with sticky header
+                        Section(header: aiSectionHeader) {
+                            aiSectionContent
+                        }
+
+                        // News section with sticky header
+                        Section(header: newsSectionHeader) {
+                            newsSectionContent
+                        }
+
+                        // Bottom spacer for the floating button
+                        Spacer().frame(height: 80)
+                    }
                 }
+
+                Spacer(minLength: 0)
             }
 
             // Floating "问问慧投" button
@@ -279,22 +241,91 @@ struct StockDetailView: View {
         }
     }
 
-    // MARK: - AI Analysis Section
+    // MARK: - K-Line Section (split for sticky header)
 
-    private var aiAnalysisSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "brain.head.profile")
-                    .font(.system(size: 14))
-                    .foregroundColor(.accentBlue)
-                Text("AI 智能分析")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.textPrimary)
+    /// Sticky header for K-line section
+    private var klineSectionHeader: some View {
+        HStack {
+            Image(systemName: "chart.xyaxis.line")
+                .font(.system(size: 14))
+                .foregroundColor(market.accentColor)
+            Text("K 线走势")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.textPrimary)
+            Spacer()
+            // Period selector inline in header
+            periodSelectorCompact
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(Color.primaryBackground)
+    }
+
+    /// K-line content below sticky header
+    private var klineSectionContent: some View {
+        Group {
+            if isLoadingKline {
+                KLineChartSkeleton()
+                    .padding(.horizontal, 16)
+            } else if !klineData.isEmpty {
+                KLineChartView(
+                    data: klineData,
+                    accentColor: market.accentColor,
+                    onLoadMore: { loadMoreKLineData() },
+                    period: selectedPeriod.rawValue
+                )
+                .padding(.horizontal, 16)
+            } else {
+                VStack(spacing: 12) {
+                    Image(systemName: "chart.xyaxis.line")
+                        .font(.system(size: 32))
+                        .foregroundColor(.textTertiary)
+                    Text("暂无K线数据")
+                        .font(.system(size: 14))
+                        .foregroundColor(.textSecondary)
+                    Button(action: {
+                        klineRetryCount = 0
+                        loadKLineData()
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 12))
+                            Text("点击重试")
+                                .font(.system(size: 13, weight: .medium))
+                        }
+                        .foregroundColor(market.accentColor)
+                    }
+                }
+                .frame(height: 200)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 20)
+        }
+        .padding(.bottom, 8)
+    }
 
+    // MARK: - AI Analysis Section (split for sticky header)
+
+    /// Sticky header for AI analysis section
+    private var aiSectionHeader: some View {
+        HStack {
+            Image(systemName: "brain.head.profile")
+                .font(.system(size: 14))
+                .foregroundColor(.accentBlue)
+            Text("AI 智能分析")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.textPrimary)
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(Color.primaryBackground)
+    }
+
+    /// AI analysis content below sticky header
+    private var aiSectionContent: some View {
+        Group {
             if isLoadingKline && analysisItems.isEmpty {
-                // Skeleton placeholders for AI analysis cards
                 VStack(spacing: 10) {
                     ForEach(0..<3, id: \.self) { _ in
                         AnalysisCardSkeleton()
@@ -310,32 +341,39 @@ struct StockDetailView: View {
                 .padding(.horizontal, 16)
             }
         }
+        .padding(.bottom, 8)
     }
 
-    // MARK: - News Section
+    // MARK: - News Section (split for sticky header)
 
-    private var newsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Image(systemName: "newspaper")
-                    .font(.system(size: 14))
-                    .foregroundColor(.accentBlue)
-                Text("相关资讯")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.textPrimary)
-                Spacer()
-                if !newsItems.isEmpty {
-                    Text("AI 摘要")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.accentBlue.opacity(0.8))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.accentBlue.opacity(0.12))
-                        .cornerRadius(4)
-                }
+    /// Sticky header for the news section — pins to top when scrolled
+    private var newsSectionHeader: some View {
+        HStack {
+            Image(systemName: "newspaper")
+                .font(.system(size: 14))
+                .foregroundColor(.accentBlue)
+            Text("相关资讯")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.textPrimary)
+            Spacer()
+            if !newsItems.isEmpty {
+                Text("AI 摘要")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.accentBlue.opacity(0.8))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.accentBlue.opacity(0.12))
+                    .cornerRadius(4)
             }
-            .padding(.horizontal, 20)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(Color.primaryBackground)
+    }
 
+    /// News section content (below the sticky header)
+    private var newsSectionContent: some View {
+        Group {
             if isLoadingNews {
                 VStack(spacing: 8) {
                     ForEach(0..<3, id: \.self) { _ in
@@ -604,9 +642,9 @@ struct StockDetailView: View {
         }
     }
 
-    // MARK: - Period Selector
+    // MARK: - Period Selector (compact, in sticky header)
 
-    private var periodSelector: some View {
+    private var periodSelectorCompact: some View {
         let availablePeriods = StockDataService.KLinePeriod.availablePeriods(for: stock.market)
         
         return HStack(spacing: 0) {
@@ -619,14 +657,14 @@ struct StockDetailView: View {
                     loadKLineData()
                 }) {
                     Text(period.label)
-                        .font(.system(size: 12, weight: selectedPeriod == period ? .semibold : .regular))
+                        .font(.system(size: 11, weight: selectedPeriod == period ? .semibold : .regular))
                         .foregroundColor(selectedPeriod == period ? .white : .textSecondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 7)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
                         .background(
                             selectedPeriod == period
                                 ? AnyView(
-                                    RoundedRectangle(cornerRadius: 8)
+                                    RoundedRectangle(cornerRadius: 6)
                                         .fill(market.accentColor)
                                   )
                                 : AnyView(Color.clear)
@@ -635,9 +673,9 @@ struct StockDetailView: View {
                 .buttonStyle(PlainButtonStyle())
             }
         }
-        .padding(3)
-        .background(Color.primaryBackground)
-        .cornerRadius(10)
+        .padding(2)
+        .background(Color.secondaryBackground.opacity(0.5))
+        .cornerRadius(8)
     }
 
     // MARK: - Auto Refresh

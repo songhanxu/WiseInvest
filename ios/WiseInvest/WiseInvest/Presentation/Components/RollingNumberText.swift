@@ -159,14 +159,25 @@ private struct SingleCharacterView: View {
 
     @State private var animationProgress: CGFloat = 0
 
+    @State private var charHeight: CGFloat = 20
+
     var body: some View {
         // We measure the character size by rendering an invisible reference character
         // and overlay the animated content on top.
         ZStack {
-            // Invisible sizer — ensures consistent cell width for monospaced fonts.
+            // Invisible sizer — ensures consistent cell width for monospaced fonts
+            // and captures the actual rendered height.
             Text("0")
                 .font(font)
                 .opacity(0)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(key: CharHeightKey.self, value: geo.size.height)
+                    }
+                )
+                .onPreferenceChange(CharHeightKey.self) { h in
+                    charHeight = h
+                }
 
             if direction == .none {
                 // No change — static text
@@ -175,29 +186,25 @@ private struct SingleCharacterView: View {
                     .foregroundColor(color)
                     .minimumScaleFactor(minimumScaleFactor)
             } else {
-                // Animated transition
-                GeometryReader { geo in
-                    let h = geo.size.height
-                    ZStack {
-                        // Old character sliding out
-                        Text(previousCharacter)
-                            .font(font)
-                            .foregroundColor(color)
-                            .minimumScaleFactor(minimumScaleFactor)
-                            .offset(y: oldCharacterOffset(height: h))
-                            .opacity(1 - animationProgress)
+                // Animated transition — uses measured charHeight instead of GeometryReader
+                ZStack {
+                    // Old character sliding out
+                    Text(previousCharacter)
+                        .font(font)
+                        .foregroundColor(color)
+                        .minimumScaleFactor(minimumScaleFactor)
+                        .offset(y: oldCharacterOffset(height: charHeight))
+                        .opacity(1 - animationProgress)
 
-                        // New character sliding in
-                        Text(character)
-                            .font(font)
-                            .foregroundColor(color)
-                            .minimumScaleFactor(minimumScaleFactor)
-                            .offset(y: newCharacterOffset(height: h))
-                            .opacity(animationProgress)
-                    }
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    .clipped()
+                    // New character sliding in
+                    Text(character)
+                        .font(font)
+                        .foregroundColor(color)
+                        .minimumScaleFactor(minimumScaleFactor)
+                        .offset(y: newCharacterOffset(height: charHeight))
+                        .opacity(animationProgress)
                 }
+                .clipped()
                 .onAppear {
                     animationProgress = 0
                     withAnimation(.easeInOut(duration: animationDuration)) {
@@ -240,5 +247,14 @@ private extension String {
     func leftPadded(toLength length: Int) -> String {
         if count >= length { return self }
         return String(repeating: " ", count: length - count) + self
+    }
+}
+
+// MARK: - Preference Key for character height measurement
+
+private struct CharHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 20
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
