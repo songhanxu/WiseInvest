@@ -20,8 +20,8 @@ class StockDataService: ObservableObject {
         self.session = URLSession(configuration: config)
 
         let longConfig = URLSessionConfiguration.default
-        longConfig.timeoutIntervalForRequest = 30
-        longConfig.timeoutIntervalForResource = 60
+        longConfig.timeoutIntervalForRequest = 65
+        longConfig.timeoutIntervalForResource = 120
         self.longSession = URLSession(configuration: longConfig)
     }
 
@@ -597,9 +597,277 @@ class StockDataService: ObservableObject {
             }
         }.resume()
     }
-}
 
-// MARK: - API Response Models
+    // MARK: - AI Analysis Enhancement
+
+    /// Fetches detailed AI analysis for a specific analysis type (tech/trend/volume).
+    /// Uses POST to send kline/price summary in request body (avoids URL length limits).
+    /// Triggers comprehensive AI analysis for a stock.
+    /// The backend fetches multi-timeframe K-line data internally and generates a unified analysis
+    /// combining technical, fundamental, and multi-timeframe trading advice.
+    func enhanceAnalysis(code: String, market: String, name: String,
+                         analysisType: String = "comprehensive",
+                         klineSummary: String = "", priceSummary: String = "",
+                         completion: @escaping (String, String, String) -> Void) {
+        let urlString = "\(baseURL)/api/v1/stocks/analysis/enhance"
+        guard let url = URL(string: urlString) else {
+            print("[EnhanceAnalysis] Invalid URL: \(urlString)")
+            completion("neutral", "", "")
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        addAuthHeader(to: &request)
+
+        var body: [String: Any] = [
+            "code": code,
+            "market": market,
+            "name": name,
+        ]
+        if !klineSummary.isEmpty { body["kline_summary"] = klineSummary }
+        if !priceSummary.isEmpty { body["price_summary"] = priceSummary }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        print("[EnhanceAnalysis] POST \(urlString) code=\(code)")
+
+        longSession.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("[EnhanceAnalysis] Network error: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion("neutral", "", "") }
+                return
+            }
+
+            let httpStatus = (response as? HTTPURLResponse)?.statusCode ?? 0
+            print("[EnhanceAnalysis] HTTP \(httpStatus)")
+
+            guard let data = data else {
+                print("[EnhanceAnalysis] No data received")
+                DispatchQueue.main.async { completion("neutral", "", "") }
+                return
+            }
+
+            // Debug: log raw response for troubleshooting
+            if let rawStr = String(data: data, encoding: .utf8) {
+                let preview = rawStr.count > 200 ? String(rawStr.prefix(200)) + "..." : rawStr
+                print("[EnhanceAnalysis] Response: \(preview)")
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    let conclusion = json["conclusion"] as? String ?? "neutral"
+                    let summary = json["summary"] as? String ?? ""
+                    let detail = json["detail"] as? String ?? ""
+                    if detail.isEmpty {
+                        print("[EnhanceAnalysis] WARNING: detail is empty, summary=\(summary)")
+                    }
+                    DispatchQueue.main.async { completion(conclusion, summary, detail) }
+                } else {
+                    print("[EnhanceAnalysis] Failed to parse JSON as [String: Any]")
+                    DispatchQueue.main.async { completion("neutral", "", "") }
+                }
+            } catch {
+                print("[EnhanceAnalysis] JSON parse error: \(error)")
+                DispatchQueue.main.async { completion("neutral", "", "") }
+            }
+        }.resume()
+    }
+
+    /// Fetches overall bullish/bearish conclusion for a stock.
+    func getAnalysisConclusion(code: String, market: String, name: String,
+                               klineSummary: String, priceSummary: String,
+                               completion: @escaping (String, String) -> Void) {
+        var components = URLComponents(string: "\(baseURL)/api/v1/stocks/analysis/conclusion")
+        components?.queryItems = [
+            URLQueryItem(name: "code", value: code),
+            URLQueryItem(name: "market", value: market),
+            URLQueryItem(name: "name", value: name),
+            URLQueryItem(name: "kline_summary", value: klineSummary),
+            URLQueryItem(name: "price_summary", value: priceSummary),
+        ]
+        guard let url = components?.url else {
+            completion("neutral", "")
+            return
+        }
+
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+
+        longSession.dataTask(with: request) { data, response, error in
+            guard let data = data, error == nil else {
+                DispatchQueue.main.async { completion("neutral", "") }
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    let conclusion = json["conclusion"] as? String ?? "neutral"
+                    let summary = json["summary"] as? String ?? ""
+                    DispatchQueue.main.async { completion(conclusion, summary) }
+                } else {
+                    DispatchQueue.main.async { completion("neutral", "") }
+                }
+            } catch {
+                DispatchQueue.main.async { completion("neutral", "") }
+            }
+        }.resume()
+    }
+
+    // MARK: - Batch Analysis Conclusion (preload when entering a market section)
+
+    struct AnalysisConclusionResult {
+        let code: String
+        let market: String
+        let conclusion: String
+        let summary: String
+    }
+
+    /// Fetches AI analysis conclusions for multiple stocks in one batch request.
+    /// Called from PreloadManager when user enters a market section.
+    func batchAnalysisConclusion(
+        stocks: [(code: String, name: String, market: String, klineSummary: String, priceSummary: String)],
+        completion: @escaping ([AnalysisConclusionResult]) -> Void
+    ) {
+        let urlString = "\(baseURL)/api/v1/stocks/analysis/batch-conclusion"
+        guard let url = URL(string: urlString) else {
+            completion([])
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        addAuthHeader(to: &request)
+
+        let body: [String: Any] = [
+            "stocks": stocks.map { [
+                "code": $0.code,
+                "name": $0.name,
+                "market": $0.market,
+                "kline_summary": $0.klineSummary,
+                "price_summary": $0.priceSummary
+            ] }
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        longSession.dataTask(with: request) { data, response, error in
+            guard let data = data, error == nil else {
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+
+            do {
+                if let arr = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                    let results = arr.compactMap { item -> AnalysisConclusionResult? in
+                        guard let code = item["code"] as? String,
+                              let market = item["market"] as? String else { return nil }
+                        return AnalysisConclusionResult(
+                            code: code,
+                            market: market,
+                            conclusion: item["conclusion"] as? String ?? "neutral",
+                            summary: item["summary"] as? String ?? ""
+                        )
+                    }
+                    DispatchQueue.main.async { completion(results) }
+                } else {
+                    DispatchQueue.main.async { completion([]) }
+                }
+            } catch {
+                DispatchQueue.main.async { completion([]) }
+            }
+        }.resume()
+    }
+
+    // MARK: - Batch Enhance Analysis (fire-and-forget preload)
+
+    /// Triggers batch comprehensive AI analysis for multiple stocks.
+    /// The backend fetches multi-timeframe K-line data internally and generates
+    /// a single unified analysis per stock. Returns immediately with 202 status.
+    func batchEnhanceAnalysis(
+        stocks: [(code: String, name: String, market: String, klineSummary: String, priceSummary: String)],
+        completion: (() -> Void)? = nil
+    ) {
+        let urlString = "\(baseURL)/api/v1/stocks/analysis/batch-enhance"
+        guard let url = URL(string: urlString) else {
+            completion?()
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        addAuthHeader(to: &request)
+
+        let body: [String: Any] = [
+            "stocks": stocks.map { [
+                "code": $0.code,
+                "name": $0.name,
+                "market": $0.market,
+                "kline_summary": $0.klineSummary,
+                "price_summary": $0.priceSummary
+            ] }
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        print("[BatchEnhanceAnalysis] POST \(urlString) count=\(stocks.count)")
+
+        // Fire-and-forget: we don't need the response content
+        longSession.dataTask(with: request) { _, response, error in
+            let httpStatus = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if let error = error {
+                print("[BatchEnhanceAnalysis] Error: \(error.localizedDescription)")
+            } else {
+                print("[BatchEnhanceAnalysis] HTTP \(httpStatus)")
+            }
+            DispatchQueue.main.async { completion?() }
+        }.resume()
+    }
+
+    /// Fetches the cached comprehensive analysis for a given stock from the backend.
+    /// Returns a single (conclusion, summary, detail) result, or nil if not cached.
+    func getCachedAnalysis(
+        code: String, market: String,
+        completion: @escaping ((conclusion: String, summary: String, detail: String)?) -> Void
+    ) {
+        var components = URLComponents(string: "\(baseURL)/api/v1/stocks/analysis/cached")
+        components?.queryItems = [
+            URLQueryItem(name: "code", value: code),
+            URLQueryItem(name: "market", value: market),
+        ]
+        guard let url = components?.url else {
+            completion(nil)
+            return
+        }
+
+        var request = URLRequest(url: url)
+        addAuthHeader(to: &request)
+
+        session.dataTask(with: request) { data, response, error in
+            guard let data = data, error == nil else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let isCached = json["cached"] as? Bool, isCached,
+                   let analysis = json["analysis"] as? [String: Any] {
+                    let result = (
+                        conclusion: analysis["conclusion"] as? String ?? "neutral",
+                        summary: analysis["summary"] as? String ?? "",
+                        detail: analysis["detail"] as? String ?? ""
+                    )
+                    DispatchQueue.main.async { completion(result) }
+                } else {
+                    DispatchQueue.main.async { completion(nil) }
+                }
+            } catch {
+                DispatchQueue.main.async { completion(nil) }
+            }
+        }.resume()
+    }
+}
 
 private struct IndexAPIResponse: Decodable {
     let id: String
@@ -692,9 +960,41 @@ private struct BatchNewsAPIResponse: Decodable {
 
 // MARK: - AI Analysis Item (generated client-side from stock data — no separate API needed)
 
-struct AIAnalysisItem: Identifiable {
+struct AIAnalysisItem: Identifiable, Hashable {
     let id: String
     let title: String
     let icon: String
     let content: String
+    /// Detailed AI analysis (fetched from backend)
+    var detail: String = ""
+    /// Conclusion: bullish, bearish, neutral
+    var conclusion: String = "neutral"
+    /// Summary from AI (longer than content)
+    var aiSummary: String = ""
+
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    static func == (lhs: AIAnalysisItem, rhs: AIAnalysisItem) -> Bool { lhs.id == rhs.id }
+}
+
+/// Overall conclusion aggregated from all analysis items
+enum AnalysisConclusion: String {
+    case bullish = "bullish"
+    case bearish = "bearish"
+    case neutral = "neutral"
+
+    var label: String {
+        switch self {
+        case .bullish: return "看多"
+        case .bearish: return "看空"
+        case .neutral: return "中性"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .bullish: return "arrow.up.right.circle.fill"
+        case .bearish: return "arrow.down.right.circle.fill"
+        case .neutral: return "minus.circle.fill"
+        }
+    }
 }

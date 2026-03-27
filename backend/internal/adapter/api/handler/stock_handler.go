@@ -35,6 +35,16 @@ type StockHandler struct {
 	searcher      search.Searcher      // Web search for news (may be NoopSearcher)
 	llmClient     *llm.OpenAIClient    // LLM client for AI summaries (may be nil)
 	fmpAPIKey     string               // FMP (Financial Modeling Prep) API key
+	llmSem        chan struct{}         // Semaphore to limit concurrent LLM requests (prevents DeepSeek overload)
+	wsHub         *WSHub               // WebSocket hub for real-time push (may be nil)
+	binanceWS     *BinanceWSClient     // Binance WebSocket stream for real-time crypto data
+
+	// In-memory caches for slow-changing crypto data (sparklines, fear/greed index).
+	// Updated every 60 s by a dedicated goroutine in backgroundRefreshLoop.
+	cryptoSlowMu      sync.RWMutex
+	cryptoBTCSparkline []float64
+	cryptoETHSparkline []float64
+	cryptoFearGreed    *IndexResponse // nil until first fetch
 }
 
 // NewStockHandler creates a new StockHandler.
@@ -49,17 +59,35 @@ func NewStockHandler(watchlistRepo *repository.WatchlistRepository, logger *logg
 		searcher:      searcher,
 		llmClient:     llmClient,
 		fmpAPIKey:     os.Getenv("FMP_API_KEY"),
+		llmSem:        make(chan struct{}, 3), // Max 3 concurrent LLM requests to avoid DeepSeek overload
+		wsHub:         NewWSHub(logger),       // WebSocket hub for real-time push
 	}
 	if quoteCache != nil {
 		ctx, cancel := context.WithCancel(context.Background())
 		h.stopTicker = cancel
+
+		// NOTE: Binance WebSocket is disabled — unreliable in current network.
+		// Using simple 2s HTTP polling instead (see backgroundRefreshLoop).
+		// To re-enable WS in the future, uncomment the lines below:
+		// h.binanceWS = NewBinanceWSClient(logger, []string{"BTCUSDT", "ETHUSDT"}, func(tickers map[string]BinanceTicker24hr) {
+		// 	h.onBinanceWSUpdate(ctx, tickers)
+		// })
+
 		go h.backgroundRefreshLoop(ctx)
 	}
 	return h
 }
 
-// Stop gracefully shuts down background tickers.
+// WSHub returns the WebSocket hub for route registration.
+func (h *StockHandler) WSHub() *WSHub {
+	return h.wsHub
+}
+
+// Stop gracefully shuts down background tickers and Binance WebSocket.
 func (h *StockHandler) Stop() {
+	if h.binanceWS != nil {
+		h.binanceWS.Stop()
+	}
 	if h.stopTicker != nil {
 		h.stopTicker()
 	}
@@ -94,6 +122,31 @@ func (h *StockHandler) backgroundRefreshLoop(ctx context.Context) {
 			return
 		}
 		_ = h.cache.SetJSON(ctx, cache.IndicesKey("a_share"), data, 5*time.Second)
+		// Push to WebSocket subscribers
+		if h.wsHub != nil {
+			h.wsHub.Broadcast(indicesChannelKey("a_share"), WSMessage{
+				Type:   "indices",
+				Market: "a_share",
+				Data:   data,
+			})
+			// Also broadcast individual stock quotes for subscribed indices
+			for _, idx := range data {
+				h.wsHub.Broadcast(quoteChannelKey("a_share", idx.ID), WSMessage{
+					Type:   "quote",
+					Market: "a_share",
+					Code:   idx.ID,
+					Data: StockResponse{
+						ID:            idx.ID,
+						Symbol:        idx.ID,
+						Name:          idx.Name,
+						Market:        "a_share",
+						CurrentPrice:  idx.Value,
+						Change:        idx.Change,
+						ChangePercent: idx.ChangePercent,
+					},
+				})
+			}
+		}
 	})
 
 	// US-stock indices — 2 s
@@ -103,19 +156,204 @@ func (h *StockHandler) backgroundRefreshLoop(ctx context.Context) {
 			return
 		}
 		_ = h.cache.SetJSON(ctx, cache.IndicesKey("us_stock"), data, 10*time.Second)
+		// Push to WebSocket subscribers
+		if h.wsHub != nil {
+			h.wsHub.Broadcast(indicesChannelKey("us_stock"), WSMessage{
+				Type:   "indices",
+				Market: "us_stock",
+				Data:   data,
+			})
+			for _, idx := range data {
+				h.wsHub.Broadcast(quoteChannelKey("us_stock", idx.ID), WSMessage{
+					Type:   "quote",
+					Market: "us_stock",
+					Code:   idx.ID,
+					Data: StockResponse{
+						ID:            idx.ID,
+						Symbol:        idx.ID,
+						Name:          idx.Name,
+						Market:        "us_stock",
+						CurrentPrice:  idx.Value,
+						Change:        idx.Change,
+						ChangePercent: idx.ChangePercent,
+					},
+				})
+			}
+		}
 	})
 
-	// Crypto indices — 2 s
+	// Crypto slow data — 60 s (sparklines + fear/greed index are slow-changing)
+	go tick("crypto_slow_data", 60*time.Second, func() {
+		var btcSp, ethSp []float64
+		var fg IndexResponse
+		var fgErr error
+		var wg sync.WaitGroup
+
+		wg.Add(3)
+		go func() { defer wg.Done(); btcSp = h.fetchCryptoSparkline(ctx, "BTCUSDT") }()
+		go func() { defer wg.Done(); ethSp = h.fetchCryptoSparkline(ctx, "ETHUSDT") }()
+		go func() { defer wg.Done(); fg, fgErr = h.fetchFearGreedIndex(ctx) }()
+		wg.Wait()
+
+		h.cryptoSlowMu.Lock()
+		if len(btcSp) > 0 {
+			h.cryptoBTCSparkline = btcSp
+		}
+		if len(ethSp) > 0 {
+			h.cryptoETHSparkline = ethSp
+		}
+		if fgErr == nil {
+			h.cryptoFearGreed = &fg
+		}
+		h.cryptoSlowMu.Unlock()
+	})
+
+	// Crypto real-time data — fixed 2s HTTP polling.
+	// Binance WS is unreliable in current network, so we use simple HTTP polling
+	// as the primary (and only) data source for crypto indices.
 	go tick("crypto_indices", 2*time.Second, func() {
 		data, err := h.fetchCryptoIndices(ctx)
 		if err != nil || len(data) == 0 {
 			return
 		}
-		_ = h.cache.SetJSON(ctx, cache.IndicesKey("crypto"), data, 10*time.Second)
+		_ = h.cache.SetJSON(ctx, cache.IndicesKey("crypto"), data, 5*time.Second)
+
+		// Cache individual tickers + broadcast
+		for _, idx := range data {
+			if idx.ID == "btc_price" || idx.ID == "eth_price" {
+				base := "BTC"
+				if idx.ID == "eth_price" {
+					base = "ETH"
+				}
+				_ = h.cache.SetJSON(ctx, cache.StockQuoteKey("crypto", idx.ID), StockResponse{
+					ID:            idx.ID,
+					Symbol:        base,
+					Name:          idx.Name,
+					Market:        "crypto",
+					CurrentPrice:  idx.Value,
+					Change:        idx.Change,
+					ChangePercent: idx.ChangePercent,
+				}, 10*time.Second)
+				if h.wsHub != nil {
+					h.wsHub.Broadcast(quoteChannelKey("crypto", idx.ID), WSMessage{
+						Type:   "quote",
+						Market: "crypto",
+						Code:   idx.ID,
+						Data: StockResponse{
+							ID:            idx.ID,
+							Symbol:        base,
+							Name:          idx.Name,
+							Market:        "crypto",
+							CurrentPrice:  idx.Value,
+							Change:        idx.Change,
+							ChangePercent: idx.ChangePercent,
+						},
+					})
+				}
+			}
+		}
+		if h.wsHub != nil {
+			h.wsHub.Broadcast(indicesChannelKey("crypto"), WSMessage{
+				Type:   "indices",
+				Market: "crypto",
+				Data:   data,
+			})
+		}
 	})
 
 	// Block until context cancelled
 	<-ctx.Done()
+}
+
+// onBinanceWSUpdate is called by the Binance WebSocket client whenever a
+// real-time ticker update arrives (~every 1 second per symbol).
+// It builds the crypto indices response, writes to Redis, and broadcasts
+// to all connected iOS/Web clients via the WSHub.
+func (h *StockHandler) onBinanceWSUpdate(ctx context.Context, tickers map[string]BinanceTicker24hr) {
+	// Read slow-changing data from in-memory cache
+	h.cryptoSlowMu.RLock()
+	btcSparkline := h.cryptoBTCSparkline
+	ethSparkline := h.cryptoETHSparkline
+	fgPtr := h.cryptoFearGreed
+	h.cryptoSlowMu.RUnlock()
+
+	var btcPrice, btcChangePct float64
+	if t, ok := tickers["BTCUSDT"]; ok {
+		btcPrice = parseFloat(t.LastPrice)
+		btcChangePct = parseFloat(t.PriceChangePercent)
+	}
+
+	indices := []IndexResponse{
+		{
+			ID:            "btc_price",
+			Name:          "比特币",
+			ShortName:     "BTC",
+			Value:         btcPrice,
+			Change:        parseFloat(tickers["BTCUSDT"].PriceChange),
+			ChangePercent: btcChangePct,
+			SparklineData: btcSparkline,
+		},
+	}
+
+	if t, ok := tickers["ETHUSDT"]; ok {
+		indices = append(indices, IndexResponse{
+			ID:            "eth_price",
+			Name:          "以太坊",
+			ShortName:     "ETH",
+			Value:         parseFloat(t.LastPrice),
+			Change:        parseFloat(t.PriceChange),
+			ChangePercent: parseFloat(t.PriceChangePercent),
+			SparklineData: ethSparkline,
+		})
+	}
+
+	if fgPtr != nil {
+		indices = append(indices, *fgPtr)
+	}
+
+	// Write to Redis cache (for HTTP API consumers)
+	if h.cache != nil {
+		_ = h.cache.SetJSON(ctx, cache.IndicesKey("crypto"), indices, 5*time.Second)
+	}
+
+	// Cache individual tickers + broadcast to WebSocket subscribers
+	for _, idx := range indices {
+		if idx.ID == "btc_price" || idx.ID == "eth_price" {
+			base := "BTC"
+			if idx.ID == "eth_price" {
+				base = "ETH"
+			}
+			stock := StockResponse{
+				ID:            base,
+				Symbol:        base + "/USDT",
+				Name:          idx.Name,
+				Market:        "crypto",
+				CurrentPrice:  idx.Value,
+				Change:        idx.Change,
+				ChangePercent: idx.ChangePercent,
+			}
+			if h.cache != nil {
+				_ = h.cache.SetJSON(ctx, cache.StockQuoteKey("crypto", base), stock, 15*time.Second)
+			}
+			if h.wsHub != nil {
+				h.wsHub.Broadcast(quoteChannelKey("crypto", base), WSMessage{
+					Type:   "quote",
+					Market: "crypto",
+					Code:   base,
+					Data:   stock,
+				})
+			}
+		}
+	}
+
+	// Broadcast crypto indices to WebSocket subscribers
+	if h.wsHub != nil {
+		h.wsHub.Broadcast(indicesChannelKey("crypto"), WSMessage{
+			Type:   "indices",
+			Market: "crypto",
+			Data:   indices,
+		})
+	}
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -573,43 +811,24 @@ func (h *StockHandler) fetchUSIndexSparkline(ctx context.Context, code string) [
 // ── Crypto Indices (Binance API) ─────────────────────────────────────────────
 
 func (h *StockHandler) fetchCryptoIndices(ctx context.Context) ([]IndexResponse, error) {
-	// Fetch BTC and ETH 24hr tickers from Binance for index display
+	// Fetch BTC and ETH 24hr tickers from Binance (lightweight, ~2 weight)
 	tickers, err := h.fetchBinance24hrTickers(ctx, []string{"BTCUSDT", "ETHUSDT"})
 	if err != nil {
 		return nil, err
 	}
 
+	// Read slow-changing data from in-memory cache (updated every 60 s)
+	h.cryptoSlowMu.RLock()
+	btcSparkline := h.cryptoBTCSparkline
+	ethSparkline := h.cryptoETHSparkline
+	fgPtr := h.cryptoFearGreed
+	h.cryptoSlowMu.RUnlock()
+
 	var btcPrice, btcChangePct float64
-	var ethPrice float64
 	if t, ok := tickers["BTCUSDT"]; ok {
 		btcPrice = parseFloat(t.LastPrice)
 		btcChangePct = parseFloat(t.PriceChangePercent)
 	}
-	if t, ok := tickers["ETHUSDT"]; ok {
-		ethPrice = parseFloat(t.LastPrice)
-	}
-	_ = ethPrice
-
-	// Fetch sparkline data and fear/greed index in parallel
-	var btcSparkline, ethSparkline []float64
-	var fgIdx IndexResponse
-	var fgErr error
-	var wg sync.WaitGroup
-
-	wg.Add(3)
-	go func() {
-		defer wg.Done()
-		btcSparkline = h.fetchCryptoSparkline(ctx, "BTCUSDT")
-	}()
-	go func() {
-		defer wg.Done()
-		ethSparkline = h.fetchCryptoSparkline(ctx, "ETHUSDT")
-	}()
-	go func() {
-		defer wg.Done()
-		fgIdx, fgErr = h.fetchFearGreedIndex(ctx)
-	}()
-	wg.Wait()
 
 	indices := []IndexResponse{
 		{
@@ -635,9 +854,9 @@ func (h *StockHandler) fetchCryptoIndices(ctx context.Context) ([]IndexResponse,
 		})
 	}
 
-	// Fear & Greed index from alternative.me
-	if fgErr == nil {
-		indices = append(indices, fgIdx)
+	// Fear & Greed index from in-memory cache
+	if fgPtr != nil {
+		indices = append(indices, *fgPtr)
 	}
 
 	return indices, nil
@@ -714,6 +933,10 @@ func (h *StockHandler) fetchBinance24hrTickers(ctx context.Context, symbols []st
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode == 429 || resp.StatusCode == 418 {
+			// Binance rate limit exceeded or IP banned
+			h.logger.WithField("status", resp.StatusCode).WithField("body", string(body)).Warn("Binance rate limit hit — backing off")
+		}
 		return nil, fmt.Errorf("binance API returned %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -1308,60 +1531,88 @@ func (h *StockHandler) GetWatchlist(c *gin.Context) {
 		}
 		stocks, _ = h.fetchUSStocksBySymbol(ctx, strings.Join(symbols, ","))
 	case "crypto":
-		var binanceSymbols []string
-		seen := make(map[string]bool) // Deduplicate symbols (e.g. "BTC" and "btc_price" both map to BTCUSDT)
+		// Collect base symbols and try cache first to avoid unnecessary Binance calls
+		type cryptoItem struct {
+			base string
+			name string
+		}
+		var allItems []cryptoItem
+		seen := make(map[string]bool)
 		for _, item := range items {
 			code := strings.TrimSpace(item.StockCode)
-			// Map index IDs to real symbols (e.g. "btc_price" → "BTC")
 			if mapped, ok := cryptoIndexToSymbol[strings.ToLower(code)]; ok {
 				code = mapped
 			}
-			// Skip non-tradeable indices like "fear_greed"
 			if strings.EqualFold(code, "fear_greed") {
 				continue
 			}
-			sym := strings.ToUpper(code)
-			// If StockCode is just the base (e.g., "BTC"), append USDT
-			if !strings.HasSuffix(sym, "USDT") {
-				sym = sym + "USDT"
-			}
-			if !seen[sym] {
-				binanceSymbols = append(binanceSymbols, sym)
-				seen[sym] = true
+			base := strings.ToUpper(code)
+			if !seen[base] {
+				allItems = append(allItems, cryptoItem{base: base, name: item.Name})
+				seen[base] = true
 			}
 		}
-		if len(binanceSymbols) > 0 {
+
+		// Phase 1: Try to read from Redis cache (populated by background ticker)
+		var uncachedSymbols []string
+		cachedStocks := make(map[string]StockResponse)
+		if h.cache != nil {
+			for _, ci := range allItems {
+				var cached StockResponse
+				if hit, _ := h.cache.GetJSON(ctx, cache.StockQuoteKey("crypto", ci.base), &cached); hit && cached.CurrentPrice > 0 {
+					cachedStocks[ci.base] = cached
+				} else {
+					sym := ci.base
+					if !strings.HasSuffix(sym, "USDT") {
+						sym = sym + "USDT"
+					}
+					uncachedSymbols = append(uncachedSymbols, sym)
+				}
+			}
+		} else {
+			for _, ci := range allItems {
+				sym := ci.base
+				if !strings.HasSuffix(sym, "USDT") {
+					sym = sym + "USDT"
+				}
+				uncachedSymbols = append(uncachedSymbols, sym)
+			}
+		}
+
+		// Phase 2: Fetch only uncached symbols from Binance
+		var freshStocks []StockResponse
+		if len(uncachedSymbols) > 0 {
 			var fetchErr error
-			stocks, fetchErr = h.fetchBinanceCryptoStocks(ctx, binanceSymbols)
+			freshStocks, fetchErr = h.fetchBinanceCryptoStocks(ctx, uncachedSymbols)
 			if fetchErr != nil {
 				h.logger.WithField("error", fetchErr).Warn("Binance API failed for crypto watchlist")
 			}
-			// Fallback: if Binance API failed or returned fewer results than expected,
-			// fill in missing stocks from DB records so the list is never empty.
-			if len(stocks) < len(items) {
-				// Build set of IDs already fetched
-				fetched := make(map[string]bool, len(stocks))
-				for _, s := range stocks {
-					fetched[strings.ToUpper(s.ID)] = true
+			// Cache the fresh results
+			if h.cache != nil {
+				for _, s := range freshStocks {
+					_ = h.cache.SetJSON(ctx, cache.StockQuoteKey("crypto", s.ID), s, 15*time.Second)
 				}
-				for _, item := range items {
-					base := strings.ToUpper(strings.TrimSpace(item.StockCode))
-					if mapped, ok := cryptoIndexToSymbol[strings.ToLower(base)]; ok {
-						base = strings.ToUpper(mapped)
-					}
-					if strings.EqualFold(base, "fear_greed") {
-						continue
-					}
-					if !fetched[base] {
-						// Add a placeholder entry from DB so the watchlist is not empty
-						stocks = append(stocks, StockResponse{
-							ID:     base,
-							Symbol: base + "/USDT",
-							Name:   item.Name,
-							Market: "crypto",
-						})
-					}
-				}
+			}
+		}
+
+		// Phase 3: Merge cached + fresh results in the original order
+		freshMap := make(map[string]StockResponse, len(freshStocks))
+		for _, s := range freshStocks {
+			freshMap[strings.ToUpper(s.ID)] = s
+		}
+		for _, ci := range allItems {
+			if s, ok := cachedStocks[ci.base]; ok {
+				stocks = append(stocks, s)
+			} else if s, ok := freshMap[ci.base]; ok {
+				stocks = append(stocks, s)
+			} else {
+				// Fallback placeholder
+				stocks = append(stocks, StockResponse{
+					ID:     ci.base,
+					Symbol: ci.base + "/USDT",
+					Name:   ci.name,
+					Market: "crypto",
+				})
 			}
 		}
 	}
@@ -1537,6 +1788,16 @@ func (h *StockHandler) GetStockQuote(c *gin.Context) {
 	// Write to cache (short TTL — individual stock quote)
 	if h.cache != nil {
 		_ = h.cache.SetJSON(c.Request.Context(), cache.StockQuoteKey(market, code), stocks[0], 2*time.Second)
+	}
+
+	// Push to WebSocket subscribers
+	if h.wsHub != nil {
+		h.wsHub.Broadcast(quoteChannelKey(market, code), WSMessage{
+			Type:   "quote",
+			Market: market,
+			Code:   code,
+			Data:   stocks[0],
+		})
 	}
 
 	c.JSON(http.StatusOK, stocks[0])
@@ -3567,4 +3828,825 @@ func toFloatVal(v interface{}) (float64, bool) {
 		return 0, false
 	}
 	return 0, false
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// AI Stock Analysis — POST /api/v1/stocks/analysis/enhance
+// ──────────────────────────────────────────────────────────────────────────────
+// Called when user opens the AI analysis detail page for a specific analysis type.
+// Uses POST to send kline/price summary in request body (avoids URL length limits).
+// Returns comprehensive AI-generated analysis including bullish/bearish conclusion,
+// trading suggestions, support/resistance levels, stop-loss/take-profit etc.
+
+// Analysis cache (in-memory, 15 min TTL)
+// Stores a single comprehensive analysis per stock that combines technical, fundamental,
+// and multi-timeframe trading advice.
+type analysisCacheEntry struct {
+	data      map[string]AnalysisResponse // key = analysis type; "comprehensive" for unified analysis
+	timestamp time.Time
+}
+
+type AnalysisResponse struct {
+	Type       string `json:"type"`       // "comprehensive" (unified) or legacy tech/trend/volume
+	Title      string `json:"title"`      // 综合智能分析
+	Conclusion string `json:"conclusion"` // bullish, bearish, neutral
+	Summary    string `json:"summary"`    // 核心结论 (80-120字)
+	Detail     string `json:"detail"`     // 完整分析报告 (800-1500字)
+}
+
+var (
+	analysisMemCache   = make(map[string]*analysisCacheEntry)
+	analysisMemCacheMu sync.RWMutex
+	analysisCacheTTL   = 15 * time.Minute
+)
+
+func getAnalysisCacheKey(code, market string) string {
+	return "analysis_" + market + "_" + code
+}
+
+func getAnalysisFromMemCache(code, market, analysisType string) (*AnalysisResponse, bool) {
+	key := getAnalysisCacheKey(code, market)
+	analysisMemCacheMu.RLock()
+	defer analysisMemCacheMu.RUnlock()
+	entry, ok := analysisMemCache[key]
+	if !ok || time.Since(entry.timestamp) > analysisCacheTTL {
+		return nil, false
+	}
+	if resp, ok := entry.data[analysisType]; ok && resp.Detail != "" {
+		return &resp, true
+	}
+	return nil, false
+}
+
+func setAnalysisToMemCache(code, market, analysisType string, resp AnalysisResponse) {
+	key := getAnalysisCacheKey(code, market)
+	analysisMemCacheMu.Lock()
+	entry, ok := analysisMemCache[key]
+	if !ok || time.Since(entry.timestamp) > analysisCacheTTL {
+		entry = &analysisCacheEntry{data: make(map[string]AnalysisResponse), timestamp: time.Now()}
+		analysisMemCache[key] = entry
+	}
+	entry.data[analysisType] = resp
+	analysisMemCacheMu.Unlock()
+}
+
+// EnhanceAnalysis — POST /api/v1/stocks/analysis/enhance
+// Generates a single comprehensive AI analysis combining technical, fundamental, and
+// multi-timeframe trading advice. The backend fetches K-line data for multiple periods
+// internally, so the client only needs to provide code/market/name.
+func (h *StockHandler) EnhanceAnalysis(c *gin.Context) {
+	var req struct {
+		Code         string `json:"code"`
+		Market       string `json:"market"`
+		Name         string `json:"name"`
+		Type         string `json:"type"`          // ignored now, always "comprehensive"
+		KlineSummary string `json:"kline_summary"` // optional client fallback
+		PriceSummary string `json:"price_summary"` // optional client fallback
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		req.Code = c.Query("code")
+		req.Market = c.DefaultQuery("market", "a_share")
+		req.Name = c.Query("name")
+		req.KlineSummary = c.Query("kline_summary")
+		req.PriceSummary = c.Query("price_summary")
+	}
+	if req.Market == "" {
+		req.Market = "a_share"
+	}
+
+	code := req.Code
+	market := req.Market
+	name := req.Name
+
+	if code == "" || name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "code and name are required"})
+		return
+	}
+
+	// Check cache — look for "comprehensive" type
+	if cached, ok := getAnalysisFromMemCache(code, market, "comprehensive"); ok {
+		c.JSON(http.StatusOK, cached)
+		return
+	}
+
+	if h.llmClient == nil {
+		c.JSON(http.StatusOK, AnalysisResponse{
+			Type:       "comprehensive",
+			Conclusion: "neutral",
+			Summary:    "AI 分析服务暂不可用",
+			Detail:     "",
+		})
+		return
+	}
+
+	// Fetch multi-timeframe K-line data from backend directly
+	multiKlineSummary := h.fetchMultiTimeframeKLineSummary(code, market)
+	if multiKlineSummary == "" && req.KlineSummary != "" {
+		multiKlineSummary = req.KlineSummary // fallback to client-provided
+	}
+	priceSummary := req.PriceSummary
+
+	prompt := h.buildComprehensiveAnalysisPrompt(name, code, market, multiKlineSummary, priceSummary)
+
+	// Acquire LLM semaphore to limit concurrent DeepSeek requests
+	select {
+	case h.llmSem <- struct{}{}:
+		// acquired
+	case <-c.Request.Context().Done():
+		c.JSON(http.StatusOK, AnalysisResponse{
+			Type:       "comprehensive",
+			Conclusion: "neutral",
+			Summary:    "请求已取消",
+			Detail:     "",
+		})
+		return
+	}
+	defer func() { <-h.llmSem }()
+
+	aiCtx, aiCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer aiCancel()
+
+	resp, err := h.llmClient.CreateChatCompletion(aiCtx, llm.ChatCompletionRequest{
+		Model: "deepseek-chat",
+		Messages: []llm.ChatMessage{
+			{Role: "system", Content: "你是顶级金融分析师和交易顾问。严格按要求只返回JSON格式数据。分析要专业、具体、有明确可操作性。必须给出精确的价格点位。"},
+			{Role: "user", Content: prompt},
+		},
+		Temperature: 0.3,
+		MaxTokens:   4000,
+	})
+	if err != nil {
+		h.logger.WithField("error", err).Warn("LLM comprehensive analysis failed")
+		c.JSON(http.StatusOK, AnalysisResponse{
+			Type:       "comprehensive",
+			Conclusion: "neutral",
+			Summary:    "分析生成失败，请稍后重试",
+			Detail:     "",
+		})
+		return
+	}
+
+	content := strings.TrimSpace(resp.Content)
+	content = strings.TrimPrefix(content, "```json")
+	content = strings.TrimPrefix(content, "```")
+	content = strings.TrimSuffix(content, "```")
+	content = strings.TrimSpace(content)
+
+	var result AnalysisResponse
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		h.logger.WithField("error", err).WithField("content", content).Warn("Failed to parse comprehensive analysis")
+		c.JSON(http.StatusOK, AnalysisResponse{
+			Type:       "comprehensive",
+			Conclusion: "neutral",
+			Summary:    "分析解析失败",
+			Detail:     "",
+		})
+		return
+	}
+	result.Type = "comprehensive"
+
+	setAnalysisToMemCache(code, market, "comprehensive", result)
+	c.JSON(http.StatusOK, result)
+}
+
+// fetchMultiTimeframeKLineSummary fetches K-line data for multiple timeframes from
+// the backend's own data sources, and builds a compact text summary for the AI prompt.
+// This eliminates dependency on the iOS client sending K-line data.
+func (h *StockHandler) fetchMultiTimeframeKLineSummary(code, market string) string {
+	type klineResult struct {
+		period string
+		data   []KLineResponse
+		err    error
+	}
+
+	// Determine which periods to fetch based on market type
+	var periods []string
+	switch market {
+	case "crypto":
+		periods = []string{"1h", "4h", "1d", "1w"}
+	case "us_stock":
+		periods = []string{"1d", "1w"}
+	default: // a_share
+		periods = []string{"30m", "1d", "1w"}
+	}
+
+	results := make(chan klineResult, len(periods))
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	for _, p := range periods {
+		go func(period string) {
+			limit := 60
+			if period == "1w" {
+				limit = 30
+			}
+			var klines []KLineResponse
+			var err error
+			switch market {
+			case "a_share":
+				klines, err = h.fetchAShareKLine(ctx, code, period, limit)
+			case "us_stock":
+				klines, err = h.fetchUSStockKLine(ctx, code, period, limit)
+			case "crypto":
+				klines, err = h.fetchCryptoKLine(ctx, code, period, limit)
+			}
+			results <- klineResult{period: period, data: klines, err: err}
+		}(p)
+	}
+
+	summaries := make(map[string]string)
+	for range periods {
+		r := <-results
+		if r.err != nil || len(r.data) == 0 {
+			continue
+		}
+		klines := r.data
+		last := klines[len(klines)-1]
+		first := klines[0]
+
+		// Calculate basic stats
+		periodChange := 0.0
+		if first.Open > 0 {
+			periodChange = ((last.Close - first.Open) / first.Open) * 100
+		}
+		high := klines[0].High
+		low := klines[0].Low
+		totalVol := 0.0
+		for _, k := range klines {
+			if k.High > high {
+				high = k.High
+			}
+			if k.Low < low {
+				low = k.Low
+			}
+			totalVol += k.Volume
+		}
+		avgVol := totalVol / float64(len(klines))
+
+		// MA calculations
+		recentN := min(5, len(klines))
+		ma5Sum := 0.0
+		for _, k := range klines[len(klines)-recentN:] {
+			ma5Sum += k.Close
+		}
+		ma5 := ma5Sum / float64(recentN)
+
+		recent20N := min(20, len(klines))
+		ma20Sum := 0.0
+		for _, k := range klines[len(klines)-recent20N:] {
+			ma20Sum += k.Close
+		}
+		ma20 := ma20Sum / float64(recent20N)
+
+		// Recent 5 candle pattern summary
+		recentCandles := ""
+		startIdx := len(klines) - min(5, len(klines))
+		for i := startIdx; i < len(klines); i++ {
+			k := klines[i]
+			direction := "阳"
+			if k.Close < k.Open {
+				direction = "阴"
+			}
+			bodyPct := 0.0
+			if k.Open > 0 {
+				bodyPct = ((k.Close - k.Open) / k.Open) * 100
+			}
+			recentCandles += fmt.Sprintf("%s(%.1f%%) ", direction, bodyPct)
+		}
+
+		periodLabel := map[string]string{
+			"5m": "5分钟", "15m": "15分钟", "30m": "30分钟",
+			"1h": "1小时", "4h": "4小时", "1d": "日K", "1w": "周K",
+		}[r.period]
+
+		summaries[r.period] = fmt.Sprintf(
+			"【%s线】共%d根，最新收盘%.4f，区间涨跌%.2f%%，MA5=%.4f，MA20=%.4f，最高%.4f，最低%.4f，均量%.0f，近5根: %s",
+			periodLabel, len(klines), last.Close, periodChange, ma5, ma20, high, low, avgVol, strings.TrimSpace(recentCandles),
+		)
+	}
+
+	if len(summaries) == 0 {
+		return ""
+	}
+
+	// Assemble in order
+	var sb strings.Builder
+	for _, p := range periods {
+		if s, ok := summaries[p]; ok {
+			sb.WriteString(s)
+			sb.WriteString("\n")
+		}
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+// buildComprehensiveAnalysisPrompt creates a single unified prompt that asks the AI to
+// analyze all dimensions (technical, fundamental, volume) and provide multi-timeframe
+// trading suggestions with precise entry/exit/stop-loss prices.
+func (h *StockHandler) buildComprehensiveAnalysisPrompt(name, code, market, multiKlineSummary, priceSummary string) string {
+	isCrypto := market == "crypto"
+	var actionLabel, assetType string
+	if isCrypto {
+		actionLabel = "做多/做空"
+		assetType = "加密货币"
+	} else if market == "us_stock" {
+		actionLabel = "买入/卖出"
+		assetType = "美股"
+	} else {
+		actionLabel = "买入/卖出"
+		assetType = "A股"
+	}
+
+	return fmt.Sprintf(`你是顶级金融分析师。对"%s"（%s，%s %s）进行全方位综合分析。
+
+当前实时行情：
+%s
+
+多周期K线数据（后端实时获取）：
+%s
+
+【分析要求】请以技术面为核心基准，结合以下所有维度进行深度分析：
+
+1. **技术面分析**（核心）：
+   - 各时间周期趋势判断（短线/中线/长线）
+   - MA均线系统分析（MA5/MA20/MA60 排列关系）
+   - 关键支撑位和阻力位（至少各2个，给出精确价格）
+   - K线形态识别（最近的关键形态）
+   - 量价配合关系分析
+
+2. **基本面结合**：
+   - 当前价格所处的历史区间位置
+   - 市场情绪判断
+   - 宏观环境影响
+
+3. **多周期交易建议**（最重要！必须给出精确价格）：
+   根据不同时间维度的K线分别给出交易建议：
+   - **短线（1-3天/4小时级别）**：入场价、止盈价、止损价
+   - **中线（1-2周/日K级别）**：入场价、止盈价、止损价
+   - **长线（1月以上/周K级别）**：入场价、止盈价、止损价
+   
+   对每个时间维度：
+   - 如果当前价格适合%s，给出具体的入场价位
+   - 如果当前不到合适位置，说明"等回调到XX价位再入场"或"突破XX后追多/追空"
+   - 止盈和止损价位必须精确到小数点
+   - 盈亏比评估
+
+4. **综合结论**：看多/看空/中性，以及核心逻辑
+
+【返回格式】严格按以下JSON格式返回，summary和detail内容不得重复：
+{
+  "conclusion": "bullish或bearish或neutral",
+  "title": "AI 综合分析",
+  "summary": "2-3句核心结论，包含当前方向判断和最佳操作建议，不超过120字",
+  "detail": "800-1500字的完整深度分析报告，按以下结构：\n\n📊 技术面分析\n（趋势判断、均线分析、支撑阻力、形态识别、量价关系）\n\n📈 基本面研判\n（历史区间、市场情绪、宏观影响）\n\n💰 交易建议\n◆ 短线（1-3天）：方向XX，入场XX，止盈XX，止损XX，盈亏比X:X\n◆ 中线（1-2周）：方向XX，入场XX，止盈XX，止损XX，盈亏比X:X\n◆ 长线（1月+）：方向XX，入场XX，止盈XX，止损XX，盈亏比X:X\n（如果当前不适合入场，明确说等到哪个价位再操作）\n\n⚠️ 风险提示\n（关键风险点和注意事项）"
+}`, name, code, assetType, market, priceSummary, multiKlineSummary, actionLabel)
+}
+
+// buildAnalysisPrompt — legacy wrapper for backward compatibility
+func (h *StockHandler) buildAnalysisPrompt(analysisType, name, code, market, klineSummary, priceSummary string) string {
+	return h.buildComprehensiveAnalysisPrompt(name, code, market, klineSummary, priceSummary)
+}
+
+// GetAnalysisConclusion — GET /api/v1/stocks/analysis/conclusion
+// Returns the overall bullish/bearish conclusion aggregated from all analysis types.
+// This is a lightweight endpoint that checks cache for existing analysis.
+func (h *StockHandler) GetAnalysisConclusion(c *gin.Context) {
+	code := c.Query("code")
+	market := c.DefaultQuery("market", "a_share")
+	name := c.Query("name")
+	priceSummary := c.Query("price_summary")
+	klineSummary := c.Query("kline_summary")
+
+	if code == "" || name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "code and name are required"})
+		return
+	}
+
+	// Check if we have cached analysis — prefer comprehensive
+	key := getAnalysisCacheKey(code, market)
+	analysisMemCacheMu.RLock()
+	entry, ok := analysisMemCache[key]
+	analysisMemCacheMu.RUnlock()
+
+	if ok && time.Since(entry.timestamp) <= analysisCacheTTL {
+		// Prefer comprehensive analysis
+		if comp, exists := entry.data["comprehensive"]; exists && comp.Detail != "" {
+			c.JSON(http.StatusOK, gin.H{
+				"conclusion": comp.Conclusion,
+				"summary":    comp.Summary,
+				"cached":     true,
+			})
+			return
+		}
+	}
+
+	if ok && time.Since(entry.timestamp) <= analysisCacheTTL && len(entry.data) >= 3 {
+		// Aggregate existing analyses
+		bullish, bearish := 0, 0
+		for _, a := range entry.data {
+			switch a.Conclusion {
+			case "bullish":
+				bullish++
+			case "bearish":
+				bearish++
+			}
+		}
+		conclusion := "neutral"
+		if bullish > bearish {
+			conclusion = "bullish"
+		} else if bearish > bullish {
+			conclusion = "bearish"
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"conclusion": conclusion,
+			"bullish":    bullish,
+			"bearish":    bearish,
+			"neutral":    len(entry.data) - bullish - bearish,
+			"cached":     true,
+		})
+		return
+	}
+
+	// No cached analysis — generate a quick overall conclusion
+	if h.llmClient == nil {
+		c.JSON(http.StatusOK, gin.H{"conclusion": "neutral", "cached": false})
+		return
+	}
+
+	isCrypto := market == "crypto"
+	var actionLabel string
+	if isCrypto {
+		actionLabel = "做多/做空"
+	} else {
+		actionLabel = "买入/卖出"
+	}
+
+	prompt := fmt.Sprintf(`你是专业金融分析师。对"%s"（%s，%s）做一个快速综合判断。
+
+行情数据：%s
+K线摘要：%s
+
+综合技术面、走势和量价关系，给出%s建议。
+严格按JSON格式返回：
+{"conclusion":"bullish/bearish/neutral","summary":"50-100字综合判断"}`, name, code, market, priceSummary, klineSummary, actionLabel)
+
+	// Acquire LLM semaphore to limit concurrent DeepSeek requests
+	select {
+	case h.llmSem <- struct{}{}:
+		// acquired
+	case <-c.Request.Context().Done():
+		c.JSON(http.StatusOK, gin.H{"conclusion": "neutral", "cached": false})
+		return
+	}
+	defer func() { <-h.llmSem }()
+
+	aiCtx, aiCancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+	defer aiCancel()
+
+	resp, err := h.llmClient.CreateChatCompletion(aiCtx, llm.ChatCompletionRequest{
+		Model: "deepseek-chat",
+		Messages: []llm.ChatMessage{
+			{Role: "system", Content: "你是金融分析助手，只返回JSON。"},
+			{Role: "user", Content: prompt},
+		},
+		Temperature: 0.3,
+		MaxTokens:   500,
+	})
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"conclusion": "neutral", "cached": false})
+		return
+	}
+
+	content := strings.TrimSpace(resp.Content)
+	content = strings.TrimPrefix(content, "```json")
+	content = strings.TrimPrefix(content, "```")
+	content = strings.TrimSuffix(content, "```")
+	content = strings.TrimSpace(content)
+
+	var result struct {
+		Conclusion string `json:"conclusion"`
+		Summary    string `json:"summary"`
+	}
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		c.JSON(http.StatusOK, gin.H{"conclusion": "neutral", "cached": false})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"conclusion": result.Conclusion,
+		"summary":    result.Summary,
+		"cached":     false,
+	})
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Batch Analysis Conclusion — POST /api/v1/stocks/analysis/batch-conclusion
+// ──────────────────────────────────────────────────────────────────────────────
+// Called when user enters a market section. Generates AI analysis conclusions
+// for ALL stocks (indices + watchlist) in parallel. Results are cached.
+
+type BatchAnalysisRequest struct {
+	Stocks []BatchAnalysisStock `json:"stocks"`
+}
+
+type BatchAnalysisStock struct {
+	Code         string `json:"code"`
+	Name         string `json:"name"`
+	Market       string `json:"market"`
+	KlineSummary string `json:"kline_summary"`
+	PriceSummary string `json:"price_summary"`
+}
+
+type BatchAnalysisConclusionResult struct {
+	Code       string `json:"code"`
+	Market     string `json:"market"`
+	Conclusion string `json:"conclusion"`
+	Summary    string `json:"summary"`
+}
+
+func (h *StockHandler) BatchAnalysisConclusion(c *gin.Context) {
+	var req BatchAnalysisRequest
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Stocks) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "stocks array is required"})
+		return
+	}
+
+	// Cap at 20 stocks per request
+	if len(req.Stocks) > 20 {
+		req.Stocks = req.Stocks[:20]
+	}
+
+	results := make([]BatchAnalysisConclusionResult, len(req.Stocks))
+	var wg sync.WaitGroup
+
+	for i, stock := range req.Stocks {
+		if stock.Market == "" {
+			stock.Market = "a_share"
+		}
+
+		// Check cache first — prefer comprehensive analysis
+		key := getAnalysisCacheKey(stock.Code, stock.Market)
+		analysisMemCacheMu.RLock()
+		entry, ok := analysisMemCache[key]
+		analysisMemCacheMu.RUnlock()
+
+		if ok && time.Since(entry.timestamp) <= analysisCacheTTL {
+			if comp, exists := entry.data["comprehensive"]; exists && comp.Detail != "" {
+				results[i] = BatchAnalysisConclusionResult{
+					Code: stock.Code, Market: stock.Market,
+					Conclusion: comp.Conclusion, Summary: comp.Summary,
+				}
+				continue
+			}
+		}
+
+		if ok && time.Since(entry.timestamp) <= analysisCacheTTL && len(entry.data) >= 3 {
+			// Aggregate from cached analysis types
+			bullish, bearish := 0, 0
+			for _, a := range entry.data {
+				switch a.Conclusion {
+				case "bullish":
+					bullish++
+				case "bearish":
+					bearish++
+				}
+			}
+			conclusion := "neutral"
+			if bullish > bearish {
+				conclusion = "bullish"
+			} else if bearish > bullish {
+				conclusion = "bearish"
+			}
+			results[i] = BatchAnalysisConclusionResult{
+				Code: stock.Code, Market: stock.Market,
+				Conclusion: conclusion, Summary: "已缓存",
+			}
+			continue
+		}
+
+		// Need LLM — run in parallel
+		if h.llmClient == nil {
+			results[i] = BatchAnalysisConclusionResult{
+				Code: stock.Code, Market: stock.Market,
+				Conclusion: "neutral", Summary: "",
+			}
+			continue
+		}
+
+		wg.Add(1)
+		go func(idx int, s BatchAnalysisStock) {
+			defer wg.Done()
+
+			isCrypto := s.Market == "crypto"
+			var actionLabel string
+			if isCrypto {
+				actionLabel = "做多/做空"
+			} else {
+				actionLabel = "买入/卖出"
+			}
+
+			prompt := fmt.Sprintf(`你是专业金融分析师。对"%s"（%s，%s）做一个快速综合判断。
+行情数据：%s
+K线摘要：%s
+综合技术面、走势和量价关系，给出%s建议。
+严格按JSON格式返回：{"conclusion":"bullish或bearish或neutral","summary":"50-100字综合判断"}`,
+				s.Name, s.Code, s.Market, s.PriceSummary, s.KlineSummary, actionLabel)
+
+			aiCtx, aiCancel := context.WithTimeout(c.Request.Context(), 25*time.Second)
+			defer aiCancel()
+
+			resp, err := h.llmClient.CreateChatCompletion(aiCtx, llm.ChatCompletionRequest{
+				Model: "deepseek-chat",
+				Messages: []llm.ChatMessage{
+					{Role: "system", Content: "你是金融分析助手，只返回JSON。"},
+					{Role: "user", Content: prompt},
+				},
+				Temperature: 0.3,
+				MaxTokens:   500,
+			})
+			if err != nil {
+				results[idx] = BatchAnalysisConclusionResult{
+					Code: s.Code, Market: s.Market,
+					Conclusion: "neutral", Summary: "",
+				}
+				return
+			}
+
+			content := strings.TrimSpace(resp.Content)
+			content = strings.TrimPrefix(content, "```json")
+			content = strings.TrimPrefix(content, "```")
+			content = strings.TrimSuffix(content, "```")
+			content = strings.TrimSpace(content)
+
+			var parsed struct {
+				Conclusion string `json:"conclusion"`
+				Summary    string `json:"summary"`
+			}
+			if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+				results[idx] = BatchAnalysisConclusionResult{
+					Code: s.Code, Market: s.Market,
+					Conclusion: "neutral", Summary: "",
+				}
+				return
+			}
+
+			results[idx] = BatchAnalysisConclusionResult{
+				Code: s.Code, Market: s.Market,
+				Conclusion: parsed.Conclusion, Summary: parsed.Summary,
+			}
+		}(i, stock)
+	}
+
+	wg.Wait()
+	c.JSON(http.StatusOK, results)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Batch Enhance Analysis — POST /api/v1/stocks/analysis/batch-enhance
+// ──────────────────────────────────────────────────────────────────────────────
+// Called when user enters the app or a market section. For each stock, generates
+// a single comprehensive analysis (combining tech/fundamental/multi-timeframe trading).
+// The backend fetches K-line data internally. Returns 202 Accepted immediately.
+
+type BatchEnhanceRequest struct {
+	Stocks []BatchEnhanceStock `json:"stocks"`
+}
+
+type BatchEnhanceStock struct {
+	Code         string `json:"code"`
+	Name         string `json:"name"`
+	Market       string `json:"market"`
+	KlineSummary string `json:"kline_summary"`  // optional fallback
+	PriceSummary string `json:"price_summary"`  // optional fallback
+}
+
+func (h *StockHandler) BatchEnhanceAnalysis(c *gin.Context) {
+	var req BatchEnhanceRequest
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Stocks) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "stocks array is required"})
+		return
+	}
+
+	// Cap at 10 stocks per request
+	if len(req.Stocks) > 10 {
+		req.Stocks = req.Stocks[:10]
+	}
+
+	if h.llmClient == nil {
+		c.JSON(http.StatusOK, gin.H{"status": "skipped", "reason": "llm_unavailable"})
+		return
+	}
+
+	// Filter out stocks that already have fresh comprehensive analysis
+	var uncached []BatchEnhanceStock
+	for _, stock := range req.Stocks {
+		if stock.Market == "" {
+			stock.Market = "a_share"
+		}
+		if cached, ok := getAnalysisFromMemCache(stock.Code, stock.Market, "comprehensive"); ok && cached.Detail != "" {
+			continue
+		}
+		uncached = append(uncached, stock)
+	}
+
+	if len(uncached) == 0 {
+		c.JSON(http.StatusOK, gin.H{"status": "all_cached", "count": len(req.Stocks)})
+		return
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"status":     "processing",
+		"total":      len(req.Stocks),
+		"to_process": len(uncached),
+		"cached":     len(req.Stocks) - len(uncached),
+	})
+
+	// Background: one comprehensive analysis per stock
+	go func() {
+		sem := make(chan struct{}, 4) // limit to 4 parallel LLM calls
+		var wg sync.WaitGroup
+
+		for _, stock := range uncached {
+			// Skip if already cached (race check)
+			if cached, ok := getAnalysisFromMemCache(stock.Code, stock.Market, "comprehensive"); ok && cached.Detail != "" {
+				continue
+			}
+
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(s BatchEnhanceStock) {
+				defer wg.Done()
+				defer func() { <-sem }()
+
+				// Fetch multi-timeframe K-line data from backend
+				multiKlineSummary := h.fetchMultiTimeframeKLineSummary(s.Code, s.Market)
+				if multiKlineSummary == "" && s.KlineSummary != "" {
+					multiKlineSummary = s.KlineSummary
+				}
+
+				prompt := h.buildComprehensiveAnalysisPrompt(s.Name, s.Code, s.Market, multiKlineSummary, s.PriceSummary)
+
+				aiCtx, aiCancel := context.WithTimeout(context.Background(), 60*time.Second)
+				defer aiCancel()
+
+				resp, err := h.llmClient.CreateChatCompletion(aiCtx, llm.ChatCompletionRequest{
+					Model: "deepseek-chat",
+					Messages: []llm.ChatMessage{
+						{Role: "system", Content: "你是顶级金融分析师和交易顾问。严格按要求只返回JSON格式数据。分析要专业、具体、有明确可操作性。必须给出精确的价格点位。"},
+						{Role: "user", Content: prompt},
+					},
+					Temperature: 0.3,
+					MaxTokens:   4000,
+				})
+				if err != nil {
+					h.logger.WithField("error", err).WithField("stock", s.Code).
+						Warn("Batch enhance: LLM call failed")
+					return
+				}
+
+				content := strings.TrimSpace(resp.Content)
+				content = strings.TrimPrefix(content, "```json")
+				content = strings.TrimPrefix(content, "```")
+				content = strings.TrimSuffix(content, "```")
+				content = strings.TrimSpace(content)
+
+				var result AnalysisResponse
+				if err := json.Unmarshal([]byte(content), &result); err != nil {
+					h.logger.WithField("error", err).WithField("stock", s.Code).
+						Warn("Batch enhance: failed to parse LLM response")
+					return
+				}
+				result.Type = "comprehensive"
+
+				setAnalysisToMemCache(s.Code, s.Market, "comprehensive", result)
+			}(stock)
+		}
+
+		wg.Wait()
+		h.logger.WithField("count", len(uncached)).Info("Batch comprehensive analysis completed")
+	}()
+}
+
+// GetCachedAnalysis — GET /api/v1/stocks/analysis/cached
+// Returns the cached comprehensive analysis for a given stock.
+func (h *StockHandler) GetCachedAnalysis(c *gin.Context) {
+	code := c.Query("code")
+	market := c.DefaultQuery("market", "a_share")
+
+	if code == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "code is required"})
+		return
+	}
+
+	// Check for comprehensive analysis
+	if cached, ok := getAnalysisFromMemCache(code, market, "comprehensive"); ok {
+		c.JSON(http.StatusOK, gin.H{
+			"cached":   true,
+			"analysis": cached,
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"cached": false, "analysis": nil})
 }

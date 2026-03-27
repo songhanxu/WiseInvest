@@ -19,6 +19,10 @@ struct StockDetailView: View {
     @State private var tradingStatus: MarketTradingHours.TradingStatus = .closed("已收盘")
     @State private var refreshTimer: Timer?
     @State private var selectedPeriod: StockDataService.KLinePeriod = .d1
+    /// Overall AI conclusion (bullish/bearish/neutral)
+    @State private var overallConclusion: AnalysisConclusion = .neutral
+    @State private var conclusionSummary: String = ""
+    @State private var isLoadingConclusion = false
     /// Monotonically increasing counter — each new quote request gets the next value.
     @State private var quoteCounter: UInt64 = 0
     /// High-water mark: the highest seq whose response has been accepted.
@@ -36,9 +40,14 @@ struct StockDetailView: View {
     @State private var klineRetryCount: Int = 0
     @State private var klineRetryTimer: Timer?
     private let klineMaxClientRetries = 3
+    /// State for the comprehensive analysis detail view (triggered by the CTA button)
+    @State private var showComprehensiveAnalysis = false
+    /// Cached comprehensive analysis item (from preload)
+    @State private var comprehensiveItem: AIAnalysisItem?
 
     private let stockService = StockDataService.shared
     private let preloadManager = PreloadManager.shared
+    private let wsClient = WebSocketClient.shared
 
     /// Use liveStock if available (refreshed from API), fallback to initial stock
     private var displayStock: Stock { liveStock ?? stock }
@@ -99,6 +108,9 @@ struct StockDetailView: View {
             newsTimeoutTimer?.invalidate()
             newsTimeoutTimer = nil
         }
+        .onReceive(wsClient.eventPublisher.receive(on: DispatchQueue.main)) { event in
+            handleWSQuoteEvent(event)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .newsEnhancementDidComplete)) { _ in
             // Background AI enhancement finished — refresh newsItems from cache
             // so that when user taps a NewsCard, the passed NewsItem already has analysis.
@@ -139,6 +151,39 @@ struct StockDetailView: View {
         }
         .sheet(item: $selectedNewsItem) { news in
             NewsDetailView(news: news, stockCode: stock.id, stockName: stock.name, stockMarket: market.rawValue, accentColor: market.accentColor)
+        }
+        .sheet(isPresented: $showComprehensiveAnalysis) {
+            ComprehensiveAnalysisView(
+                stock: displayStock,
+                market: market,
+                klineData: klineData,
+                accentColor: market.accentColor,
+                preloadedItem: comprehensiveItem
+            )
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .analysisEnhancementDidComplete)) { _ in
+            if let cached = preloadManager.getCachedAnalysis(stockId: stock.id, market: market),
+               let comp = cached.first(where: { $0.id == "comprehensive" && !$0.detail.isEmpty }) {
+                self.comprehensiveItem = comp
+                // Also update conclusion from the comprehensive item
+                if !comp.conclusion.isEmpty {
+                    self.overallConclusion = AnalysisConclusion(rawValue: comp.conclusion) ?? .neutral
+                }
+                if !comp.aiSummary.isEmpty {
+                    self.conclusionSummary = comp.aiSummary
+                    self.isLoadingConclusion = false
+                }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .analysisConclusionBatchDidComplete)) { _ in
+            // Batch analysis conclusions arrived — update if we don't have one yet
+            if let cached = preloadManager.getCachedAnalysisConclusion(stockId: stock.id, market: market) {
+                if self.overallConclusion == .neutral && self.conclusionSummary.isEmpty {
+                    self.overallConclusion = AnalysisConclusion(rawValue: cached.conclusion) ?? .neutral
+                    self.conclusionSummary = cached.summary
+                    self.isLoadingConclusion = false
+                }
+            }
         }
     }
 
@@ -316,10 +361,43 @@ struct StockDetailView: View {
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(.textPrimary)
             Spacer()
+            // Overall conclusion badge
+            if !analysisItems.isEmpty {
+                conclusionBadge
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
         .background(Color.primaryBackground)
+    }
+
+    /// Conclusion badge showing bullish/bearish/neutral
+    private var conclusionBadge: some View {
+        HStack(spacing: 4) {
+            if isLoadingConclusion {
+                ProgressView()
+                    .scaleEffect(0.6)
+                    .frame(width: 12, height: 12)
+            } else {
+                Image(systemName: overallConclusion.icon)
+                    .font(.system(size: 11))
+            }
+            Text(overallConclusion.label)
+                .font(.system(size: 11, weight: .semibold))
+        }
+        .foregroundColor(conclusionColor)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(conclusionColor.opacity(0.12))
+        .cornerRadius(6)
+    }
+
+    private var conclusionColor: Color {
+        switch overallConclusion {
+        case .bullish: return .accentGreen
+        case .bearish: return Color(hex: "E53935")
+        case .neutral: return .textSecondary
+        }
     }
 
     /// AI analysis content below sticky header
@@ -327,18 +405,67 @@ struct StockDetailView: View {
         Group {
             if isLoadingKline && analysisItems.isEmpty {
                 VStack(spacing: 10) {
-                    ForEach(0..<3, id: \.self) { _ in
-                        AnalysisCardSkeleton()
-                    }
+                    AnalysisCardSkeleton()
+                    AnalysisCardSkeleton()
+                    AnalysisCardSkeleton()
                 }
                 .padding(.horizontal, 16)
             } else if !analysisItems.isEmpty {
-                VStack(spacing: 10) {
+                // Conclusion summary banner
+                if !conclusionSummary.isEmpty {
+                    HStack(spacing: 8) {
+                        Image(systemName: overallConclusion.icon)
+                            .font(.system(size: 16))
+                            .foregroundColor(conclusionColor)
+                        Text(conclusionSummary)
+                            .font(.system(size: 13))
+                            .foregroundColor(.textSecondary)
+                            .lineLimit(2)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(conclusionColor.opacity(0.06))
+                    .cornerRadius(10)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+                }
+
+                // Three quick analysis cards (tech / trend / volume)
+                VStack(spacing: 8) {
                     ForEach(analysisItems) { item in
-                        AnalysisCard(item: item)
+                        QuickAnalysisCard(item: item)
                     }
                 }
                 .padding(.horizontal, 16)
+
+                // "View AI Comprehensive Analysis" CTA button
+                Button(action: { showComprehensiveAnalysis = true }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "brain.head.profile")
+                            .font(.system(size: 15))
+                            .foregroundColor(.white)
+                        Text("点击查看 AI 综合分析")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.white)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .background(
+                        LinearGradient(
+                            colors: [market.accentColor, market.accentColor.opacity(0.7)],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .cornerRadius(12)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
             }
         }
         .padding(.bottom, 8)
@@ -469,6 +596,19 @@ struct StockDetailView: View {
 
         // Check watchlist status from the parent view's watchlist data
         isInWatchlist = watchlistIDs.contains(stock.id)
+
+        // Load preloaded analysis conclusion immediately (before K-line finishes)
+        if let cached = preloadManager.getCachedAnalysisConclusion(stockId: stock.id, market: market) {
+            self.overallConclusion = AnalysisConclusion(rawValue: cached.conclusion) ?? .neutral
+            self.conclusionSummary = cached.summary
+            self.isLoadingConclusion = false
+        }
+
+        // Load preloaded comprehensive analysis from cache
+        if let cachedItems = preloadManager.getCachedAnalysis(stockId: stock.id, market: market),
+           let comp = cachedItems.first(where: { $0.id == "comprehensive" && !$0.detail.isEmpty }) {
+            self.comprehensiveItem = comp
+        }
     }
 
     /// Load news data with smart preload-aware strategy:
@@ -584,7 +724,12 @@ struct StockDetailView: View {
 
             // Generate AI analysis only for daily data
             if self.selectedPeriod == .d1 {
-                self.analysisItems = Self.generateAnalysis(stock: self.displayStock, klineData: result.points)
+                let items = Self.generateAnalysis(stock: self.displayStock, klineData: result.points)
+                self.analysisItems = items
+                // Cache analysis items
+                self.preloadManager.updateAnalysisCache(stockId: self.stock.id, market: self.market, data: items)
+                // Fetch overall conclusion from AI
+                self.loadAnalysisConclusion(klineData: result.points)
             }
             // Background preload: immediately request more history data
             if result.points.count > 0 {
@@ -678,30 +823,56 @@ struct StockDetailView: View {
         .cornerRadius(8)
     }
 
-    // MARK: - Auto Refresh
+    // MARK: - Auto Refresh (WebSocket-based + HTTP fallback)
 
     private func startAutoRefresh() {
         tradingStatus = MarketTradingHours.tradingStatus(market: market)
 
-        guard let interval = MarketTradingHours.refreshInterval(market: market) else {
-            return
-        }
+        // Subscribe to real-time quote via WebSocket
+        wsClient.connect()
+        wsClient.subscribeQuote(market: market.rawValue, code: stock.id)
 
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
-            refreshQuote()
+        // Fallback: if WebSocket is down, use timer-based HTTP polling
+        if !wsClient.isConnected {
+            guard let interval = MarketTradingHours.refreshInterval(market: market) else {
+                return
+            }
+            refreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+                if wsClient.isConnected {
+                    // WebSocket reconnected — stop HTTP fallback
+                    refreshTimer?.invalidate()
+                    refreshTimer = nil
+                    return
+                }
+                refreshQuoteHTTP()
+            }
         }
     }
 
     private func stopAutoRefresh() {
         refreshTimer?.invalidate()
         refreshTimer = nil
+        wsClient.unsubscribeQuote(market: market.rawValue, code: stock.id)
     }
 
-    /// Lightweight refresh: update real-time stock quote AND sync the last K-line candle.
-    /// Uses high-water-mark to discard stale responses — any response with seq > current
-    /// high-water mark is accepted, advancing the mark. Multiple requests can be in-flight;
-    /// whichever arrives with a higher seq wins.
-    private func refreshQuote() {
+    /// Handle incoming WebSocket quote event — update live stock and sync K-line
+    private func handleWSQuoteEvent(_ event: WSEvent) {
+        switch event {
+        case .quote(let wsMarket, let code, let updatedStock):
+            guard wsMarket == market.rawValue, code == stock.id else { return }
+            // Update trading status
+            tradingStatus = MarketTradingHours.tradingStatus(market: market)
+            // Apply update
+            self.liveStock = updatedStock
+            self.syncKLineWithRealtimePrice(updatedStock)
+
+        default:
+            break
+        }
+    }
+
+    /// HTTP fallback: poll quote via HTTP when WebSocket is disconnected
+    private func refreshQuoteHTTP() {
         tradingStatus = MarketTradingHours.tradingStatus(market: market)
 
         // If market just closed, stop the timer
@@ -785,85 +956,581 @@ struct StockDetailView: View {
         }
     }
 
-    /// Generate AI analysis items from real stock and K-line data
+    /// Generate 3 quick analysis cards (tech/trend/volume) from real stock and K-line data.
+    /// These are client-side summaries for instant display; the deep AI analysis comes from the backend.
     static func generateAnalysis(stock: Stock, klineData: [KLinePoint]) -> [AIAnalysisItem] {
-        var items: [AIAnalysisItem] = []
+        guard klineData.count >= 5 else { return [] }
 
-        // Technical analysis from K-line
-        if klineData.count >= 5 {
-            let recent5 = klineData.suffix(5)
-            let recent20 = klineData.suffix(min(20, klineData.count))
-            let ma5 = recent5.reduce(0.0) { $0 + $1.close } / Double(recent5.count)
-            let ma20 = recent20.reduce(0.0) { $0 + $1.close } / Double(recent20.count)
-            let trend = stock.currentPrice > ma5 ? "短期均线上方" : "短期均线下方"
-            let maTrend = ma5 > ma20 ? "多头排列" : "空头排列"
+        let recent5 = klineData.suffix(5)
+        let recent20 = klineData.suffix(min(20, klineData.count))
+        let ma5 = recent5.reduce(0.0) { $0 + $1.close } / Double(recent5.count)
+        let ma20 = recent20.reduce(0.0) { $0 + $1.close } / Double(recent20.count)
+        let trend = stock.currentPrice > ma5 ? "短期均线上方" : "短期均线下方"
+        let maTrend = ma5 > ma20 ? "多头排列" : "空头排列"
 
-            let support = klineData.suffix(10).map { $0.low }.min() ?? stock.low
-            let resistance = klineData.suffix(10).map { $0.high }.max() ?? stock.high
+        let support = klineData.suffix(10).map { $0.low }.min() ?? stock.low
+        let resistance = klineData.suffix(10).map { $0.high }.max() ?? stock.high
 
-            items.append(AIAnalysisItem(
-                id: "tech",
-                title: "技术面分析",
-                icon: "chart.xyaxis.line",
-                content: "\(stock.name)当前价\(stock.priceText)，处于\(trend)，均线\(maTrend)。近期支撑位\(String(format: "%.2f", support))，阻力位\(String(format: "%.2f", resistance))。"
-            ))
+        let periodChange = klineData.count > 1 ? ((klineData.last!.close - klineData.first!.open) / klineData.first!.open) * 100 : 0
+        let direction = periodChange >= 0 ? "上涨" : "下跌"
+
+        let avgVol = recent5.reduce(0.0) { $0 + $1.volume } / 5.0
+        let currentVol = klineData.last?.volume ?? 0
+        let volRatio = avgVol > 0 ? currentVol / avgVol : 1.0
+        let volDesc = volRatio > 1.5 ? "放量" : (volRatio < 0.7 ? "缩量" : "量能平稳")
+
+        // 1. 技术面分析卡片
+        let techContent = "\(stock.name)当前价\(stock.priceText)，处于\(trend)，均线\(maTrend)。" +
+            "MA5=\(String(format: "%.2f", ma5))，MA20=\(String(format: "%.2f", ma20))。" +
+            "支撑位\(String(format: "%.2f", support))，阻力位\(String(format: "%.2f", resistance))。"
+
+        // 2. 趋势分析卡片
+        let trendContent = "近\(klineData.count)日累计\(direction)\(String(format: "%.2f", abs(periodChange)))%。" +
+            "当前价格处于\(trend)，均线呈\(maTrend)，\(ma5 > ma20 ? "多头趋势延续" : "空头压力较大")。"
+
+        // 3. 量能分析卡片
+        let volContent = "当前\(volDesc)，量比\(String(format: "%.2f", volRatio))。" +
+            "5日平均成交量\(String(format: "%.1f", avgVol))，" +
+            "最新成交量\(String(format: "%.1f", currentVol))，" +
+            "\(volRatio > 1.5 ? "资金活跃度较高" : (volRatio < 0.7 ? "市场观望情绪浓厚" : "资金参与度适中"))。"
+
+        return [
+            AIAnalysisItem(id: "tech", title: "技术面", icon: "chart.xyaxis.line", content: techContent),
+            AIAnalysisItem(id: "trend", title: "趋势研判", icon: "arrow.up.right.circle", content: trendContent),
+            AIAnalysisItem(id: "volume", title: "量能分析", icon: "chart.bar", content: volContent),
+        ]
+    }
+
+    // MARK: - AI Analysis Conclusion
+
+    /// Build a compact summary of K-line data for the AI backend
+    static func buildKLineSummary(klineData: [KLinePoint]) -> String {
+        guard !klineData.isEmpty else { return "无K线数据" }
+        let count = klineData.count
+        let last = klineData.last!
+        let first = klineData.first!
+        let recent5 = klineData.suffix(min(5, count))
+        let recent20 = klineData.suffix(min(20, count))
+        let ma5 = recent5.reduce(0.0) { $0 + $1.close } / Double(recent5.count)
+        let ma20 = recent20.reduce(0.0) { $0 + $1.close } / Double(recent20.count)
+        let periodHigh = klineData.map { $0.high }.max() ?? 0
+        let periodLow = klineData.map { $0.low }.min() ?? 0
+        let periodChange = count > 1 ? ((last.close - first.open) / first.open) * 100 : 0
+        let avgVol = recent5.reduce(0.0) { $0 + $1.volume } / Double(recent5.count)
+        let lastVol = last.volume
+        let volRatio = avgVol > 0 ? lastVol / avgVol : 1.0
+
+        return "共\(count)根K线，最新收盘\(String(format: "%.2f", last.close))，区间涨跌\(String(format: "%.2f", periodChange))%，MA5=\(String(format: "%.2f", ma5))，MA20=\(String(format: "%.2f", ma20))，区间最高\(String(format: "%.2f", periodHigh))，区间最低\(String(format: "%.2f", periodLow))，量比\(String(format: "%.2f", volRatio))"
+    }
+
+    /// Build a compact summary of current price data
+    static func buildPriceSummary(stock: Stock) -> String {
+        return "当前价\(stock.priceText)，涨跌\(stock.changeText)（\(stock.changePercentText)），高\(String(format: "%.2f", stock.high))，低\(String(format: "%.2f", stock.low))，量\(String(format: "%.1f亿", stock.volume))"
+    }
+
+    /// Load the overall bullish/bearish conclusion
+    private func loadAnalysisConclusion(klineData: [KLinePoint]) {
+        // Check preloaded cache first (from batch preload when entering market section)
+        if let cached = preloadManager.getCachedAnalysisConclusion(stockId: stock.id, market: market) {
+            self.overallConclusion = AnalysisConclusion(rawValue: cached.conclusion) ?? .neutral
+            self.conclusionSummary = cached.summary
+            self.isLoadingConclusion = false
+            return
         }
 
-        // Price trend
-        if let first = klineData.first, let last = klineData.last, klineData.count > 1 {
-            let periodChange = ((last.close - first.open) / first.open) * 100
-            let direction = periodChange >= 0 ? "上涨" : "下跌"
-            items.append(AIAnalysisItem(
-                id: "trend",
-                title: "走势概览",
-                icon: "arrow.up.right.circle",
-                content: "近\(klineData.count)个交易日累计\(direction)\(String(format: "%.2f", abs(periodChange)))%。当日涨跌\(stock.changeText)（\(stock.changePercentText)），成交量\(String(format: "%.1f", stock.volume))亿。"
-            ))
-        }
+        isLoadingConclusion = true
+        let klineSummary = Self.buildKLineSummary(klineData: klineData)
+        let priceSummary = Self.buildPriceSummary(stock: displayStock)
 
-        // Volume analysis
-        if klineData.count >= 5 {
-            let avgVol = klineData.suffix(5).reduce(0.0) { $0 + $1.volume } / 5.0
-            let currentVol = klineData.last?.volume ?? 0
-            let volRatio = avgVol > 0 ? currentVol / avgVol : 1.0
-            let volDesc = volRatio > 1.5 ? "明显放量" : (volRatio < 0.7 ? "缩量" : "正常水平")
-            items.append(AIAnalysisItem(
-                id: "volume",
-                title: "成交量分析",
-                icon: "chart.bar",
-                content: "当前成交量处于近5日\(volDesc)状态（量比\(String(format: "%.2f", volRatio))）。\(volRatio > 1.5 ? "放量可能预示趋势加速或反转。" : volRatio < 0.7 ? "缩量表明市场观望情绪浓厚。" : "成交量平稳，无明显异动。")"
-            ))
+        stockService.getAnalysisConclusion(
+            code: stock.id, market: market.rawValue, name: stock.name,
+            klineSummary: klineSummary, priceSummary: priceSummary
+        ) { conclusion, summary in
+            self.isLoadingConclusion = false
+            self.overallConclusion = AnalysisConclusion(rawValue: conclusion) ?? .neutral
+            self.conclusionSummary = summary
+            // Cache for future use
+            self.preloadManager.updateAnalysisConclusionCache(
+                stockId: self.stock.id, market: self.market,
+                conclusion: conclusion, summary: summary
+            )
         }
-
-        return items
     }
 }
 
-// MARK: - Analysis Card
+// MARK: - Quick Analysis Card (compact, non-tappable)
 
-private struct AnalysisCard: View {
+private struct QuickAnalysisCard: View {
     let item: AIAnalysisItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
                 Image(systemName: item.icon)
-                    .font(.system(size: 14))
+                    .font(.system(size: 13))
                     .foregroundColor(.accentBlue)
                 Text(item.title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.textPrimary)
             }
 
             Text(item.content)
-                .font(.system(size: 13))
+                .font(.system(size: 12))
                 .foregroundColor(.textSecondary)
-                .lineSpacing(4)
+                .lineSpacing(3)
+                .lineLimit(3)
         }
-        .padding(14)
+        .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondaryBackground)
-        .cornerRadius(14)
+        .cornerRadius(10)
+    }
+}
+
+// MARK: - Comprehensive Analysis View (Full Screen with Markdown)
+
+struct ComprehensiveAnalysisView: View {
+    let stock: Stock
+    let market: Market
+    let klineData: [KLinePoint]
+    var accentColor: Color = .accentBlue
+    /// Preloaded comprehensive item (may have detail already)
+    var preloadedItem: AIAnalysisItem? = nil
+    @Environment(\.dismiss) private var dismiss
+    @State private var isLoading = false
+    @State private var detailText: String = ""
+    @State private var summaryText: String = ""
+    @State private var conclusion: AnalysisConclusion = .neutral
+    @State private var errorMessage: String = ""
+    @State private var retryCount: Int = 0
+
+    var body: some View {
+        ZStack {
+            Color.primaryBackground.ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Header
+                HStack(spacing: 12) {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundColor(.textPrimary)
+                    }
+
+                    Image(systemName: "brain.head.profile")
+                        .font(.system(size: 16))
+                        .foregroundColor(accentColor)
+                    Text("AI 综合分析")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundColor(.textPrimary)
+
+                    Spacer()
+
+                    // Conclusion badge
+                    if !isLoading && !detailText.isEmpty {
+                        conclusionBadge
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(Color.secondaryBackground)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 20) {
+                        // Stock info
+                        HStack(spacing: 12) {
+                            Text(stock.name)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundColor(.textPrimary)
+                            Text(stock.symbol)
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundColor(.textTertiary)
+                            Spacer()
+                            Text(stock.priceText)
+                                .font(.system(size: 16, weight: .bold, design: .monospaced))
+                                .foregroundColor(stock.isUp ? .accentGreen : Color(hex: "E53935"))
+                            Text(stock.changePercentText)
+                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                                .foregroundColor(stock.isUp ? .accentGreen : Color(hex: "E53935"))
+                        }
+
+                        Rectangle()
+                            .fill(Color.white.opacity(0.08))
+                            .frame(height: 1)
+
+                        // AI Detailed Analysis (Markdown rendered)
+                        VStack(alignment: .leading, spacing: 12) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(accentColor)
+                                Text("AI 深度分析")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.textPrimary)
+                            }
+
+                            if isLoading {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(0..<10, id: \.self) { _ in
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .fill(Color.white.opacity(0.06))
+                                            .frame(height: 14)
+                                            .shimmer()
+                                    }
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .fill(Color.white.opacity(0.06))
+                                        .frame(width: 180, height: 14)
+                                        .shimmer()
+                                }
+                            } else if !detailText.isEmpty {
+                                // Render detail with Markdown support
+                                AnalysisMarkdownView(content: detailText)
+                            } else {
+                                // Failed state
+                                VStack(spacing: 8) {
+                                    Text(errorMessage.isEmpty ? "分析加载失败" : errorMessage)
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.textTertiary)
+                                        .multilineTextAlignment(.center)
+                                    if retryCount < 3 {
+                                        Button(action: { loadDetailAnalysis() }) {
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "arrow.clockwise")
+                                                    .font(.system(size: 12))
+                                                Text("重试")
+                                                    .font(.system(size: 13, weight: .medium))
+                                            }
+                                            .foregroundColor(accentColor)
+                                        }
+                                    } else {
+                                        Text("多次重试失败，请稍后再试")
+                                            .font(.system(size: 12))
+                                            .foregroundColor(.textTertiary)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 20)
+                            }
+                        }
+                        .padding(16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(accentColor.opacity(0.06))
+                        .cornerRadius(14)
+
+                        // Conclusion section
+                        if !isLoading && !detailText.isEmpty {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "chart.bar.xaxis")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(accentColor)
+                                    Text("AI 综合研判")
+                                        .font(.system(size: 16, weight: .semibold))
+                                        .foregroundColor(.textPrimary)
+                                }
+
+                                HStack(spacing: 12) {
+                                    conclusionIndicator
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("AI 分析综合判断")
+                                            .font(.system(size: 13))
+                                            .foregroundColor(.textSecondary)
+                                        Text(conclusionDescription)
+                                            .font(.system(size: 14, weight: .medium))
+                                            .foregroundColor(conclusionDisplayColor)
+                                    }
+                                }
+                            }
+                            .padding(16)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.secondaryBackground)
+                            .cornerRadius(14)
+                        }
+
+                        // Disclaimer
+                        if !isLoading && !detailText.isEmpty {
+                            Text("⚠️ 以上内容由 AI 自动生成，仅供参考，不构成投资建议。投资有风险，决策需谨慎。")
+                                .font(.system(size: 11))
+                                .foregroundColor(.textTertiary)
+                                .padding(.horizontal, 4)
+                        }
+
+                        Spacer().frame(height: 40)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.top, 12)
+                }
+            }
+        }
+        .onAppear {
+            retryCount = 0
+            // Check if preloaded item already has detail
+            if let preloaded = preloadedItem, !preloaded.detail.isEmpty {
+                detailText = preloaded.detail
+                summaryText = preloaded.aiSummary
+                conclusion = AnalysisConclusion(rawValue: preloaded.conclusion) ?? .neutral
+                return
+            }
+            // Check PreloadManager cache
+            if let cachedItems = PreloadManager.shared.getCachedAnalysis(stockId: stock.id, market: market),
+               let cached = cachedItems.first(where: { $0.id == "comprehensive" && !$0.detail.isEmpty }) {
+                detailText = cached.detail
+                summaryText = cached.aiSummary
+                conclusion = AnalysisConclusion(rawValue: cached.conclusion) ?? .neutral
+                return
+            }
+            loadDetailAnalysis()
+        }
+    }
+
+    private func loadDetailAnalysis() {
+        isLoading = true
+        errorMessage = ""
+        retryCount += 1
+
+        // First try fetching from backend cache
+        StockDataService.shared.getCachedAnalysis(code: stock.id, market: market.rawValue) { result in
+            if let cached = result, !cached.detail.isEmpty {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    self.conclusion = AnalysisConclusion(rawValue: cached.conclusion) ?? .neutral
+                    self.summaryText = cached.summary
+                    self.detailText = cached.detail
+                    self.isLoading = false
+                    self.errorMessage = ""
+                }
+                PreloadManager.shared.updateSingleAnalysis(
+                    stockId: stock.id, market: market, analysisId: "comprehensive",
+                    conclusion: cached.conclusion, summary: cached.summary, detail: cached.detail
+                )
+                return
+            }
+            // Cache miss — call the enhance API
+            self.callEnhanceAPI()
+        }
+    }
+
+    private func callEnhanceAPI() {
+        StockDataService.shared.enhanceAnalysis(
+            code: stock.id, market: market.rawValue, name: stock.name
+        ) { conclusionStr, summary, detail in
+            if !detail.isEmpty {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    self.conclusion = AnalysisConclusion(rawValue: conclusionStr) ?? .neutral
+                    self.summaryText = summary
+                    self.detailText = detail
+                    self.isLoading = false
+                    self.errorMessage = ""
+                }
+                PreloadManager.shared.updateSingleAnalysis(
+                    stockId: stock.id, market: market, analysisId: "comprehensive",
+                    conclusion: conclusionStr, summary: summary, detail: detail
+                )
+            } else if self.retryCount <= 1 {
+                // First failure: auto-retry after 5s
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                    self.retryCount += 1
+                    StockDataService.shared.getCachedAnalysis(code: self.stock.id, market: self.market.rawValue) { result in
+                        if let cached = result, !cached.detail.isEmpty {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                self.conclusion = AnalysisConclusion(rawValue: cached.conclusion) ?? .neutral
+                                self.summaryText = cached.summary
+                                self.detailText = cached.detail
+                                self.isLoading = false
+                                self.errorMessage = ""
+                            }
+                            PreloadManager.shared.updateSingleAnalysis(
+                                stockId: self.stock.id, market: self.market, analysisId: "comprehensive",
+                                conclusion: cached.conclusion, summary: cached.summary, detail: cached.detail
+                            )
+                        } else {
+                            self.callEnhanceAPI()
+                        }
+                    }
+                }
+            } else {
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    self.conclusion = AnalysisConclusion(rawValue: conclusionStr) ?? .neutral
+                    self.summaryText = summary
+                    self.isLoading = false
+                    self.detailText = ""
+                    if !summary.isEmpty {
+                        self.errorMessage = summary
+                    } else {
+                        self.errorMessage = "AI 分析生成失败，请稍后重试"
+                    }
+                }
+            }
+        }
+    }
+
+    private var conclusionBadge: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(conclusionDisplayColor)
+                .frame(width: 6, height: 6)
+            Text(conclusion.label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(conclusionDisplayColor)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(conclusionDisplayColor.opacity(0.12))
+        .cornerRadius(8)
+    }
+
+    private var conclusionIndicator: some View {
+        ZStack {
+            Circle()
+                .stroke(conclusionDisplayColor.opacity(0.3), lineWidth: 3)
+                .frame(width: 48, height: 48)
+            Circle()
+                .trim(from: 0, to: conclusionProgress)
+                .stroke(conclusionDisplayColor, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                .frame(width: 48, height: 48)
+                .rotationEffect(.degrees(-90))
+            Image(systemName: conclusion.icon)
+                .font(.system(size: 18))
+                .foregroundColor(conclusionDisplayColor)
+        }
+    }
+
+    private var conclusionDisplayColor: Color {
+        switch conclusion {
+        case .bullish: return .accentGreen
+        case .bearish: return Color(hex: "E53935")
+        case .neutral: return .textSecondary
+        }
+    }
+
+    private var conclusionProgress: CGFloat {
+        switch conclusion {
+        case .bullish: return 0.85
+        case .bearish: return 0.75
+        case .neutral: return 0.5
+        }
+    }
+
+    private var conclusionDescription: String {
+        switch conclusion {
+        case .bullish: return "看多 — 建议关注做多机会"
+        case .bearish: return "看空 — 建议谨慎或关注做空"
+        case .neutral: return "中性 — 观望为主"
+        }
+    }
+}
+
+// MARK: - Analysis Markdown View (renders AI analysis with markdown)
+
+/// Custom markdown renderer for analysis content — uses the same approach as MarkdownContentView
+/// but with styles adjusted for the analysis context (lighter background, smaller fonts)
+struct AnalysisMarkdownView: View {
+    let content: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(content.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+                AnalysisMarkdownLine(line: line)
+            }
+        }
+    }
+}
+
+/// Single line markdown renderer for analysis content
+private struct AnalysisMarkdownLine: View {
+    let line: String
+
+    private var t: String { line.trimmingCharacters(in: .whitespaces) }
+
+    var body: some View {
+        Group {
+            if t.isEmpty {
+                Color.clear.frame(height: 8)
+            } else if t.hasPrefix("#### ") {
+                Text(LocalizedStringKey(String(t.dropFirst(5))))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 8)
+                    .padding(.bottom, 2)
+            } else if t.hasPrefix("### ") {
+                Text(LocalizedStringKey(String(t.dropFirst(4))))
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 10)
+                    .padding(.bottom, 2)
+            } else if t.hasPrefix("## ") {
+                Text(LocalizedStringKey(String(t.dropFirst(3))))
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 12)
+                    .padding(.bottom, 2)
+            } else if t.hasPrefix("# ") {
+                Text(LocalizedStringKey(String(t.dropFirst(2))))
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 12)
+                    .padding(.bottom, 4)
+            } else if t.hasPrefix("- ") || t.hasPrefix("* ") {
+                HStack(alignment: .top, spacing: 6) {
+                    Text("•")
+                        .font(.system(size: 13))
+                        .foregroundColor(.textTertiary)
+                        .frame(width: 10, alignment: .center)
+                        .padding(.top, 1)
+                    Text(LocalizedStringKey(String(t.dropFirst(2))))
+                        .font(.system(size: 14))
+                        .foregroundColor(.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineSpacing(4)
+                }
+                .padding(.vertical, 1)
+            } else if t.range(of: #"^\d+\. "#, options: .regularExpression) != nil,
+                      let dotIdx = t.firstIndex(of: ".") {
+                let num = String(t[t.startIndex..<dotIdx])
+                let content = String(t[t.index(dotIdx, offsetBy: 2)...])
+                HStack(alignment: .top, spacing: 6) {
+                    Text("\(num).")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.textTertiary)
+                        .frame(width: 18, alignment: .trailing)
+                    Text(LocalizedStringKey(content))
+                        .font(.system(size: 14))
+                        .foregroundColor(.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineSpacing(4)
+                }
+                .padding(.vertical, 1)
+            } else if t.hasPrefix("> ") {
+                HStack(alignment: .top, spacing: 8) {
+                    Rectangle()
+                        .fill(Color.accentBlue)
+                        .frame(width: 3)
+                        .cornerRadius(1.5)
+                    Text(LocalizedStringKey(String(t.dropFirst(2))))
+                        .font(.system(size: 13))
+                        .foregroundColor(.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineSpacing(4)
+                }
+                .padding(.vertical, 2)
+            } else if t.hasPrefix("---") || t.hasPrefix("***") {
+                Rectangle()
+                    .fill(Color.white.opacity(0.1))
+                    .frame(height: 1)
+                    .padding(.vertical, 6)
+            } else {
+                // Regular paragraph with inline markdown parsing
+                Text(LocalizedStringKey(t))
+                    .font(.system(size: 14))
+                    .foregroundColor(.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(5)
+                    .padding(.vertical, 1)
+            }
+        }
     }
 }
 

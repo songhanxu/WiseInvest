@@ -20,6 +20,10 @@ final class PreloadManager {
     private var quoteCache: [String: CachedData<Stock>] = [:]
     /// Cached news per stock (key = "\(market)_\(stockId)")
     private var newsCache: [String: CachedData<[NewsItem]>] = [:]
+    /// Cached AI analysis per stock (key = "\(market)_\(stockId)")
+    private var analysisCache: [String: CachedData<[AIAnalysisItem]>] = [:]
+    /// Cached AI analysis conclusion per stock (key = "\(market)_\(stockId)")
+    private var analysisConclusionCache: [String: CachedData<(conclusion: String, summary: String)>] = [:]
 
     /// Thread-safe access
     private let lock = NSLock()
@@ -35,6 +39,10 @@ final class PreloadManager {
 
     /// Track in-flight AI enhancement per news item (key = newsItemId)
     private var inFlightEnhance: Set<String> = []
+    /// Track in-flight batch analysis conclusion per market
+    private var inFlightBatchAnalysis: Set<String> = []
+    /// Track in-flight batch analysis enhance per market
+    private var inFlightBatchEnhance: Set<String> = []
 
     private init() {}
 
@@ -103,30 +111,34 @@ final class PreloadManager {
     }
 
     /// Preload watchlist for a specific market, then batch-preload news for all stocks.
+    /// Also triggers batch comprehensive analysis after watchlist arrives.
     private func preloadWatchlistAndNews(for market: Market) {
         let key = market.rawValue
         lock.lock()
         let hasFreshWatchlist = watchlistCache[key]?.isFresh(maxAge: watchlistTTL) ?? false
         let hasFreshNews = hasAllNewsFresh(for: market)
+        let cachedStocks = watchlistCache[key]?.data ?? []
         lock.unlock()
 
-        // If watchlist is fresh and all news are fresh, skip entirely
+        // Always trigger analysis for cached watchlist (even if news are fresh)
+        if hasFreshWatchlist && !cachedStocks.isEmpty {
+            batchPreloadAnalysisEnhance(stocks: cachedStocks, market: market)
+        }
+
+        // If watchlist is fresh and all news are fresh, skip news preload
         if hasFreshWatchlist && hasFreshNews {
             return
         }
 
         // If watchlist is fresh but news need refreshing, use cached watchlist
         if hasFreshWatchlist {
-            lock.lock()
-            let stocks = watchlistCache[key]?.data ?? []
-            lock.unlock()
-            if !stocks.isEmpty {
-                batchPreloadNews(stocks: stocks, market: market)
+            if !cachedStocks.isEmpty {
+                batchPreloadNews(stocks: cachedStocks, market: market)
             }
             return
         }
 
-        // Fetch watchlist, then batch news
+        // Fetch watchlist, then batch news + analysis
         lock.lock()
         if inFlightWatchlist.contains(key) {
             lock.unlock()
@@ -145,6 +157,8 @@ final class PreloadManager {
             // Immediately preload news for ALL watchlist stocks via batch API
             if !stocks.isEmpty {
                 self.batchPreloadNews(stocks: stocks, market: market)
+                // Trigger comprehensive AI analysis for all stocks
+                self.batchPreloadAnalysisEnhance(stocks: stocks, market: market)
             }
         }
     }
@@ -298,9 +312,9 @@ final class PreloadManager {
 
     // MARK: - Parallel Per-Item AI Enhancement
 
-    /// For each stock's cached news, fire off individual enhance requests in parallel.
-    /// Each news item that lacks analysis gets its own concurrent request.
-    /// When each completes, update the cache and post a notification immediately.
+    /// For each stock's cached news, fire off individual enhance requests with concurrency limit.
+    /// Each news item that lacks analysis gets its own request, but at most 3 run concurrently
+    /// to avoid overwhelming the DeepSeek LLM backend.
     private func enhanceAllCachedNews(stocks: [Stock], market: Market) {
         lock.lock()
         // Build a flat list of (stockId, stockName, newsItem) that need enhancement
@@ -319,50 +333,65 @@ final class PreloadManager {
 
         guard !itemsToEnhance.isEmpty else { return }
 
-        // Fire all enhance requests in parallel — each one is independent
+        // Limit concurrency to 3 to avoid DeepSeek overload
+        let newsSemaphore = DispatchSemaphore(value: 3)
+        let newsEnhanceQueue = DispatchQueue(label: "com.wiseinvest.news-enhance", qos: .utility)
+
         for entry in itemsToEnhance {
-            stockService.enhanceNewsItem(
-                newsID: entry.news.id,
-                code: entry.stockId,
-                market: market.rawValue,
-                name: entry.stockName,
-                title: entry.news.title,
-                summary: entry.news.summary,
-                source: entry.news.source
-            ) { [weak self] summary, analysis, sentimentStr in
-                guard let self = self else { return }
-                let sentiment = NewsSentiment(rawValue: sentimentStr) ?? entry.news.sentiment
+            newsEnhanceQueue.async {
+                newsSemaphore.wait()
+                let group = DispatchGroup()
+                group.enter()
 
-                self.lock.lock()
-                self.inFlightEnhance.remove(entry.news.id)
-
-                // Update the news item in cache
-                let cacheKey = "\(market.rawValue)_\(entry.stockId)"
-                if var cached = self.newsCache[cacheKey] {
-                    var updatedNews = cached.data
-                    if let idx = updatedNews.firstIndex(where: { $0.id == entry.news.id }) {
-                        let old = updatedNews[idx]
-                        updatedNews[idx] = NewsItem(
-                            id: old.id,
-                            title: old.title,
-                            source: old.source,
-                            time: old.time,
-                            summary: summary.isEmpty ? old.summary : summary,
-                            analysis: analysis,
-                            sentiment: sentiment,
-                            url: old.url
-                        )
+                self.stockService.enhanceNewsItem(
+                    newsID: entry.news.id,
+                    code: entry.stockId,
+                    market: market.rawValue,
+                    name: entry.stockName,
+                    title: entry.news.title,
+                    summary: entry.news.summary,
+                    source: entry.news.source
+                ) { [weak self] summary, analysis, sentimentStr in
+                    defer {
+                        group.leave()
+                        newsSemaphore.signal()
                     }
-                    self.newsCache[cacheKey] = CachedData(data: updatedNews, timestamp: cached.timestamp)
-                }
-                self.lock.unlock()
+                    guard let self = self else { return }
+                    let sentiment = NewsSentiment(rawValue: sentimentStr) ?? entry.news.sentiment
 
-                // Notify observers (StockDetailView) that enhanced data is available
-                if !analysis.isEmpty {
-                    DispatchQueue.main.async {
-                        NotificationCenter.default.post(name: .newsEnhancementDidComplete, object: nil)
+                    self.lock.lock()
+                    self.inFlightEnhance.remove(entry.news.id)
+
+                    // Update the news item in cache
+                    let cacheKey = "\(market.rawValue)_\(entry.stockId)"
+                    if var cached = self.newsCache[cacheKey] {
+                        var updatedNews = cached.data
+                        if let idx = updatedNews.firstIndex(where: { $0.id == entry.news.id }) {
+                            let old = updatedNews[idx]
+                            updatedNews[idx] = NewsItem(
+                                id: old.id,
+                                title: old.title,
+                                source: old.source,
+                                time: old.time,
+                                summary: summary.isEmpty ? old.summary : summary,
+                                analysis: analysis,
+                                sentiment: sentiment,
+                                url: old.url
+                            )
+                        }
+                        self.newsCache[cacheKey] = CachedData(data: updatedNews, timestamp: cached.timestamp)
+                    }
+                    self.lock.unlock()
+
+                    // Notify observers (StockDetailView) that enhanced data is available
+                    if !analysis.isEmpty {
+                        DispatchQueue.main.async {
+                            NotificationCenter.default.post(name: .newsEnhancementDidComplete, object: nil)
+                        }
                     }
                 }
+
+                group.wait()
             }
         }
     }
@@ -527,8 +556,223 @@ final class PreloadManager {
         watchlistCache.removeAll()
         quoteCache.removeAll()
         newsCache.removeAll()
+        analysisCache.removeAll()
+        analysisConclusionCache.removeAll()
         inFlightEnhance.removeAll()
+        inFlightBatchAnalysis.removeAll()
+        inFlightBatchEnhance.removeAll()
         lock.unlock()
+    }
+
+    // MARK: - AI Analysis Cache
+
+    /// TTL for analysis cache: 15 minutes
+    private let analysisTTL: TimeInterval = 900
+
+    /// Get cached analysis items for a stock
+    func getCachedAnalysis(stockId: String, market: Market) -> [AIAnalysisItem]? {
+        lock.lock()
+        defer { lock.unlock() }
+        let key = "\(market.rawValue)_\(stockId)"
+        guard let cached = analysisCache[key], cached.isFresh(maxAge: analysisTTL) else { return nil }
+        return cached.data.isEmpty ? nil : cached.data
+    }
+
+    /// Update analysis cache
+    func updateAnalysisCache(stockId: String, market: Market, data: [AIAnalysisItem]) {
+        lock.lock()
+        let key = "\(market.rawValue)_\(stockId)"
+        analysisCache[key] = CachedData(data: data, timestamp: Date())
+        lock.unlock()
+    }
+
+    /// Update a single analysis item in the cache (after AI enhancement completes)
+    func updateSingleAnalysis(stockId: String, market: Market, analysisId: String,
+                               conclusion: String, summary: String, detail: String) {
+        lock.lock()
+        let key = "\(market.rawValue)_\(stockId)"
+        guard var cached = analysisCache[key] else {
+            lock.unlock()
+            return
+        }
+        var items = cached.data
+        if let idx = items.firstIndex(where: { $0.id == analysisId }) {
+            items[idx].conclusion = conclusion
+            items[idx].aiSummary = summary
+            items[idx].detail = detail
+        }
+        analysisCache[key] = CachedData(data: items, timestamp: cached.timestamp)
+        lock.unlock()
+
+        // Notify observers
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .analysisEnhancementDidComplete, object: nil)
+        }
+    }
+
+    // MARK: - Analysis Conclusion Cache
+
+    /// Get cached analysis conclusion for a stock
+    func getCachedAnalysisConclusion(stockId: String, market: Market) -> (conclusion: String, summary: String)? {
+        lock.lock()
+        defer { lock.unlock() }
+        let key = "\(market.rawValue)_\(stockId)"
+        guard let cached = analysisConclusionCache[key], cached.isFresh(maxAge: analysisTTL) else { return nil }
+        return cached.data
+    }
+
+    /// Update analysis conclusion cache for a stock
+    func updateAnalysisConclusionCache(stockId: String, market: Market, conclusion: String, summary: String) {
+        lock.lock()
+        let key = "\(market.rawValue)_\(stockId)"
+        analysisConclusionCache[key] = CachedData(data: (conclusion: conclusion, summary: summary), timestamp: Date())
+        lock.unlock()
+    }
+
+    // MARK: - Batch Analysis Conclusion Preload
+
+    /// Preload AI analysis conclusions for all stocks (indices + watchlist) when entering a market section.
+    /// All stocks are processed in a single batch request to the backend, which handles them in parallel.
+    func batchPreloadAnalysisConclusions(stocks: [Stock], market: Market) {
+        let marketKey = market.rawValue
+        lock.lock()
+        if inFlightBatchAnalysis.contains(marketKey) {
+            lock.unlock()
+            return
+        }
+        // Filter out stocks that already have fresh conclusion cache
+        let uncachedStocks = stocks.filter { stock in
+            let key = "\(market.rawValue)_\(stock.id)"
+            guard let cached = analysisConclusionCache[key], cached.isFresh(maxAge: analysisTTL) else { return true }
+            return false
+        }
+        if uncachedStocks.isEmpty {
+            lock.unlock()
+            return
+        }
+        inFlightBatchAnalysis.insert(marketKey)
+        lock.unlock()
+
+        // Build batch input — use basic price info since we don't have full K-line data at this stage
+        let batchInput = uncachedStocks.map { stock -> (code: String, name: String, market: String, klineSummary: String, priceSummary: String) in
+            let priceSummary = "当前价\(stock.priceText)，涨跌\(stock.changeText)（\(stock.changePercentText)），高\(String(format: "%.2f", stock.high))，低\(String(format: "%.2f", stock.low))，量\(String(format: "%.1f亿", stock.volume))"
+            return (code: stock.id, name: stock.name, market: market.rawValue, klineSummary: "暂无K线数据", priceSummary: priceSummary)
+        }
+
+        stockService.batchAnalysisConclusion(stocks: batchInput) { [weak self] results in
+            guard let self = self else { return }
+            self.lock.lock()
+            self.inFlightBatchAnalysis.remove(marketKey)
+            for result in results {
+                let key = "\(result.market)_\(result.code)"
+                self.analysisConclusionCache[key] = CachedData(
+                    data: (conclusion: result.conclusion, summary: result.summary),
+                    timestamp: Date()
+                )
+            }
+            self.lock.unlock()
+
+            // Notify observers
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .analysisConclusionBatchDidComplete, object: nil)
+            }
+        }
+    }
+
+    // MARK: - Batch Enhance Analysis Preload (comprehensive analysis for all stocks)
+
+    /// Trigger comprehensive AI analysis for all stocks with concurrency limit.
+    /// Each stock gets its own independent enhanceAnalysis request, but at most 2 run
+    /// concurrently to avoid overwhelming the DeepSeek LLM backend (which would cause
+    /// all requests to time out).
+    func batchPreloadAnalysisEnhance(stocks: [Stock], market: Market) {
+        lock.lock()
+
+        // Filter stocks that don't have a comprehensive analysis cached
+        let uncachedStocks = stocks.filter { stock in
+            let key = "\(market.rawValue)_\(stock.id)"
+            guard let cached = analysisCache[key], cached.isFresh(maxAge: analysisTTL) else { return true }
+            let items = cached.data
+            return !items.contains(where: { $0.id == "comprehensive" && !$0.detail.isEmpty })
+        }
+
+        // Also filter out stocks already in-flight
+        let toProcess = uncachedStocks.filter { stock in
+            let flightKey = "\(market.rawValue)_\(stock.id)_enhance"
+            if inFlightBatchEnhance.contains(flightKey) { return false }
+            inFlightBatchEnhance.insert(flightKey)
+            return true
+        }
+
+        lock.unlock()
+
+        guard !toProcess.isEmpty else { return }
+
+        // Use a serial DispatchQueue + semaphore to limit concurrency to 2
+        let enhanceSemaphore = DispatchSemaphore(value: 2)
+        let enhanceQueue = DispatchQueue(label: "com.wiseinvest.enhance-preload", qos: .utility)
+
+        for stock in toProcess {
+            enhanceQueue.async {
+                enhanceSemaphore.wait()
+                let group = DispatchGroup()
+                group.enter()
+
+                self.stockService.enhanceAnalysis(
+                    code: stock.id, market: market.rawValue, name: stock.name
+                ) { [weak self] conclusionStr, summary, detail in
+                    defer {
+                        group.leave()
+                        enhanceSemaphore.signal()
+                    }
+                    guard let self = self else { return }
+
+                    let flightKey = "\(market.rawValue)_\(stock.id)_enhance"
+                    self.lock.lock()
+                    self.inFlightBatchEnhance.remove(flightKey)
+
+                    if !detail.isEmpty {
+                        let key = "\(market.rawValue)_\(stock.id)"
+                        var items = self.analysisCache[key]?.data ?? []
+
+                        if let idx = items.firstIndex(where: { $0.id == "comprehensive" }) {
+                            items[idx].conclusion = conclusionStr
+                            items[idx].aiSummary = summary
+                            items[idx].detail = detail
+                        } else {
+                            var item = AIAnalysisItem(
+                                id: "comprehensive",
+                                title: "AI 综合分析",
+                                icon: "brain.head.profile",
+                                content: summary
+                            )
+                            item.conclusion = conclusionStr
+                            item.aiSummary = summary
+                            item.detail = detail
+                            items.append(item)
+                        }
+
+                        self.analysisCache[key] = CachedData(data: items, timestamp: Date())
+                        // Also update conclusion cache
+                        self.analysisConclusionCache[key] = CachedData(
+                            data: (conclusion: conclusionStr, summary: summary),
+                            timestamp: Date()
+                        )
+                    }
+                    self.lock.unlock()
+
+                    // Notify observers immediately when each stock completes
+                    if !detail.isEmpty {
+                        DispatchQueue.main.async {
+                            NotificationCenter.default.post(name: .analysisEnhancementDidComplete, object: nil)
+                            NotificationCenter.default.post(name: .analysisConclusionBatchDidComplete, object: nil)
+                        }
+                    }
+                }
+
+                group.wait()
+            }
+        }
     }
 }
 
@@ -538,4 +782,8 @@ extension Notification.Name {
     /// Posted when an AI enhancement finishes and newsCache is updated with analysis.
     /// Observers (e.g. StockDetailView) should refresh their newsItems from cache.
     static let newsEnhancementDidComplete = Notification.Name("newsEnhancementDidComplete")
+    /// Posted when an AI analysis enhancement finishes for a stock.
+    static let analysisEnhancementDidComplete = Notification.Name("analysisEnhancementDidComplete")
+    /// Posted when batch analysis conclusions are preloaded for a market.
+    static let analysisConclusionBatchDidComplete = Notification.Name("analysisConclusionBatchDidComplete")
 }

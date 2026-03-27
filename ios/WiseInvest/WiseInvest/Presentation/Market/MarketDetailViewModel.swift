@@ -1,10 +1,12 @@
 import SwiftUI
 import Combine
 
-/// ViewModel for the Market Detail screen — fetches real data from backend API
+/// ViewModel for the Market Detail screen — uses WebSocket for real-time data push,
+/// with HTTP API fallback for initial load and watchlist operations.
 class MarketDetailViewModel: ObservableObject {
     let market: Market
     private let stockService = StockDataService.shared
+    private let wsClient = WebSocketClient.shared
 
     @Published var indices: [MarketIndex] = []
     @Published var watchlist: [Stock] = []
@@ -29,10 +31,11 @@ class MarketDetailViewModel: ObservableObject {
     /// loadWatchlist waits for pending mutations to finish before overwriting.
     private var pendingMutations = 0
 
-    /// Timer for auto-refreshing during trading hours
-    private var refreshTimer: Timer?
     /// Timer to periodically check if trading hours changed (every 60s)
     private var tradingCheckTimer: Timer?
+
+    /// Fallback HTTP refresh timer — used only when WebSocket is disconnected
+    private var httpFallbackTimer: Timer?
 
     /// Monotonically increasing counter — each new request gets the next value.
     private var indicesCounter: UInt64 = 0
@@ -69,6 +72,9 @@ class MarketDetailViewModel: ObservableObject {
                 self?.performSearch(query: query)
             }
             .store(in: &cancellables)
+
+        // Subscribe to WebSocket events
+        setupWebSocketSubscription()
     }
 
     deinit {
@@ -78,9 +84,72 @@ class MarketDetailViewModel: ObservableObject {
         cancellables.removeAll()
     }
 
+    // MARK: - WebSocket Subscription
+
+    private func setupWebSocketSubscription() {
+        wsClient.eventPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] event in
+                guard let self = self, !self.isInvalidated else { return }
+                self.handleWSEvent(event)
+            }
+            .store(in: &cancellables)
+    }
+
+    private func handleWSEvent(_ event: WSEvent) {
+        switch event {
+        case .indices(let wsMarket, let data):
+            guard wsMarket == market.rawValue, !data.isEmpty else { return }
+            self.indices = data
+            self.isLoadingIndices = false
+            self.preloadManager.updateIndicesCache(for: self.market, data: data)
+
+        case .quote(let wsMarket, let code, let stock):
+            guard wsMarket == market.rawValue else { return }
+            // Update the matching watchlist stock in-place
+            if let idx = watchlist.firstIndex(where: { $0.id == code }) {
+                watchlist[idx].currentPrice = stock.currentPrice
+                watchlist[idx].change = stock.change
+                watchlist[idx].changePercent = stock.changePercent
+                if stock.volume > 0 { watchlist[idx].volume = stock.volume }
+                if stock.high > 0 { watchlist[idx].high = stock.high }
+                if stock.low > 0 { watchlist[idx].low = stock.low }
+            }
+
+        case .connected:
+            // WebSocket connected — subscribe to channels and stop fallback timer
+            subscribeToWSChannels()
+            httpFallbackTimer?.invalidate()
+            httpFallbackTimer = nil
+
+        case .disconnected:
+            // WebSocket lost — start fallback HTTP polling
+            startHTTPFallback()
+        }
+    }
+
+    /// Subscribe to WebSocket channels for this market
+    private func subscribeToWSChannels() {
+        // Always subscribe to indices
+        wsClient.subscribeIndices(market: market.rawValue)
+
+        // Subscribe to individual quote channels for each watchlist stock
+        for stock in watchlist {
+            wsClient.subscribeQuote(market: market.rawValue, code: stock.id)
+        }
+    }
+
+    /// Unsubscribe from all WebSocket channels for this market
+    private func unsubscribeFromWSChannels() {
+        wsClient.unsubscribeIndices(market: market.rawValue)
+        for stock in watchlist {
+            wsClient.unsubscribeQuote(market: market.rawValue, code: stock.id)
+        }
+    }
+
     // MARK: - Lifecycle (called by View)
 
-    /// Called from the View's `.onAppear`. Performs first load + starts auto-refresh.
+    /// Called from the View's `.onAppear`. Performs first load + starts WebSocket subscription.
     func onViewAppear() {
         tradingStatus = MarketTradingHours.tradingStatus(market: market)
 
@@ -91,63 +160,68 @@ class MarketDetailViewModel: ObservableObject {
         startAutoRefresh()
     }
 
-    // MARK: - Auto Refresh
+    // MARK: - Auto Refresh (WebSocket-based + HTTP fallback)
 
-    /// Start or restart the auto-refresh timer based on trading hours.
+    /// Start WebSocket subscription + trading status check timer.
     func startAutoRefresh() {
         stopAutoRefresh()
 
         // Update trading status immediately
         tradingStatus = MarketTradingHours.tradingStatus(market: market)
 
-        // Set up data refresh timer if market is open
-        if let interval = MarketTradingHours.refreshInterval(market: market) {
-            refreshTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-                guard let self = self, !self.isInvalidated else { return }
-                self.refreshLiveData()
-            }
-        }
+        // Connect WebSocket (idempotent if already connected)
+        wsClient.connect()
 
-        // Check trading status every 60 seconds to start/stop refresh timer
+        // Subscribe to market data channels
+        subscribeToWSChannels()
+
+        // Check trading status every 60 seconds
         tradingCheckTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             guard let self = self, !self.isInvalidated else { return }
             let newStatus = MarketTradingHours.tradingStatus(market: self.market)
-            let wasActive = self.tradingStatus.isActive
-            let isActive = newStatus.isActive
-
             self.tradingStatus = newStatus
+        }
 
-            // Trading session changed — restart or stop the refresh timer
-            if wasActive != isActive {
-                if isActive {
-                    self.startAutoRefresh()
-                } else {
-                    self.refreshTimer?.invalidate()
-                    self.refreshTimer = nil
-                }
-            }
+        // If WebSocket is not connected, start HTTP fallback immediately
+        if !wsClient.isConnected {
+            startHTTPFallback()
         }
     }
 
     func stopAutoRefresh() {
-        refreshTimer?.invalidate()
-        refreshTimer = nil
         tradingCheckTimer?.invalidate()
         tradingCheckTimer = nil
+        httpFallbackTimer?.invalidate()
+        httpFallbackTimer = nil
+        // Note: we don't unsubscribe from WebSocket here because other ViewModels
+        // for different markets may still need the connection. The WebSocket client
+        // manages its own lifecycle.
+        unsubscribeFromWSChannels()
     }
 
-    /// Lightweight refresh: only update indices and watchlist quotes (no skeleton).
-    /// Uses high-water-mark: any response whose seq > current high-water mark is accepted
-    /// (it carries newer data), while responses with seq <= high-water mark are discarded.
-    /// Multiple requests can be in-flight simultaneously — whichever arrives with a higher
-    /// seq wins and advances the water mark.
-    private func refreshLiveData() {
+    /// HTTP fallback polling — only used when WebSocket is disconnected.
+    private func startHTTPFallback() {
+        httpFallbackTimer?.invalidate()
+        guard let interval = MarketTradingHours.refreshInterval(market: market) else { return }
+        httpFallbackTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            guard let self = self, !self.isInvalidated else { return }
+            // Stop fallback if WebSocket reconnected
+            if self.wsClient.isConnected {
+                self.httpFallbackTimer?.invalidate()
+                self.httpFallbackTimer = nil
+                return
+            }
+            self.refreshLiveDataHTTP()
+        }
+    }
+
+    /// Lightweight HTTP refresh (fallback when WS is down): only update indices + watchlist quotes.
+    private func refreshLiveDataHTTP() {
         // --- Indices ---
         indicesCounter &+= 1
         let idxSeq = indicesCounter
         stockService.getIndices(for: market) { [weak self] indices in
             guard let self = self, !self.isInvalidated else { return }
-            // Accept only if this response is newer than the last accepted one
             guard idxSeq > self.indicesHighWaterMark else { return }
             self.indicesHighWaterMark = idxSeq
             if !indices.isEmpty {
@@ -192,6 +266,17 @@ class MarketDetailViewModel: ObservableObject {
             // Update preload cache
             if !indices.isEmpty {
                 self.preloadManager.updateIndicesCache(for: self.market, data: indices)
+                // Convert indices to Stock-like objects and preload AI analysis conclusions
+                let indexStocks = indices.map { index in
+                    Stock(id: index.id, symbol: index.id.uppercased(), name: index.name,
+                          market: self.market.rawValue, currentPrice: index.value,
+                          change: index.change, changePercent: index.changePercent,
+                          volume: 0, high: index.value, low: index.value,
+                          open: index.value, previousClose: index.value - index.change, isIndex: true)
+                }
+                self.preloadManager.batchPreloadAnalysisConclusions(stocks: indexStocks, market: self.market)
+                // Also trigger batch deep analysis (tech/trend/volume) for all indices
+                self.preloadManager.batchPreloadAnalysisEnhance(stocks: indexStocks, market: self.market)
             }
         }
     }
@@ -241,6 +326,15 @@ class MarketDetailViewModel: ObservableObject {
             self.preloadManager.preloadWatchlistQuotes(stocks: stocks, market: self.market)
             // Batch preload news for ALL watchlist stocks (backend processes in parallel)
             self.preloadManager.batchPreloadNews(stocks: stocks, market: self.market)
+            // Batch preload AI analysis conclusions for all watchlist stocks
+            self.preloadManager.batchPreloadAnalysisConclusions(stocks: stocks, market: self.market)
+            // Also trigger batch deep analysis (tech/trend/volume) for all watchlist stocks
+            self.preloadManager.batchPreloadAnalysisEnhance(stocks: stocks, market: self.market)
+
+            // Subscribe to quote channels for watchlist stocks via WebSocket
+            for stock in stocks {
+                self.wsClient.subscribeQuote(market: self.market.rawValue, code: stock.id)
+            }
         }
     }
 
@@ -253,6 +347,8 @@ class MarketDetailViewModel: ObservableObject {
         pendingMutations += 1
         hasPendingChanges = true
         preloadManager.invalidateWatchlistCache(for: market)
+        // Subscribe to WebSocket quote for the new stock
+        wsClient.subscribeQuote(market: market.rawValue, code: stock.id)
         stockService.addToWatchlist(stock, for: market) { [weak self] success in
             guard let self = self else { return }
             self.pendingMutations = max(0, self.pendingMutations - 1)
@@ -260,6 +356,7 @@ class MarketDetailViewModel: ObservableObject {
                 // Revert on failure
                 self.watchlist.removeAll { $0.id == stock.id }
                 self.watchlistIDs.remove(stock.id)
+                self.wsClient.unsubscribeQuote(market: self.market.rawValue, code: stock.id)
             }
         }
     }
@@ -271,6 +368,8 @@ class MarketDetailViewModel: ObservableObject {
         pendingMutations += 1
         hasPendingChanges = true
         preloadManager.invalidateWatchlistCache(for: market)
+        // Unsubscribe from WebSocket quote
+        wsClient.unsubscribeQuote(market: market.rawValue, code: stockId)
         stockService.removeFromWatchlist(stockId, for: market) { [weak self] success in
             guard let self = self else { return }
             self.pendingMutations = max(0, self.pendingMutations - 1)

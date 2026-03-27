@@ -50,6 +50,8 @@ struct HomeView: View {
         }
         .onAppear {
             PreloadManager.shared.preloadAllMarkets()
+            // Connect WebSocket for real-time market data push
+            WebSocketClient.shared.connect()
         }
         .sheet(item: $sheetItem, onDismiss: {
             viewModel.loadRecentConversations()

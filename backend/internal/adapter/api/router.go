@@ -61,7 +61,15 @@ func NewRouter(
 			stocks.GET("/news/enhance", stockHandler.EnhanceNewsItem)
 			stocks.POST("/news/enhance/batch", stockHandler.EnhanceBatchNews)
 			stocks.POST("/news/batch", stockHandler.GetBatchNews)
+			stocks.POST("/analysis/enhance", stockHandler.EnhanceAnalysis)
+			stocks.GET("/analysis/conclusion", stockHandler.GetAnalysisConclusion)
+			stocks.POST("/analysis/batch-conclusion", stockHandler.BatchAnalysisConclusion)
+			stocks.POST("/analysis/batch-enhance", stockHandler.BatchEnhanceAnalysis)
+			stocks.GET("/analysis/cached", stockHandler.GetCachedAnalysis)
 		}
+
+		// ── WebSocket (public — real-time market data push) ──────────────
+		v1.GET("/ws", stockHandler.WSHub().HandleWS)
 
 		// ── Protected API ─────────────────────────────────────────────────
 		protected := v1.Group("")

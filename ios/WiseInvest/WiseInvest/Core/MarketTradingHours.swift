@@ -26,7 +26,7 @@ struct MarketTradingHours {
         case .usStock:
             return isUSStockTrading() ? 2 : nil
         case .crypto:
-            return 2  // always on
+            return 1  // always on (matches Binance WebSocket stream ~1s push interval)
         }
     }
 
