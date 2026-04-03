@@ -319,6 +319,8 @@ class ConversationViewModel: ObservableObject {
             return "你好！我是交易执行助手，可以帮你管理币安账户、分析合约机会、执行智能交易策略。需要什么帮助？"
         case .orchestrator:
             return "你好！我是智能调度助手，可以协调分析和交易功能，为你提供一体化的投资体验。有什么需要？"
+        case .groupChat:
+            return ""
         }
     }
 }

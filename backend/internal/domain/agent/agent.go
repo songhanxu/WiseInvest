@@ -56,4 +56,7 @@ const (
 	TypeAShare  = "a_share"  // A股：沪深北交所
 	TypeUSStock = "us_stock" // 美股：纽交所/纳斯达克
 	TypeCrypto  = "crypto"   // 币圈：加密货币
+
+	// Group chat agent types
+	TypeGroupChat = "group_chat" // 慧投圆桌：多 Agent 圆桌讨论
 )

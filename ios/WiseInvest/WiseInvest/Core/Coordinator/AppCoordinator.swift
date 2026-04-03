@@ -39,7 +39,7 @@ private struct RootView: View {
     var body: some View {
         Group {
             if authState.isAuthenticated {
-                HomeView(coordinator: coordinator)
+                MainTabView(coordinator: coordinator)
             } else {
                 LoginView()
             }

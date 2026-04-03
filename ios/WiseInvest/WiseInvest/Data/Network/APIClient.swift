@@ -1,6 +1,58 @@
 import Foundation
 import Combine
 
+/// SSE delegate that parses group chat events (include agent_id field).
+private class GroupStreamingDelegate: NSObject, URLSessionDataDelegate {
+    let subject: PassthroughSubject<GroupStreamChunk, Error>
+    var buffer = ""
+
+    init(subject: PassthroughSubject<GroupStreamChunk, Error>) {
+        self.subject = subject
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        guard let chunk = String(data: data, encoding: .utf8) else { return }
+        buffer += chunk
+
+        let lines = buffer.components(separatedBy: "\n")
+        buffer = lines.last ?? ""
+
+        for line in lines.dropLast() {
+            guard line.hasPrefix("data: ") else { continue }
+            let jsonString = String(line.dropFirst(6))
+            if jsonString == "[DONE]" {
+                subject.send(completion: .finished)
+                return
+            }
+            guard
+                let jsonData = jsonString.data(using: .utf8),
+                let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]
+            else { continue }
+
+            if let errorText = json["error"] as? String {
+                subject.send(completion: .failure(
+                    NSError(domain: "SSE", code: -1, userInfo: [NSLocalizedDescriptionKey: errorText])
+                ))
+                return
+            }
+
+            let agentId  = (json["agent_id"] as? String) ?? ""
+            let typeRaw  = (json["type"]     as? String) ?? GroupStreamChunkType.content.rawValue
+            let content  = (json["content"]  as? String) ?? ""
+            let chunkType = GroupStreamChunkType(rawValue: typeRaw) ?? .content
+            subject.send(GroupStreamChunk(agentId: agentId, type: chunkType, content: content))
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let error = error {
+            subject.send(completion: .failure(error))
+        } else {
+            subject.send(completion: .finished)
+        }
+    }
+}
+
 /// Streaming delegate for SSE
 private class StreamingDelegate: NSObject, URLSessionDataDelegate {
     let subject: PassthroughSubject<StreamChunk, Error>
@@ -76,13 +128,47 @@ class APIClient {
         request.setValue("true", forHTTPHeaderField: "ngrok-skip-browser-warning")
     }
 
-    /// Create or get conversation ID
+    /// Get or create a conversation for the given agent type.
+    /// For group_chat, reuses the most recent existing conversation to avoid
+    /// creating a new one every time the sheet is opened.
     func getOrCreateConversation(agentType: AgentType) -> AnyPublisher<UInt, Error> {
         let subject = PassthroughSubject<UInt, Error>()
 
+        // For group_chat, try to reuse an existing conversation first.
+        if agentType == .groupChat {
+            guard let listURL = URL(string: "\(baseURL)/api/v1/conversations/user/0") else {
+                subject.send(completion: .failure(APIError.invalidURL))
+                return subject.eraseToAnyPublisher()
+            }
+            var listRequest = URLRequest(url: listURL)
+            listRequest.httpMethod = "GET"
+            addAuthHeader(to: &listRequest)
+
+            let task = session.dataTask(with: listRequest) { [weak self] data, response, error in
+                guard let self else { return }
+                if let data = data,
+                   let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+                   let existing = list.first(where: { ($0["agent_type"] as? String) == AgentType.groupChat.rawValue }),
+                   let idNumber = existing["id"] as? NSNumber {
+                    subject.send(idNumber.uintValue)
+                    subject.send(completion: .finished)
+                } else {
+                    // No existing conversation — create one.
+                    self.createConversation(agentType: agentType, subject: subject)
+                }
+            }
+            task.resume()
+        } else {
+            createConversation(agentType: agentType, subject: subject)
+        }
+
+        return subject.eraseToAnyPublisher()
+    }
+
+    private func createConversation(agentType: AgentType, subject: PassthroughSubject<UInt, Error>) {
         guard let url = URL(string: "\(baseURL)/api/v1/conversations") else {
             subject.send(completion: .failure(APIError.invalidURL))
-            return subject.eraseToAnyPublisher()
+            return
         }
 
         var request = URLRequest(url: url)
@@ -94,26 +180,23 @@ class APIClient {
             "agent_type": agentType.rawValue,
             "title": "\(agentType.displayName) Conversation"
         ]
-        
-        do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
-        } catch {
-            subject.send(completion: .failure(error))
-            return subject.eraseToAnyPublisher()
+
+        guard let body = try? JSONSerialization.data(withJSONObject: requestBody) else {
+            subject.send(completion: .failure(APIError.decodingError))
+            return
         }
-        
+        request.httpBody = body
+
         let task = session.dataTask(with: request) { data, response, error in
             if let error = error {
                 subject.send(completion: .failure(error))
                 return
             }
-            
-            // Check HTTP status code first
+
             if let httpResponse = response as? HTTPURLResponse,
                !(200...299).contains(httpResponse.statusCode) {
                 let raw = data.flatMap { String(data: $0, encoding: .utf8) } ?? "nil"
                 print("[APIClient] getOrCreateConversation HTTP \(httpResponse.statusCode), raw: \(raw)")
-                // Try to extract server error message
                 if let data = data,
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                    let errorMsg = json["error"] as? String {
@@ -123,29 +206,20 @@ class APIClient {
                 }
                 return
             }
-            
-            guard let data = data,
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                subject.send(completion: .failure(APIError.decodingError))
-                return
-            }
 
-            // JSONSerialization 返回 NSNumber，兼容 Int / UInt 两种情况
-            guard let idNumber = json["id"] as? NSNumber else {
-                // 打印原始响应方便调试
-                let raw = String(data: data, encoding: .utf8) ?? "nil"
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let idNumber = json["id"] as? NSNumber else {
+                let raw = data.flatMap { String(data: $0, encoding: .utf8) } ?? "nil"
                 print("[APIClient] getOrCreateConversation decode failed, raw: \(raw)")
                 subject.send(completion: .failure(APIError.decodingError))
                 return
             }
-            let id = idNumber.uintValue
-            
-            subject.send(id)
+
+            subject.send(idNumber.uintValue)
             subject.send(completion: .finished)
         }
-        
         task.resume()
-        return subject.eraseToAnyPublisher()
     }
     
     /// Send chat message with streaming response
@@ -188,6 +262,51 @@ class APIClient {
         let task = streamingSession.dataTask(with: request)
         task.resume()
         
+        return subject.eraseToAnyPublisher()
+    }
+
+    // MARK: - Group Chat (慧投圆桌)
+
+    /// Streams a multi-agent roundtable response.
+    /// - Parameters:
+    ///   - conversationId: The `group_chat` conversation ID.
+    ///   - message: The user's message.
+    ///   - participants: Agent IDs to include. Pass `[]` for all four in default order.
+    func sendGroupChatMessage(
+        conversationId: UInt,
+        message: String,
+        participants: [String] = []
+    ) -> AnyPublisher<GroupStreamChunk, Error> {
+        let subject = PassthroughSubject<GroupStreamChunk, Error>()
+
+        guard let url = URL(string: "\(baseURL)/api/v1/messages/group-chat/stream") else {
+            subject.send(completion: .failure(APIError.invalidURL))
+            return subject.eraseToAnyPublisher()
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 600
+        addAuthHeader(to: &request)
+
+        let body: [String: Any] = [
+            "conversation_id": conversationId,
+            "content": message,
+            "participants": participants
+        ]
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            subject.send(completion: .failure(error))
+            return subject.eraseToAnyPublisher()
+        }
+
+        let delegate = GroupStreamingDelegate(subject: subject)
+        let streamingSession = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        streamingSession.dataTask(with: request).resume()
+
         return subject.eraseToAnyPublisher()
     }
 

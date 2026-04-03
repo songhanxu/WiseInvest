@@ -113,8 +113,20 @@ func main() {
 	cryptoRegistry.Register(skill.NewCryptoPriceSkill())
 	log.Infof("Crypto skill registry: %d skills registered", cryptoRegistry.Count())
 
+	// Group chat (慧投圆桌): combined registry with all market skills so that
+	// persona agents can query any market during a roundtable discussion.
+	groupRegistry := skill.NewRegistry()
+	groupRegistry.Register(skill.NewWebSearchSkill(searcher, ""))
+	groupRegistry.Register(skill.NewASharePriceSkill())
+	groupRegistry.Register(skill.NewUSStockPriceSkill())
+	groupRegistry.Register(skill.NewCryptoPriceSkill())
+	groupRegistry.Register(skill.NewAShareSectorSkill())
+	groupRegistry.Register(skill.NewAShareStockDetailSkill())
+	groupRegistry.Register(skill.NewLookupAShareCodeSkill())
+	log.Infof("Group chat skill registry: %d skills registered", groupRegistry.Count())
+
 	// ── Agent Factory ──────────────────────────────────────────────────────────
-	agentFactory := agent.NewAgentFactory(llmClient, searcher, log, aShareRegistry, usStockRegistry, cryptoRegistry)
+	agentFactory := agent.NewAgentFactory(llmClient, searcher, log, aShareRegistry, usStockRegistry, cryptoRegistry, groupRegistry)
 
 	// Initialize services
 	conversationService := service.NewConversationService(

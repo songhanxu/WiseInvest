@@ -93,6 +93,10 @@ func NewRouter(
 			{
 				messages.POST("", conversationHandler.SendMessage)
 				messages.POST("/stream", conversationHandler.SendMessageStream)
+
+				// Multi-agent roundtable (慧投圆桌)
+				groupChatHandler := handler.NewGroupChatHandler(conversationService, logger)
+				messages.POST("/group-chat/stream", groupChatHandler.SendGroupChatStream)
 			}
 
 			// ── Watchlist CRUD (requires auth, bound to UserID) ──────────
