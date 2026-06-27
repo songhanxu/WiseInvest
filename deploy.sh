@@ -28,7 +28,13 @@ sudo apt install -y curl git ufw
 # ── Step 2: 安装 Docker ──────────────────────────────────
 echo -e "${YELLOW}[2/4] 安装 Docker & Docker Compose...${NC}"
 if ! command -v docker &> /dev/null; then
-    curl -fsSL https://get.docker.com | sudo sh
+    if curl -fsSL https://get.docker.com -o /tmp/get-docker.sh; then
+        sudo sh /tmp/get-docker.sh
+    else
+        echo -e "${YELLOW}⚠️  Docker 官方源连接失败，改用 Ubuntu 软件源安装...${NC}"
+        sudo apt install -y docker.io docker-compose
+        sudo systemctl enable --now docker
+    fi
     sudo usermod -aG docker $USER
     echo -e "${GREEN}✓ Docker 安装完成${NC}"
     echo -e "${RED}⚠️  Docker 组权限需要重新登录才生效${NC}"
@@ -38,11 +44,20 @@ else
     echo -e "${GREEN}✓ Docker 已安装 $(docker --version)${NC}"
 fi
 
-# Docker Compose (V2 已内置于 Docker)
-if ! sudo docker compose version &> /dev/null; then
-    sudo apt install -y docker-compose-plugin
+# Docker Compose (优先 V2，国内网络下退回 Ubuntu 源的 docker-compose)
+if sudo docker compose version &> /dev/null; then
+    COMPOSE_CMD="sudo docker compose"
+elif command -v docker-compose &> /dev/null; then
+    COMPOSE_CMD="sudo docker-compose"
+else
+    sudo apt install -y docker-compose-plugin || sudo apt install -y docker-compose
+    if sudo docker compose version &> /dev/null; then
+        COMPOSE_CMD="sudo docker compose"
+    else
+        COMPOSE_CMD="sudo docker-compose"
+    fi
 fi
-echo -e "${GREEN}✓ Docker Compose $(sudo docker compose version --short)${NC}"
+echo -e "${GREEN}✓ Docker Compose 已就绪${NC}"
 
 # ── Step 3: 防火墙 ──────────────────────────────────────
 echo -e "${YELLOW}[3/4] 配置防火墙...${NC}"
@@ -72,7 +87,7 @@ if grep -q "CHANGE_ME_TO_A_RANDOM_32_CHAR_STRING" backend/.env.production; then
 fi
 
 # 构建 & 启动（使用 sudo 确保权限）
-sudo docker compose up -d --build
+$COMPOSE_CMD up -d --build
 
 # 等待服务就绪
 echo -e "${YELLOW}等待服务启动...${NC}"
@@ -104,10 +119,10 @@ echo -e "   API:       ${GREEN}http://${SERVER_IP}/api/v1/${NC}"
 echo -e "   健康检查:  ${GREEN}http://${SERVER_IP}/health${NC}"
 echo ""
 echo -e "${YELLOW}📝 常用命令：${NC}"
-echo -e "   查看日志:    ${GREEN}docker compose logs -f backend${NC}"
-echo -e "   重启服务:    ${GREEN}docker compose restart backend${NC}"
-echo -e "   停止所有:    ${GREEN}docker compose down${NC}"
-echo -e "   更新部署:    ${GREEN}docker compose up -d --build backend${NC}"
+echo -e "   查看日志:    ${GREEN}${COMPOSE_CMD} logs -f backend${NC}"
+echo -e "   重启服务:    ${GREEN}${COMPOSE_CMD} restart backend${NC}"
+echo -e "   停止所有:    ${GREEN}${COMPOSE_CMD} down${NC}"
+echo -e "   更新部署:    ${GREEN}${COMPOSE_CMD} up -d --build backend${NC}"
 echo -e "   数据库备份:  ${GREEN}docker exec wiseinvest-db pg_dump -U wiseinvest wiseinvest > backup.sql${NC}"
 echo ""
 echo -e "${YELLOW}📱 iOS App 配置：${NC}"
