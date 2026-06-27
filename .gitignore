@@ -9,6 +9,11 @@ backend/*.test
 backend/vendor/
 backend/.env
 
+# ── Frontend / Node ─────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+
 # ── Environment / Secrets ────────────────────────────────────────
 .env
 *.env.local
