@@ -59,6 +59,23 @@ else
 fi
 echo -e "${GREEN}✓ Docker Compose 已就绪${NC}"
 
+# ── Docker Hub 镜像加速 ──────────────────────────────────
+# 国内云服务器直连 Docker Hub 经常超时，优先配置腾讯云内网镜像。
+if [ ! -f /etc/docker/daemon.json ] || ! sudo grep -q "registry-mirrors" /etc/docker/daemon.json; then
+    echo -e "${YELLOW}配置 Docker 镜像加速...${NC}"
+    sudo mkdir -p /etc/docker
+    sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+{
+  "registry-mirrors": [
+    "https://mirror.ccs.tencentyun.com"
+  ]
+}
+EOF
+    sudo systemctl daemon-reload
+    sudo systemctl restart docker
+    echo -e "${GREEN}✓ Docker 镜像加速已配置${NC}"
+fi
+
 # ── Step 3: 防火墙 ──────────────────────────────────────
 echo -e "${YELLOW}[3/4] 配置防火墙...${NC}"
 sudo ufw allow OpenSSH
