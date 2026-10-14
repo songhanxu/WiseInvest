@@ -48,12 +48,66 @@ EPS 和 PE 属于标的股票，不是代币或合约指标；远期 PE 使用�
 | UTA 合约持仓 | `GET /api/v3/position/current-position?category=USDT-FUTURES` | UTA trade 读取权限；包括港股 Quanto |
 | 经典现货账户余额 | `GET /api/v2/spot/account/assets` | 对应 Classic account |
 
-私有接口需要 API Key、Secret 和 Passphrase，并按官方规则签名。未来接入应使用服务端保存的只读凭证并绑定具体 WiseInvest 用户，不能把一套全局交易所凭证暴露给所有登录用户，也不能在浏览器保存 Secret。本次仅实现公共行情，未接入用户的私有资产。
+私有接口需要 API Key、Secret 和 Passphrase，并按官方规则签名。实体账户功能已接入上述交易账户资产及持仓查询；经典合约使用 `GET /api/v2/mix/position/all-position?productType=USDT-FUTURES`。当前不读取资金账户余额、订单历史或 Bitget App 自选，也不下单或转账。
 
 官方依据：[公开行情](https://www.bitget.com/docs/catalog/market/market-data)、[股票参考资料](https://www.bitget.com/docs/catalog/reality/market-data)、[账户资产](https://www.bitget.com/docs/catalog/account/assets-balance)、[合约持仓](https://www.bitget.com/docs/catalog/trading/position-management)、[认证与签名](https://www.bitget.com/docs/classic/rest-api)。
+
+## 连接自己的 Bitget 实体账户
+
+前端在「总览」和「自选列表」之间增加「实体账户」。账户选择器目前只有 Bitget；接口返回账户数组，后续可扩展其他账户。列表与自选共用组件，包含名称、代码、市场、价格、EPS、PE、远期 PE、公司最新财报 EPS 指引和下份财报时间。名称下补充持仓数量、现货/合约以及方向。默认每分钟刷新，支持手动刷新。
+
+1. 在 Bitget API 管理中创建 **HMAC 只读** API Key，保存 Key、Secret 和创建时填写的 Passphrase。UTA 需要「UTA mgt. (read)」查询资产；包含合约时还需「UTA trade (read)」。经典账户选择对应现货、合约查询权限。绑定后端实际出口公网 IP；云服务器运行时填写云服务器出口 IP。
+2. 在慧投登录将使用这个账户的用户。带该用户的 Bearer token 调用 `GET /api/v1/auth/me`，取响应中的 `id`，这是慧投用户 ID，**不是 Bitget UID**。仅该用户可读取这套配置的持仓。
+3. 在运行后端的环境中填写以下变量。本地已在 `backend/.env` 中预留空项；部署时填写服务器环境。不要把密钥填入前端环境、页面 JWT 输入框或 Git。
+
+```dotenv
+BITGET_API_KEY=
+BITGET_API_SECRET=
+BITGET_PASSPHRASE=
+BITGET_OWNER_USER_ID=0
+BITGET_ACCOUNT_NAME=Bitget
+BITGET_ACCOUNT_TYPE=uta
+BITGET_INCLUDE_FUTURES=true
+```
+
+将 `BITGET_OWNER_USER_ID` 的 `0` 替换成自己的慧投用户 ID；`0` 保持禁用。统一交易账户选 `uta`，经典账户选 `classic`，不会自动迁移账户。仅查现货时将 `BITGET_INCLUDE_FUTURES=false`。
+
+4. 重启后端，确保前端「设置」指向该后端，再进入「实体账户」。已配置表示凭证和用户绑定完整；实际连通性以持仓请求是否成功为准。权限、IP 或账户类型不匹配会显示同步错误，而不是伪装成空账户。
+
+新增 `GET /api/v1/accounts` 与 `GET /api/v1/accounts/bitget/holdings`，均需要 JWT。账号未绑定、凭证未填完整时不会访问 Bitget 私有接口。私有请求固定访问官方主机，拒绝重定向，不把凭证写到 URL、返回值或上游错误消息；不允许调用交易接口。
+
+股票根据官方 `symbolType=stock` 资料识别，不用币名首字母猜测。未出现在当前官方股票资料中的资产不会被归为股票。现货冻结/锁定数量计入持仓，合约多空分别展示；港股 Quanto 行情仍以 HKD 计价。列表不是完整账户权益报表。未配置 FMP/公司财报数据时财务列显示缺失，不从 Bitget 行情推算财报。
+
+服务端完整持仓快照短暂缓存 10 秒，读取缓存前仍检查用户身份；部分失败不缓存。行情失败时保留持仓数量并显示价格缺失。凭证只在服务端读取；浏览器仅持有慧投登录 token。
 
 ## 本地验证与上线
 
 在 `backend` 中运行 `go run ./cmd/server`，在 `frontend` 中运行 `npm run dev`。前端「设置」可选择本地后端 `http://127.0.0.1:8080`；默认仍使用腾讯云实例。仅更新前端不会让尚未部署的远端后端获得港股和 Bitget 功能，需要同时部署后端代码。
 
-回归测试覆盖混合行情兜底、HKD/USDT 单位、股票身份、分钟/周 K 聚合、离线行情下保留自选、公司指引可追溯性、基本面币种不混算及缺失值。
+回归测试覆盖混合行情兜底、HKD/USDT 单位、股票身份、分钟/周 K 聚合、离线行情下保留自选、公司指引可追溯性、基本面币种不混算及缺失值；账户测试覆盖固定签名、拒绝交易与重定向、UTA/经典返回结构、数量精度、用户/缓存隔离、股票与加密货币过滤、多空分别展示及部分失败。
+
+## 腾讯云已部署后端的更新
+
+以下适用于本仓库 `docker-compose.yml` 的现有 Docker 部署，数据库、Redis 和 Nginx 已在运行。通过腾讯云控制台或 SSH 登录服务器，在 **服务器原有 WiseInvest 仓库目录** 执行：
+
+```bash
+git fetch origin
+git switch 'feature/整体功能优化'
+git pull --ff-only origin 'feature/整体功能优化'
+nano backend/.env.production
+```
+
+Compose 读取 `backend/.env.production`，不是本地开发用的 `backend/.env`。保留生产环境现有数据库、JWT、微信和 LLM 配置，补充上面的七个 `BITGET_*` 配置即可。只有公共行情时无需配置私有凭证。绑定用户 ID 必须从这个 **云端后端** 的 `/api/v1/auth/me` 取得，本地数据库用户 ID 不通用。
+
+```bash
+sudo docker compose up -d --build --no-deps backend
+curl -fsS --retry 20 --retry-connrefused --retry-delay 3 http://127.0.0.1:8080/health
+sudo docker compose exec nginx nginx -s reload
+curl -fsS http://127.0.0.1/health
+sudo docker compose ps backend
+sudo docker compose logs --tail=80 backend
+```
+
+后端重建后 reload Nginx，使其重新解析后端容器地址；健康检查应返回 `status: ok`。如果服务器只有 Compose V1，把所有 `sudo docker compose` 替换成 `sudo docker-compose`。这是现有服务更新，无需重跑执行系统升级和 Docker 安装的 `deploy.sh`，也无需删除数据库或卷。生产环境文件已被 Git 忽略，并从 Docker 构建上下文排除，凭证通过运行时环境注入。
+
+登录前端后进入「实体账户」验证真实持仓。没有凭证时接口返回未连接；`/health` 正常仅代表后端运行，不代表 Bitget 凭证验证成功。当前 Compose 只部署 API，不构建或托管 Web 前端；本地前端「设置」切换到云端 API 地址即可使用新接口。

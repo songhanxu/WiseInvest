@@ -1,5 +1,6 @@
 import { FormEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WatchlistPanel } from "./WatchlistPanel";
+import { AccountsPanel } from "./AccountsPanel";
 import type { LucideIcon } from "lucide-react";
 import {
   Activity,
@@ -36,7 +37,7 @@ import {
 
 const DEFAULT_API_BASE = "http://119.91.58.30";
 
-type Tab = "home" | "watchlist" | "chat" | "profile";
+type Tab = "home" | "accounts" | "watchlist" | "chat" | "profile";
 type View = Tab | "market" | "stock";
 type Role = "assistant" | "user";
 export type MarketId = "a_share" | "us_stock" | "hk_stock" | "crypto";
@@ -596,7 +597,7 @@ export function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeMarketId, setActiveMarketId] = useState<MarketId>("a_share");
   const [activeStock, setActiveStock] = useState<StockQuote | null>(null);
-  const [stockReturnView, setStockReturnView] = useState<"market" | "watchlist">("market");
+  const [stockReturnView, setStockReturnView] = useState<"market" | "watchlist" | "accounts">("market");
   const [draftPrompt, setDraftPrompt] = useState("");
   const [isOnline, setIsOnline] = useState<boolean | null>(null);
   const marketPulse = useMarketPulse(apiBase);
@@ -631,7 +632,7 @@ export function App() {
     setView("market");
   };
 
-  const openStock = (market: Market, stock: StockQuote, returnView: "market" | "watchlist" = "market") => {
+  const openStock = (market: Market, stock: StockQuote, returnView: "market" | "watchlist" | "accounts" = "market") => {
     setStockReturnView(returnView);
     setActiveMarketId(market.id);
     setActiveStock(stock);
@@ -694,6 +695,7 @@ export function App() {
 
         <nav className="nav-list">
           <NavButton active={view === "home"} icon={Home} label="总览" onClick={() => setView("home")} />
+          <NavButton active={view === "accounts"} icon={WalletCards} label="实体账户" onClick={() => setView("accounts")} />
           <NavButton active={view === "watchlist"} icon={ListPlus} label="自选列表" onClick={() => setView("watchlist")} />
           <NavButton active={view === "chat"} icon={MessageCircle} label="AI 分析" onClick={() => setView("chat")} />
           <NavButton active={view === "profile"} icon={UserCircle} label="设置" onClick={() => setView("profile")} />
@@ -738,6 +740,10 @@ export function App() {
             }}
             onNeedToken={() => setView("profile")}
           />
+        )}
+
+        {view === "accounts" && (
+          <AccountsPanel apiBase={apiBase} token={token} markets={markets} onOpenStock={(market, stock) => openStock(market, stock, "accounts")} onNeedToken={() => setView("profile")} />
         )}
 
         {view === "watchlist" && (
@@ -801,6 +807,7 @@ export function App() {
 
       <nav className="mobile-tabs">
         <NavButton active={view === "home" || view === "market" || view === "stock"} icon={Home} label="首页" onClick={() => setView("home")} compact />
+        <NavButton active={view === "accounts"} icon={WalletCards} label="账户" onClick={() => setView("accounts")} compact />
         <NavButton active={view === "watchlist"} icon={ListPlus} label="自选" onClick={() => setView("watchlist")} compact />
         <NavButton active={view === "chat"} icon={MessageCircle} label="对话" onClick={() => setView("chat")} compact />
         <NavButton active={view === "profile"} icon={UserCircle} label="我的" onClick={() => setView("profile")} compact />

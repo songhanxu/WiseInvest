@@ -15,6 +15,7 @@ func NewRouter(
 	authHandler *handler.AuthHandler,
 	deviceHandler *handler.DeviceHandler,
 	stockHandler *handler.StockHandler,
+	accountHandler *handler.AccountHandler,
 	jwtSvc *auth.JWTService,
 	logger *logger.Logger,
 ) *gin.Engine {
@@ -101,6 +102,8 @@ func NewRouter(
 			}
 
 			// ── Watchlist CRUD (requires auth, bound to UserID) ──────────
+			protected.GET("/accounts", accountHandler.GetAccounts)
+			protected.GET("/accounts/:accountID/holdings", accountHandler.GetHoldings)
 			watchlist := protected.Group("/stocks")
 			{
 				watchlist.GET("/watchlist", stockHandler.GetWatchlist)

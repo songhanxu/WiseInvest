@@ -1934,7 +1934,7 @@ p {
     bottom: 0;
     z-index: 20;
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 6px;
     padding: 8px 10px;
     background: rgba(7, 11, 31, 0.96);
@@ -1949,3 +1949,20 @@ p {
     font-size: 12px;
   }
 }
+
+
+.account-selector-card { padding: 20px; }
+.account-selector { display: flex; align-items: center; gap: 14px; }
+.account-selector > svg { color: var(--blue); }
+.account-selector label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.account-selector select { min-width: 200px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: #10172b; color: var(--text); font: inherit; }
+.account-connection-status { margin-left: auto; padding: 5px 10px; border-radius: 5px; background: rgba(255,255,255,.05); color: var(--muted); font-size: 12px; }
+.account-connection-status.ready { background: rgba(45,180,130,.12); color: #65d9ac; }
+.account-description { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; margin-top: 16px; }
+.account-description svg { color: #65d9ac; }
+.account-connect-note { display: flex; gap: 12px; align-items: flex-start; border: 1px solid var(--line); padding: 18px; border-radius: 8px; background: rgba(74,144,226,.045); }
+.account-connect-note svg { color: var(--blue); }
+.account-connect-note strong { font-size: 14px; }
+.account-connect-note p { margin-top: 6px; color: var(--muted); font-size: 12px; }
+.unified-watchlist-table small.account-position-detail { color: #a1bbe3; }
+@media (max-width: 680px) { .account-selector { flex-wrap: wrap; } .account-selector select { min-width: 150px; max-width: 200px; } .account-connection-status { margin-left: 0; } }

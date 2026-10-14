@@ -14,6 +14,7 @@ type Config struct {
 	Redis        RedisConfig
 	OpenAI       OpenAIConfig
 	Binance      BinanceConfig
+	Bitget       BitgetConfig
 	Search       SearchConfig
 	JWT          JWTConfig
 	CORS         CORSConfig
@@ -90,6 +91,10 @@ type CORSConfig struct {
 
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
+	bitgetConfig, err := loadBitgetConfig()
+	if err != nil {
+		return nil, err
+	}
 	redisDB, err := strconv.Atoi(getEnv("REDIS_DB", "0"))
 	if err != nil {
 		return nil, fmt.Errorf("invalid REDIS_DB: %w", err)
@@ -101,6 +106,7 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
+		Bitget: bitgetConfig,
 		Server: ServerConfig{
 			Port: getEnv("SERVER_PORT", "8080"),
 			Mode: getEnv("SERVER_MODE", "debug"),

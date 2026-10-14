@@ -174,6 +174,7 @@ func main() {
 	// Initialize quote cache for high-frequency market data
 	quoteCache := cache.NewQuoteCache(redisClient, log)
 	stockHandler := handler.NewStockHandler(watchlistRepo, log, quoteCache, searcher, llmClient)
+	accountHandler := handler.NewAccountHandler(cfg.Bitget)
 	defer stockHandler.Stop() // gracefully stop background tickers
 
 	// ── Scheduler ────────────────────────────────────────────────────────────
@@ -183,7 +184,7 @@ func main() {
 	defer sched.Stop()
 
 	// Initialize HTTP server
-	router := api.NewRouter(conversationService, authHandler, deviceHandler, stockHandler, jwtSvc, log)
+	router := api.NewRouter(conversationService, authHandler, deviceHandler, stockHandler, accountHandler, jwtSvc, log)
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.Server.Port),
