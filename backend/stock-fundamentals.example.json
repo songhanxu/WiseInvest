@@ -1,0 +1,20 @@
+{
+  "us_stock:AAPL": {
+    "eps": null,
+    "pe": null,
+    "forward_pe": null,
+    "forward_period": "",
+    "guidance_eps": null,
+    "guidance_eps_low": null,
+    "guidance_eps_high": null,
+    "guidance_period": "",
+    "guidance_basis": "",
+    "guidance_report_date": "",
+    "guidance_source_url": "",
+    "next_earnings_date": "",
+    "earnings_date_status": "",
+    "currency": "USD",
+    "source": "",
+    "as_of": ""
+  }
+}

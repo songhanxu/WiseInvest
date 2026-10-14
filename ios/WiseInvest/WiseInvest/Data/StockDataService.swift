@@ -266,10 +266,9 @@ class StockDataService: ObservableObject {
         /// - Crypto supports all periods including 4h
         static func availablePeriods(for market: String) -> [KLinePeriod] {
             switch market.lowercased() {
-            case "us_stock":
-                // US stocks: Sina API only provides daily data for individual stocks
-                // US indices (via Tencent API) support daily and weekly
-                return [.d1, .w1]
+            case "us_stock", "hk_stock":
+                // Bitget stock tokens / Quanto support intraday bars.
+                return allCases
             case "a_share":
                 // A-share: Sina API supports intraday periods but not 4h
                 // (4h K-line = daily K-line due to 4h trading day)
@@ -899,9 +898,15 @@ private struct StockAPIResponse: Decodable {
     let low: Double
     let open: Double
     let previousClose: Double
+    let source: String?
+    let currency: String?
+    let productType: String?
+    let changeBasis: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, symbol, name, market, change, volume, high, low, open
+        case id, symbol, name, market, change, volume, high, low, open, source, currency
+        case productType = "product_type"
+        case changeBasis = "change_basis"
         case currentPrice = "current_price"
         case changePercent = "change_percent"
         case previousClose = "previous_close"
@@ -920,7 +925,8 @@ private struct StockAPIResponse: Decodable {
             high: high,
             low: low,
             open: open,
-            previousClose: previousClose
+            previousClose: previousClose, source: source, currency: currency,
+            productType: productType, changeBasis: changeBasis
         )
     }
 }

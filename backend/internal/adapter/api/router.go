@@ -56,6 +56,7 @@ func NewRouter(
 			stocks.GET("/indices", stockHandler.GetIndices)
 			stocks.GET("/search", stockHandler.SearchStocks)
 			stocks.GET("/quote", stockHandler.GetStockQuote)
+			stocks.GET("/fundamentals", stockHandler.GetFundamentals)
 			stocks.GET("/kline", stockHandler.GetKLineData)
 			stocks.GET("/news", stockHandler.GetStockNews)
 			stocks.GET("/news/enhance", stockHandler.EnhanceNewsItem)
@@ -103,6 +104,7 @@ func NewRouter(
 			watchlist := protected.Group("/stocks")
 			{
 				watchlist.GET("/watchlist", stockHandler.GetWatchlist)
+				watchlist.GET("/watchlist/all", stockHandler.GetAllWatchlist)
 				watchlist.POST("/watchlist", stockHandler.AddToWatchlist)
 				watchlist.DELETE("/watchlist", stockHandler.RemoveFromWatchlist)
 			}

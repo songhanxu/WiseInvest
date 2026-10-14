@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/songhanxu/wiseinvest/internal/adapter/repository"
 	"github.com/songhanxu/wiseinvest/internal/domain/model"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/bitget"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/cache"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/llm"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/logger"
@@ -27,21 +28,23 @@ import (
 
 // StockHandler provides real-time market data endpoints.
 type StockHandler struct {
+	bitget        *bitget.Client
+	fundamentals  *FundamentalsService
 	watchlistRepo *repository.WatchlistRepository
 	logger        *logger.Logger
 	httpClient    *http.Client
 	cache         *cache.QuoteCache // Redis-backed quote cache (may be nil if cache is disabled)
 	stopTicker    context.CancelFunc
-	searcher      search.Searcher      // Web search for news (may be NoopSearcher)
-	llmClient     *llm.OpenAIClient    // LLM client for AI summaries (may be nil)
-	fmpAPIKey     string               // FMP (Financial Modeling Prep) API key
-	llmSem        chan struct{}         // Semaphore to limit concurrent LLM requests (prevents DeepSeek overload)
-	wsHub         *WSHub               // WebSocket hub for real-time push (may be nil)
-	binanceWS     *BinanceWSClient     // Binance WebSocket stream for real-time crypto data
+	searcher      search.Searcher   // Web search for news (may be NoopSearcher)
+	llmClient     *llm.OpenAIClient // LLM client for AI summaries (may be nil)
+	fmpAPIKey     string            // FMP (Financial Modeling Prep) API key
+	llmSem        chan struct{}     // Semaphore to limit concurrent LLM requests (prevents DeepSeek overload)
+	wsHub         *WSHub            // WebSocket hub for real-time push (may be nil)
+	binanceWS     *BinanceWSClient  // Binance WebSocket stream for real-time crypto data
 
 	// In-memory caches for slow-changing crypto data (sparklines, fear/greed index).
 	// Updated every 60 s by a dedicated goroutine in backgroundRefreshLoop.
-	cryptoSlowMu      sync.RWMutex
+	cryptoSlowMu       sync.RWMutex
 	cryptoBTCSparkline []float64
 	cryptoETHSparkline []float64
 	cryptoFearGreed    *IndexResponse // nil until first fetch
@@ -53,6 +56,8 @@ type StockHandler struct {
 func NewStockHandler(watchlistRepo *repository.WatchlistRepository, logger *logger.Logger, quoteCache *cache.QuoteCache, searcher search.Searcher, llmClient *llm.OpenAIClient) *StockHandler {
 	h := &StockHandler{
 		watchlistRepo: watchlistRepo,
+		bitget:        bitget.NewClient(os.Getenv("BITGET_BASE_URL")),
+		fundamentals:  NewFundamentalsService(os.Getenv("FMP_API_KEY"), os.Getenv("STOCK_FUNDAMENTALS_FILE")),
 		logger:        logger,
 		httpClient:    &http.Client{Timeout: 10 * time.Second},
 		cache:         quoteCache,
@@ -368,6 +373,9 @@ type IndexResponse struct {
 	Change        float64   `json:"change"`
 	ChangePercent float64   `json:"change_percent"`
 	SparklineData []float64 `json:"sparkline_data"`
+	Source        string    `json:"source,omitempty"`
+	Currency      string    `json:"currency,omitempty"`
+	ProductType   string    `json:"product_type,omitempty"`
 }
 
 func (h *StockHandler) GetIndices(c *gin.Context) {
@@ -395,6 +403,8 @@ func (h *StockHandler) GetIndices(c *gin.Context) {
 		indices, err = h.fetchAShareIndices(ctx)
 	case "us_stock":
 		indices, err = h.fetchUSStockIndices(ctx)
+	case "hk_stock":
+		indices, err = h.fetchHKStockBoard(ctx)
 	case "crypto":
 		indices, err = h.fetchCryptoIndices(ctx)
 	default:
@@ -1004,18 +1014,25 @@ func (h *StockHandler) fetchFearGreedIndex(ctx context.Context) (IndexResponse, 
 // ──────────────────────────────────────────────────────────────────────────────
 
 type StockResponse struct {
-	ID            string  `json:"id"`
-	Symbol        string  `json:"symbol"`
-	Name          string  `json:"name"`
-	Market        string  `json:"market"`
-	CurrentPrice  float64 `json:"current_price"`
-	Change        float64 `json:"change"`
-	ChangePercent float64 `json:"change_percent"`
-	Volume        float64 `json:"volume"` // in 亿
-	High          float64 `json:"high"`
-	Low           float64 `json:"low"`
-	Open          float64 `json:"open"`
-	PreviousClose float64 `json:"previous_close"`
+	ID             string  `json:"id"`
+	Symbol         string  `json:"symbol"`
+	Name           string  `json:"name"`
+	Market         string  `json:"market"`
+	CurrentPrice   float64 `json:"current_price"`
+	Change         float64 `json:"change"`
+	ChangePercent  float64 `json:"change_percent"`
+	Volume         float64 `json:"volume"` // in 亿
+	High           float64 `json:"high"`
+	Low            float64 `json:"low"`
+	Open           float64 `json:"open"`
+	PreviousClose  float64 `json:"previous_close"`
+	Source         string  `json:"source,omitempty"`
+	ProviderSymbol string  `json:"provider_symbol,omitempty"`
+	Currency       string  `json:"currency,omitempty"`
+	ProductType    string  `json:"product_type,omitempty"`
+	ChangeBasis    string  `json:"change_basis,omitempty"`
+	QuoteTime      string  `json:"quote_time,omitempty"`
+	QuoteAvailable *bool   `json:"quote_available,omitempty"`
 }
 
 func (h *StockHandler) SearchStocks(c *gin.Context) {
@@ -1033,6 +1050,8 @@ func (h *StockHandler) SearchStocks(c *gin.Context) {
 		stocks, err = h.searchAShareStocks(ctx, query)
 	case "us_stock":
 		stocks, err = h.searchUSStocks(ctx, query)
+	case "hk_stock":
+		stocks, err = h.searchHKStocks(ctx, query)
 	case "crypto":
 		stocks, err = h.searchCryptoStocks(ctx, query)
 	default:
@@ -1042,7 +1061,8 @@ func (h *StockHandler) SearchStocks(c *gin.Context) {
 
 	if err != nil {
 		h.logger.WithField("error", err).Warn("Stock search failed")
-		stocks = []StockResponse{}
+		c.JSON(http.StatusBadGateway, gin.H{"error": "行情搜索暂不可用，请稍后重试"})
+		return
 	}
 
 	c.JSON(http.StatusOK, stocks)
@@ -1161,7 +1181,7 @@ func (h *StockHandler) fetchAShareStocksByCode(ctx context.Context, codes string
 		price := parseFloat(fields[3])
 		prevClose := parseFloat(fields[4])
 		openPrice := parseFloat(fields[5])
-		vol := parseFloat(fields[6])     // in 手
+		vol := parseFloat(fields[6]) // in 手
 		high := parseFloat(fields[33])
 		low := parseFloat(fields[34])
 
@@ -1202,9 +1222,9 @@ func (h *StockHandler) fetchAShareStocksByCode(ctx context.Context, codes string
 
 // ── US Stock Search (Yahoo Finance) ──────────────────────────────────────────
 
-func (h *StockHandler) searchUSStocks(ctx context.Context, query string) ([]StockResponse, error) {
+func (h *StockHandler) searchTencentUSStocks(ctx context.Context, query string) ([]StockResponse, error) {
 	if query == "" {
-		return h.fetchUSStocksBySymbol(ctx, "AAPL,NVDA,TSLA,MSFT,GOOGL,AMZN,META,AMD,NFLX")
+		return h.fetchTencentUSStocksBySymbol(ctx, "AAPL,NVDA,TSLA,MSFT,GOOGL,AMZN,META,AMD,NFLX")
 	}
 
 	// Tencent Finance smartbox search API (accessible from mainland China)
@@ -1261,10 +1281,10 @@ func (h *StockHandler) searchUSStocks(ctx context.Context, query string) ([]Stoc
 		symbols = symbols[:10]
 	}
 
-	return h.fetchUSStocksBySymbol(ctx, strings.Join(symbols, ","))
+	return h.fetchTencentUSStocksBySymbol(ctx, strings.Join(symbols, ","))
 }
 
-func (h *StockHandler) fetchUSStocksBySymbol(ctx context.Context, symbolsStr string) ([]StockResponse, error) {
+func (h *StockHandler) fetchTencentUSStocksBySymbol(ctx context.Context, symbolsStr string) ([]StockResponse, error) {
 	symbols := strings.Split(symbolsStr, ",")
 	// Build Tencent Finance batch query codes: "usAAPL,usNVDA,usTSLA"
 	var tCodes []string
@@ -1381,23 +1401,23 @@ var cryptoSymbolMap = map[string]struct {
 	"ada": {"ADAUSDT", "Cardano"}, "cardano": {"ADAUSDT", "Cardano"},
 	"doge": {"DOGEUSDT", "Dogecoin"}, "dogecoin": {"DOGEUSDT", "Dogecoin"},
 	"avax": {"AVAXUSDT", "Avalanche"},
-	"dot": {"DOTUSDT", "Polkadot"}, "polkadot": {"DOTUSDT", "Polkadot"},
+	"dot":  {"DOTUSDT", "Polkadot"}, "polkadot": {"DOTUSDT", "Polkadot"},
 	"link": {"LINKUSDT", "Chainlink"}, "chainlink": {"LINKUSDT", "Chainlink"},
 	"ltc": {"LTCUSDT", "Litecoin"}, "litecoin": {"LTCUSDT", "Litecoin"},
 	"atom": {"ATOMUSDT", "Cosmos"}, "cosmos": {"ATOMUSDT", "Cosmos"},
-	"uni": {"UNIUSDT", "Uniswap"},
+	"uni":   {"UNIUSDT", "Uniswap"},
 	"matic": {"MATICUSDT", "Polygon"},
-	"near": {"NEARUSDT", "NEAR"},
-	"trx": {"TRXUSDT", "TRON"},
-	"etc": {"ETCUSDT", "Ethereum Classic"},
-	"bch": {"BCHUSDT", "Bitcoin Cash"},
-	"sui": {"SUIUSDT", "Sui"},
-	"apt": {"APTUSDT", "Aptos"},
-	"arb": {"ARBUSDT", "Arbitrum"},
-	"op": {"OPUSDT", "Optimism"},
-	"ton": {"TONUSDT", "Toncoin"},
-	"pepe": {"PEPEUSDT", "Pepe"},
-	"shib": {"SHIBUSDT", "Shiba Inu"},
+	"near":  {"NEARUSDT", "NEAR"},
+	"trx":   {"TRXUSDT", "TRON"},
+	"etc":   {"ETCUSDT", "Ethereum Classic"},
+	"bch":   {"BCHUSDT", "Bitcoin Cash"},
+	"sui":   {"SUIUSDT", "Sui"},
+	"apt":   {"APTUSDT", "Aptos"},
+	"arb":   {"ARBUSDT", "Arbitrum"},
+	"op":    {"OPUSDT", "Optimism"},
+	"ton":   {"TONUSDT", "Toncoin"},
+	"pepe":  {"PEPEUSDT", "Pepe"},
+	"shib":  {"SHIBUSDT", "Shiba Inu"},
 }
 
 // defaultCryptoSymbols is the list of default crypto symbols shown when no query is provided.
@@ -1530,6 +1550,12 @@ func (h *StockHandler) GetWatchlist(c *gin.Context) {
 			symbols = append(symbols, item.StockCode)
 		}
 		stocks, _ = h.fetchUSStocksBySymbol(ctx, strings.Join(symbols, ","))
+	case "hk_stock":
+		var symbols []string
+		for _, item := range items {
+			symbols = append(symbols, item.StockCode)
+		}
+		stocks, _ = h.fetchBitgetStocks(ctx, "hk_stock", symbols)
 	case "crypto":
 		// Collect base symbols and try cache first to avoid unnecessary Binance calls
 		type cryptoItem struct {
@@ -1621,7 +1647,7 @@ func (h *StockHandler) GetWatchlist(c *gin.Context) {
 	if stocks == nil {
 		stocks = []StockResponse{}
 	}
-	c.JSON(http.StatusOK, stocks)
+	c.JSON(http.StatusOK, mergeWatchlistQuotes(items, stocks))
 }
 
 type AddWatchlistRequest struct {
@@ -1640,11 +1666,18 @@ func (h *StockHandler) AddToWatchlist(c *gin.Context) {
 		return
 	}
 
+	if !validStockMarket(req.Market) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid market type"})
+		return
+	}
 	h.logger.WithField("userID", userID).WithField("market", req.Market).WithField("stock_code", req.StockCode).Info("AddToWatchlist request")
 
 	// Normalize crypto index IDs to real symbols before storing
 	// e.g. "btc_price" → "BTC", "eth_price" → "ETH"
 	stockCode := req.StockCode
+	if req.Market == "us_stock" || req.Market == "hk_stock" {
+		stockCode = bitget.NormalizeCode(req.Market, stockCode)
+	}
 	symbol := req.Symbol
 	if req.Market == "crypto" {
 		if mapped, ok := cryptoIndexToSymbol[strings.ToLower(stockCode)]; ok {
@@ -1694,6 +1727,9 @@ func (h *StockHandler) RemoveFromWatchlist(c *gin.Context) {
 	}
 
 	code := req.StockCode
+	if req.Market == "us_stock" || req.Market == "hk_stock" {
+		code = bitget.NormalizeCode(req.Market, code)
+	}
 
 	// Try removing with the exact code first
 	if err := h.watchlistRepo.Remove(userID, req.Market, code); err != nil {
@@ -1767,6 +1803,8 @@ func (h *StockHandler) GetStockQuote(c *gin.Context) {
 		stocks, err = h.fetchAShareStocksByCode(ctx, fullCode)
 	case "us_stock":
 		stocks, err = h.fetchUSStocksBySymbol(ctx, code)
+	case "hk_stock":
+		stocks, err = h.fetchBitgetStocks(ctx, "hk_stock", []string{code})
 	case "crypto":
 		coinCode := strings.TrimSpace(code)
 		// Map index IDs to real symbols (e.g. "btc_price" → "BTC")
@@ -1815,6 +1853,7 @@ type KLineResponse struct {
 	High   float64 `json:"high"`
 	Low    float64 `json:"low"`
 	Volume float64 `json:"volume"`
+	Source string  `json:"source,omitempty"`
 }
 
 // sinaScaleMap maps our unified period strings to Sina Finance API scale values (minutes).
@@ -1935,6 +1974,8 @@ func (h *StockHandler) GetKLineData(c *gin.Context) {
 			klines, err = h.fetchAShareKLine(attemptCtx, code, period, limit)
 		case "us_stock":
 			klines, err = h.fetchUSStockKLine(attemptCtx, code, period, limit)
+		case "hk_stock":
+			klines, err = h.fetchBitgetKLine(attemptCtx, "hk_stock", code, period, limit)
 		case "crypto":
 			klines, err = h.fetchCryptoKLine(attemptCtx, code, period, limit)
 		}
@@ -2163,13 +2204,14 @@ func (h *StockHandler) aggregateTodayBar(ctx context.Context, symbol, todayStr s
 		Volume: todayVolume,
 	}
 }
+
 var usIndexTencentCode = map[string]string{
 	"DJI":  "us.DJI",
 	"GSPC": "us.INX",
 	"IXIC": "us.IXIC",
 }
 
-func (h *StockHandler) fetchUSStockKLine(ctx context.Context, symbol string, period string, limit int) ([]KLineResponse, error) {
+func (h *StockHandler) fetchLegacyUSStockKLine(ctx context.Context, symbol string, period string, limit int) ([]KLineResponse, error) {
 	// Check if the symbol is a US index — use Tencent Finance kline API for indices
 	// (Sina API returns null for US indices like DJI/INX/IXIC)
 	sym := strings.TrimSpace(symbol)
@@ -2584,7 +2626,7 @@ func normalizeSearchDate(raw string) string {
 
 	// --- Try common absolute date formats ---
 	formats := []string{
-		time.RFC3339,                // 2025-12-17T08:35:00Z
+		time.RFC3339,               // 2025-12-17T08:35:00Z
 		"2006-01-02T15:04:05Z0700", // 2025-12-17T08:35:00+0800
 		"2006-01-02T15:04:05",      // 2025-12-17T08:35:00
 		"2006-01-02",               // 2025-12-17
@@ -3089,9 +3131,9 @@ func (h *StockHandler) fetchNewsViaSearch(ctx context.Context, code, name, marke
 
 	// --- Build search queries ---
 	type searchRound struct {
-		query       string
-		maxResults  int
-		allowBroad  bool // if true, relax title-match filter to allow market-wide news
+		query      string
+		maxResults int
+		allowBroad bool // if true, relax title-match filter to allow market-wide news
 	}
 	var rounds []searchRound
 
@@ -3107,6 +3149,8 @@ func (h *StockHandler) fetchNewsViaSearch(ctx context.Context, code, name, marke
 			maxResults: 8,
 		})
 
+	case "hk_stock":
+		rounds = append(rounds, searchRound{query: fmt.Sprintf("%s %s 港股 最新新闻 财报 公告 site:hkexnews.hk OR site:xueqiu.com OR site:wallstreetcn.com", displayName, code), maxResults: 15})
 	case "us_stock":
 		rounds = append(rounds, searchRound{
 			query:      fmt.Sprintf("%s 美股 最新新闻 分析", displayName) + siteClause,
@@ -3230,6 +3274,8 @@ func (h *StockHandler) fetchNewsViaSearch(ctx context.Context, code, name, marke
 		switch market {
 		case "a_share":
 			fallbackQuery = fmt.Sprintf("%s 股票 最新新闻", displayName)
+		case "hk_stock":
+			fallbackQuery = fmt.Sprintf("%s %s 港股 公司公告 财报", displayName, code)
 		case "us_stock":
 			fallbackQuery = fmt.Sprintf("%s 美股 新闻 最新", displayName)
 		case "crypto":
@@ -3493,7 +3539,7 @@ func (h *StockHandler) EnhanceBatchNews(c *gin.Context) {
 	// Return immediately — enhancement runs asynchronously in the background.
 	// Each stock's cache is updated as soon as its LLM call completes,
 	// so the client can poll via GetBatchNews to pick up results incrementally.
-	h.logger.Info("BatchEnhance: accepted %d jobs, starting async processing", len(jobs))
+	h.logger.Infof("BatchEnhance: accepted %d jobs, starting async processing", len(jobs))
 	c.JSON(http.StatusAccepted, gin.H{"status": "accepted", "pending": len(jobs)})
 
 	// Fire-and-forget: process all jobs in background goroutines
@@ -3514,7 +3560,7 @@ func (h *StockHandler) EnhanceBatchNews(c *gin.Context) {
 
 			h.enhanceNewsWithAI(enhCtx, newsCopy, j.name, j.code)
 			setNewsToMemCache(j.code, j.market, newsCopy)
-			h.logger.Info("BatchEnhance: completed %s (%s) in %.1fs (total elapsed %.1fs)",
+			h.logger.Infof("BatchEnhance: completed %s (%s) in %.1fs (total elapsed %.1fs)",
 				j.code, j.name, time.Since(jobStart).Seconds(), time.Since(batchStart).Seconds())
 		}(job)
 	}
@@ -3599,37 +3645,37 @@ func extractDomain(rawURL string) string {
 
 	// Map common domains to Chinese names
 	domainMap := map[string]string{
-		"finance.sina.com.cn":    "新浪财经",
-		"finance.qq.com":         "腾讯财经",
-		"stock.eastmoney.com":    "东方财富",
-		"eastmoney.com":          "东方财富",
-		"xueqiu.com":             "雪球",
-		"wallstreetcn.com":       "华尔街见闻",
-		"cls.cn":                 "财联社",
-		"caixin.com":             "财新",
-		"36kr.com":               "36氪",
-		"jinse.cn":               "金色财经",
-		"jinse.com":              "金色财经",
-		"8btc.com":               "巴比特",
-		"theblockbeats.info":     "BlockBeats",
-		"odaily.news":            "Odaily星球日报",
-		"panewslab.com":          "PANews",
-		"techflowpost.com":       "深潮TechFlow",
-		"bloomberg.com":          "Bloomberg",
-		"reuters.com":            "Reuters",
-		"cnbc.com":               "CNBC",
-		"wsj.com":                "华尔街日报",
-		"nbd.com.cn":             "每日经济新闻",
-		"stcn.com":               "证券时报",
-		"cs.com.cn":              "中证网",
-		"10jqka.com.cn":          "同花顺",
-		"yicai.com":              "第一财经",
-		"thepaper.cn":            "澎湃新闻",
-		"techcrunch.com":         "TechCrunch",
-		"jin10.com":              "金十数据",
-		"cninfo.com.cn":          "巨潮资讯",
-		"foresightnews.pro":      "Foresight News",
-		"marsbit.co":             "MarsBit",
+		"finance.sina.com.cn": "新浪财经",
+		"finance.qq.com":      "腾讯财经",
+		"stock.eastmoney.com": "东方财富",
+		"eastmoney.com":       "东方财富",
+		"xueqiu.com":          "雪球",
+		"wallstreetcn.com":    "华尔街见闻",
+		"cls.cn":              "财联社",
+		"caixin.com":          "财新",
+		"36kr.com":            "36氪",
+		"jinse.cn":            "金色财经",
+		"jinse.com":           "金色财经",
+		"8btc.com":            "巴比特",
+		"theblockbeats.info":  "BlockBeats",
+		"odaily.news":         "Odaily星球日报",
+		"panewslab.com":       "PANews",
+		"techflowpost.com":    "深潮TechFlow",
+		"bloomberg.com":       "Bloomberg",
+		"reuters.com":         "Reuters",
+		"cnbc.com":            "CNBC",
+		"wsj.com":             "华尔街日报",
+		"nbd.com.cn":          "每日经济新闻",
+		"stcn.com":            "证券时报",
+		"cs.com.cn":           "中证网",
+		"10jqka.com.cn":       "同花顺",
+		"yicai.com":           "第一财经",
+		"thepaper.cn":         "澎湃新闻",
+		"techcrunch.com":      "TechCrunch",
+		"jin10.com":           "金十数据",
+		"cninfo.com.cn":       "巨潮资讯",
+		"foresightnews.pro":   "Foresight News",
+		"marsbit.co":          "MarsBit",
 	}
 
 	for domain, cnName := range domainMap {
@@ -3682,10 +3728,10 @@ func (h *StockHandler) fetchAShareNews(ctx context.Context, code string, name st
 	var result struct {
 		Result struct {
 			CmsArticleWebOld []struct {
-				Title   string `json:"title"`
-				Content string `json:"content"`
-				Date    string `json:"date"`
-				MediaName string `json:"mediaName"`
+				Title      string `json:"title"`
+				Content    string `json:"content"`
+				Date       string `json:"date"`
+				MediaName  string `json:"mediaName"`
 				ArticleUrl string `json:"url"`
 			} `json:"cmsArticleWebOld"`
 		} `json:"result"`
@@ -4025,8 +4071,8 @@ func (h *StockHandler) fetchMultiTimeframeKLineSummary(code, market string) stri
 	switch market {
 	case "crypto":
 		periods = []string{"1h", "4h", "1d", "1w"}
-	case "us_stock":
-		periods = []string{"1d", "1w"}
+	case "us_stock", "hk_stock":
+		periods = []string{"1h", "1d", "1w"}
 	default: // a_share
 		periods = []string{"30m", "1d", "1w"}
 	}
@@ -4048,6 +4094,8 @@ func (h *StockHandler) fetchMultiTimeframeKLineSummary(code, market string) stri
 				klines, err = h.fetchAShareKLine(ctx, code, period, limit)
 			case "us_stock":
 				klines, err = h.fetchUSStockKLine(ctx, code, period, limit)
+			case "hk_stock":
+				klines, err = h.fetchBitgetKLine(ctx, "hk_stock", code, period, limit)
 			case "crypto":
 				klines, err = h.fetchCryptoKLine(ctx, code, period, limit)
 			}
@@ -4150,6 +4198,9 @@ func (h *StockHandler) buildComprehensiveAnalysisPrompt(name, code, market, mult
 	if isCrypto {
 		actionLabel = "做多/做空"
 		assetType = "加密货币"
+	} else if market == "hk_stock" {
+		actionLabel = "做多/做空"
+		assetType = "港股 Quanto 合约（HKD 报价、USDT 结算，行情不是港交所现货）"
 	} else if market == "us_stock" {
 		actionLabel = "买入/卖出"
 		assetType = "美股"
@@ -4517,8 +4568,8 @@ type BatchEnhanceStock struct {
 	Code         string `json:"code"`
 	Name         string `json:"name"`
 	Market       string `json:"market"`
-	KlineSummary string `json:"kline_summary"`  // optional fallback
-	PriceSummary string `json:"price_summary"`  // optional fallback
+	KlineSummary string `json:"kline_summary"` // optional fallback
+	PriceSummary string `json:"price_summary"` // optional fallback
 }
 
 func (h *StockHandler) BatchEnhanceAnalysis(c *gin.Context) {

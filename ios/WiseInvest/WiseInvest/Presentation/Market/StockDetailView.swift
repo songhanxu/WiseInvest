@@ -202,13 +202,13 @@ struct StockDetailView: View {
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(.textPrimary)
                 HStack(spacing: 4) {
-                    Text(displayStock.symbol)
+                    Text(displayStock.symbol + (displayStock.currency.map { " · " + $0 } ?? ""))
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(.textSecondary)
                     Circle()
                         .fill(tradingStatusColor)
                         .frame(width: 5, height: 5)
-                    Text(tradingStatus.label)
+                    Text(displayStock.source == "bitget" ? (displayStock.productType == "quanto_perpetual" ? "Quanto · 24h" : "股票代币 · 24h") : tradingStatus.label)
                         .font(.system(size: 10))
                         .foregroundColor(.textTertiary)
                 }

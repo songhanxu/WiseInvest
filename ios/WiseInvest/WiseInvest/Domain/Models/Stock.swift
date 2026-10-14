@@ -15,6 +15,10 @@ struct Stock: Identifiable, Codable, Hashable {
     var low: Double
     var open: Double
     var previousClose: Double
+    var source: String?
+    var currency: String?
+    var productType: String?
+    var changeBasis: String?
     var isIndex: Bool        // 是否为大盘指数（指数不可加入自选）
     // Extended hours trading (US stocks only)
     var extendedPrice: Double?   // 盘前或盘后价格
@@ -25,6 +29,7 @@ struct Stock: Identifiable, Codable, Hashable {
         case id, symbol, name, market, currentPrice, change, changePercent
         case volume, high, low, open, previousClose, isIndex
         case extendedPrice, extendedChange, priceStatus
+        case source, currency, productType, changeBasis
     }
 
     /// Default initializer with isIndex defaulting to false
@@ -33,7 +38,8 @@ struct Stock: Identifiable, Codable, Hashable {
          volume: Double, high: Double, low: Double, open: Double,
          previousClose: Double, isIndex: Bool = false,
          extendedPrice: Double? = nil, extendedChange: Double? = nil,
-         priceStatus: String? = nil) {
+         priceStatus: String? = nil, source: String? = nil, currency: String? = nil,
+         productType: String? = nil, changeBasis: String? = nil) {
         self.id = id
         self.symbol = symbol
         self.name = name
@@ -46,6 +52,10 @@ struct Stock: Identifiable, Codable, Hashable {
         self.low = low
         self.open = open
         self.previousClose = previousClose
+        self.source = source
+        self.currency = currency
+        self.productType = productType
+        self.changeBasis = changeBasis
         self.isIndex = isIndex
         self.extendedPrice = extendedPrice
         self.extendedChange = extendedChange
@@ -66,6 +76,10 @@ struct Stock: Identifiable, Codable, Hashable {
         low = try c.decode(Double.self, forKey: .low)
         open = try c.decode(Double.self, forKey: .open)
         previousClose = try c.decode(Double.self, forKey: .previousClose)
+        source = try c.decodeIfPresent(String.self, forKey: .source)
+        currency = try c.decodeIfPresent(String.self, forKey: .currency)
+        productType = try c.decodeIfPresent(String.self, forKey: .productType)
+        changeBasis = try c.decodeIfPresent(String.self, forKey: .changeBasis)
         isIndex = try c.decodeIfPresent(Bool.self, forKey: .isIndex) ?? false
         extendedPrice = try c.decodeIfPresent(Double.self, forKey: .extendedPrice)
         extendedChange = try c.decodeIfPresent(Double.self, forKey: .extendedChange)

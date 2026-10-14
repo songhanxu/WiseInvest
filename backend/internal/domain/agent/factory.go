@@ -49,6 +49,8 @@ func (f *Factory) CreateAgent(agentType string) (Agent, error) {
 	// Market agents (primary)
 	case TypeAShare:
 		return NewAShareAgent(f.llmClient, f.searcher, f.aShareRegistry, f.logger), nil
+	case TypeHKStock:
+		return NewHKStockAgent(f.llmClient, f.searcher, f.usStockRegistry, f.logger), nil
 	case TypeUSStock:
 		return NewUSStockAgent(f.llmClient, f.searcher, f.usStockRegistry, f.logger), nil
 	case TypeCrypto:
@@ -84,7 +86,7 @@ func (f *Factory) CreateGroupChatAgents(participants []string) []*GroupPersonaAg
 	return agents
 }
 
-// GetAvailableAgents returns the three market modules available to users
+// GetAvailableAgents returns the market modules available to users
 func (f *Factory) GetAvailableAgents() []AgentInfo {
 	return []AgentInfo{
 		{
@@ -101,6 +103,7 @@ func (f *Factory) GetAvailableAgents() []AgentInfo {
 			Icon:        "dollarsign.circle",
 			Color:       "#1565C0",
 		},
+		{Type: TypeHKStock, Name: "港 股", Description: "港股研究 · Bitget Quanto 合约行情", Icon: "building.2", Color: "#8B5CF6"},
 		{
 			Type:        TypeCrypto,
 			Name:        "币 圈",

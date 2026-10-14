@@ -311,6 +311,8 @@ class ConversationViewModel: ObservableObject {
             return Market.aShare.welcomeMessage
         case .usStock:
             return Market.usStock.welcomeMessage
+        case .hkStock:
+            return Market.hkStock.welcomeMessage
         case .crypto:
             return Market.crypto.welcomeMessage
         case .investmentAdvisor, .conversation:

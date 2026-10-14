@@ -1,8 +1,11 @@
 import { FormEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { WatchlistPanel } from "./WatchlistPanel";
 import type { LucideIcon } from "lucide-react";
 import {
   Activity,
   BarChart3,
+  Building2,
+  ListPlus,
   Bell,
   Bitcoin,
   Bot,
@@ -33,13 +36,13 @@ import {
 
 const DEFAULT_API_BASE = "http://119.91.58.30";
 
-type Tab = "home" | "chat" | "profile";
+type Tab = "home" | "watchlist" | "chat" | "profile";
 type View = Tab | "market" | "stock";
 type Role = "assistant" | "user";
-type MarketId = "a_share" | "us_stock" | "crypto";
+export type MarketId = "a_share" | "us_stock" | "hk_stock" | "crypto";
 type KLinePeriod = "5m" | "15m" | "30m" | "1h" | "4h" | "1d" | "1w";
 
-type Market = {
+export type Market = {
   id: MarketId;
   displayName: string;
   title: string;
@@ -76,9 +79,12 @@ type IndexQuote = {
   change: number;
   change_percent: number;
   sparkline_data?: number[];
+  source?: string;
+  currency?: string;
+  product_type?: string;
 };
 
-type StockQuote = {
+export type StockQuote = {
   id: string;
   symbol: string;
   name: string;
@@ -91,6 +97,12 @@ type StockQuote = {
   low: number;
   open: number;
   previous_close: number;
+  source?: string;
+  provider_symbol?: string;
+  currency?: string;
+  product_type?: string;
+  change_basis?: string;
+  quote_available?: boolean;
 };
 
 type KLinePoint = {
@@ -133,7 +145,7 @@ const kLinePeriodLabels: Record<KLinePeriod, string> = {
 const allKLinePeriods: KLinePeriod[] = ["5m", "15m", "30m", "1h", "4h", "1d", "1w"];
 
 function availableKLinePeriods(marketId: MarketId): KLinePeriod[] {
-  if (marketId === "us_stock") return ["1d", "1w"];
+  if (marketId === "us_stock" || marketId === "hk_stock") return allKLinePeriods;
   if (marketId === "a_share") return ["5m", "15m", "30m", "1h", "1d", "1w"];
   return allKLinePeriods;
 }
@@ -171,6 +183,18 @@ const markets: Market[] = [
     featured: ["AAPL", "NVDA", "TSLA"]
   },
   {
+    id: "hk_stock",
+    displayName: "港 股",
+    title: "港股 Agent",
+    subtitle: "Bitget Quanto · HKD 报价",
+    description: "跟踪港股的 Quanto 合约行情，结合公司财报与估值研究。",
+    scope: ["港股研究", "财报解读", "Quanto 合约", "估值比较"],
+    welcome: "你好！我是你的港股投资分析助手。可以帮你研究香港上市公司、公司财报与宏观风险。行情来自 Bitget Quanto 合约，按 HKD 报价，和港交所现货有差异。",
+    colors: ["#8B5CF6", "#C4B5FD"],
+    icon: Building2,
+    featured: ["00700", "01810", "00992"]
+  },
+  {
     id: "crypto",
     displayName: "币 圈",
     title: "Crypto Agent",
@@ -188,6 +212,7 @@ const markets: Market[] = [
 const promptDeck: Record<MarketId, string[]> = {
   a_share: ["帮我分析一下今天 A 股的主线和风险", "宁德时代现在更适合趋势还是波段？", "给我一个白酒板块的多空框架"],
   us_stock: ["复盘一下纳指走势和利率预期", "NVDA 当前估值是否透支？", "帮我比较 Apple 和 Microsoft 的防御性"],
+  hk_stock: ["腾讯控股的估值和增长前景如何？", "小米集团最新财报有哪些关键变化？", "港股 Quanto 合约与现货有什么差别？"],
   crypto: ["BTC 现在的关键支撑和压力在哪里？", "ETH 和 SOL 谁的短线弹性更高？", "帮我做一份合约风险提示"]
 };
 
@@ -215,7 +240,7 @@ function saveConversations(conversations: SavedConversation[]) {
   localStorage.setItem(storage.conversations, JSON.stringify(conversations));
 }
 
-async function requestJson<T>(apiBase: string, path: string, token: string, init: RequestInit = {}): Promise<T> {
+export async function requestJson<T>(apiBase: string, path: string, token: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${apiBase}${path}`, {
     ...init,
     headers: {
@@ -366,6 +391,7 @@ function useMarketPulse(apiBase: string) {
   const [indices, setIndices] = useState<Record<MarketId, IndexQuote[]>>({
     a_share: [],
     us_stock: [],
+    hk_stock: [],
     crypto: []
   });
   const [loading, setLoading] = useState(true);
@@ -378,7 +404,7 @@ function useMarketPulse(apiBase: string) {
 
     Promise.allSettled(markets.map((market) => fetchIndices(apiBase, market.id))).then((results) => {
       if (cancelled) return;
-      const next = { a_share: [], us_stock: [], crypto: [] } as Record<MarketId, IndexQuote[]>;
+      const next = { a_share: [], us_stock: [], hk_stock: [], crypto: [] } as Record<MarketId, IndexQuote[]>;
       results.forEach((result, index) => {
         if (result.status === "fulfilled") next[markets[index].id] = result.value;
       });
@@ -570,6 +596,7 @@ export function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeMarketId, setActiveMarketId] = useState<MarketId>("a_share");
   const [activeStock, setActiveStock] = useState<StockQuote | null>(null);
+  const [stockReturnView, setStockReturnView] = useState<"market" | "watchlist">("market");
   const [draftPrompt, setDraftPrompt] = useState("");
   const [isOnline, setIsOnline] = useState<boolean | null>(null);
   const marketPulse = useMarketPulse(apiBase);
@@ -604,7 +631,8 @@ export function App() {
     setView("market");
   };
 
-  const openStock = (market: Market, stock: StockQuote) => {
+  const openStock = (market: Market, stock: StockQuote, returnView: "market" | "watchlist" = "market") => {
+    setStockReturnView(returnView);
     setActiveMarketId(market.id);
     setActiveStock(stock);
     setView("stock");
@@ -666,6 +694,7 @@ export function App() {
 
         <nav className="nav-list">
           <NavButton active={view === "home"} icon={Home} label="总览" onClick={() => setView("home")} />
+          <NavButton active={view === "watchlist"} icon={ListPlus} label="自选列表" onClick={() => setView("watchlist")} />
           <NavButton active={view === "chat"} icon={MessageCircle} label="AI 分析" onClick={() => setView("chat")} />
           <NavButton active={view === "profile"} icon={UserCircle} label="设置" onClick={() => setView("profile")} />
         </nav>
@@ -711,6 +740,10 @@ export function App() {
           />
         )}
 
+        {view === "watchlist" && (
+          <WatchlistPanel apiBase={apiBase} token={token} markets={markets} onOpenStock={(market, stock) => openStock(market, stock, "watchlist")} onNeedToken={() => setView("profile")} />
+        )}
+
         {view === "market" && (
           <MarketPanel
             apiBase={apiBase}
@@ -731,7 +764,7 @@ export function App() {
             token={token}
             market={activeMarket}
             stock={activeStock}
-            onBack={() => setView("market")}
+            onBack={() => setView(stockReturnView)}
             onAskAI={(seed) => openAgentChat(activeMarket, seed)}
           />
         )}
@@ -768,6 +801,7 @@ export function App() {
 
       <nav className="mobile-tabs">
         <NavButton active={view === "home" || view === "market" || view === "stock"} icon={Home} label="首页" onClick={() => setView("home")} compact />
+        <NavButton active={view === "watchlist"} icon={ListPlus} label="自选" onClick={() => setView("watchlist")} compact />
         <NavButton active={view === "chat"} icon={MessageCircle} label="对话" onClick={() => setView("chat")} compact />
         <NavButton active={view === "profile"} icon={UserCircle} label="我的" onClick={() => setView("profile")} compact />
       </nav>
@@ -926,7 +960,7 @@ function HomePanel({
           </p>
         </div>
         <div className="hero-metrics">
-          <Metric label="覆盖市场" value="3" sub="A 股 / 美股 / Crypto" />
+          <Metric label="覆盖市场" value="4" sub="A 股 / 美股 / 港股 / Crypto" />
           <Metric label="分析会话" value={String(conversations.length)} sub="本地工作记录" />
           <Metric
             label="焦点波动"
@@ -1035,7 +1069,8 @@ function MarketPanel({
       high: index.value,
       low: index.value,
       open: index.value - index.change,
-      previous_close: index.value - index.change
+      previous_close: index.value - index.change,
+      source: index.source, currency: index.currency, product_type: index.product_type
     });
   };
 
@@ -1059,7 +1094,7 @@ function MarketPanel({
 
       <div className="market-board-grid">
         <div className="main-column">
-          <SectionHeader title="大盘走势" subtitle="点击指数查看走势与 AI 分析" />
+          <SectionHeader title={market.id === "hk_stock" ? "港股合约行情" : "大盘走势"} subtitle={market.id === "hk_stock" ? "Bitget Quanto · HKD 报价 · 24h 涨跌" : "点击指数查看走势与 AI 分析"} />
           <div className="index-grid">
             {indicesLoading ? (
               [0, 1, 2].map((item) => (
@@ -1208,7 +1243,7 @@ function StockDetailPanel({
         <div>
           <p className="eyebrow">Stock Analysis</p>
           <h2>{display.name}</h2>
-          <p>{display.symbol} · {market.displayName}</p>
+          <p>{display.symbol} · {market.displayName} · {display.currency || (market.id === "a_share" ? "CNY" : "USD")} · {display.source === "bitget" ? (display.product_type === "quanto_perpetual" ? "Bitget Quanto 合约" : "Bitget 股票代币") : "股票行情"}{display.change_basis === "24h" ? " · 24h 涨跌" : ""}</p>
         </div>
         <button
           className="primary-action"
@@ -1857,7 +1892,7 @@ function WatchlistPreview({
 }
 
 function watchDisplayName(market: Market, stock: StockQuote) {
-  if (market.id === "a_share") return stock.name;
+  if (market.id === "a_share" || market.id === "hk_stock") return stock.name;
   return stock.symbol.replace(/\/USDT$/i, "").replace(/USDT$/i, "");
 }
 

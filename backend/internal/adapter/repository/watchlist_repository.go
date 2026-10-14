@@ -15,6 +15,12 @@ func NewWatchlistRepository(db *gorm.DB) *WatchlistRepository {
 	return &WatchlistRepository{db: db}
 }
 
+func (r *WatchlistRepository) GetByUser(userID uint) ([]model.WatchlistItem, error) {
+	var items []model.WatchlistItem
+	err := r.db.Where("user_id = ?", userID).Order("market ASC, sort_order ASC, id ASC").Find(&items).Error
+	return items, err
+}
+
 // GetByUserAndMarket returns all watchlist items for a user in a specific market, ordered by sort_order.
 func (r *WatchlistRepository) GetByUserAndMarket(userID uint, market string) ([]model.WatchlistItem, error) {
 	var items []model.WatchlistItem

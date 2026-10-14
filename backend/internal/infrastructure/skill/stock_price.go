@@ -3,8 +3,10 @@ package skill
 import (
 	"context"
 	"fmt"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/bitget"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -180,9 +182,11 @@ func parseTencentStockResponse(raw string) string {
 // USStockPriceSkill fetches US stock data via Tencent Finance API.
 // Free, no API key required, accessible from mainland China.
 // Supports NYSE and NASDAQ listed stocks.
-type USStockPriceSkill struct{}
+type USStockPriceSkill struct{ client *bitget.Client }
 
-func NewUSStockPriceSkill() *USStockPriceSkill { return &USStockPriceSkill{} }
+func NewUSStockPriceSkill() *USStockPriceSkill {
+	return &USStockPriceSkill{client: bitget.NewClient(os.Getenv("BITGET_BASE_URL"))}
+}
 
 func (s *USStockPriceSkill) Name() string { return "get_us_stock_price" }
 
@@ -201,7 +205,7 @@ func (s *USStockPriceSkill) Parameters() []SkillParam {
 	}
 }
 
-func (s *USStockPriceSkill) Execute(ctx context.Context, input map[string]interface{}) (interface{}, error) {
+func (s *USStockPriceSkill) executeTencent(ctx context.Context, input map[string]interface{}) (interface{}, error) {
 	symbols, _ := input["symbols"].(string)
 	if symbols == "" {
 		return nil, fmt.Errorf("symbols is required")
@@ -325,3 +329,67 @@ func (s *USStockPriceSkill) Execute(ctx context.Context, input map[string]interf
 	return sb.String(), nil
 }
 
+// Execute uses the same primary stock-token feed as the HTTP/UI market service.
+func (s *USStockPriceSkill) Execute(ctx context.Context, input map[string]interface{}) (interface{}, error) {
+	symbols, _ := input["symbols"].(string)
+	if symbols == "" {
+		return nil, fmt.Errorf("symbols is required")
+	}
+	primaryCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	quotes, _ := s.client.Quotes(primaryCtx, "us_stock", strings.Split(symbols, ","))
+	cancel()
+	var out strings.Builder
+	found := make(map[string]bool)
+	for _, q := range quotes {
+		found[q.Code] = true
+		fmt.Fprintf(&out, "**%s (%s)**\n来源：Bitget 股票代币 %s，币种 %s，最新价 %.4f，24h 涨跌 %.2f%%。此为代币行情，与股票现货可能有差异。\n\n", q.Name, q.Code, q.ProviderSymbol, q.Currency, q.Price, q.ChangePercent)
+	}
+	var missing []string
+	for _, code := range strings.Split(symbols, ",") {
+		code = bitget.NormalizeCode("us_stock", code)
+		if !found[code] {
+			missing = append(missing, code)
+		}
+	}
+	if len(missing) > 0 {
+		fallback, err := s.executeTencent(ctx, map[string]interface{}{"symbols": strings.Join(missing, ",")})
+		if err != nil && out.Len() == 0 {
+			return nil, err
+		}
+		if fallback != nil {
+			fmt.Fprintf(&out, "腾讯股票行情兜底：\n%v", fallback)
+		}
+	}
+	return out.String(), nil
+}
+
+type HKStockPriceSkill struct{ client *bitget.Client }
+
+func NewHKStockPriceSkill() *HKStockPriceSkill {
+	return &HKStockPriceSkill{client: bitget.NewClient(os.Getenv("BITGET_BASE_URL"))}
+}
+func (s *HKStockPriceSkill) Name() string { return "get_hk_stock_price" }
+func (s *HKStockPriceSkill) Description() string {
+	return "查询 Bitget 港股 Quanto 合约行情（HKD 报价，USDT 结算，24h 涨跌），不是港交所现货行情。代码如00700、01810、00992，多只逗号分隔。"
+}
+func (s *HKStockPriceSkill) Parameters() []SkillParam {
+	return []SkillParam{{Name: "symbols", Type: "string", Description: "港股代码或 Bitget 合约代码，逗号分隔", Required: true}}
+}
+func (s *HKStockPriceSkill) Execute(ctx context.Context, input map[string]interface{}) (interface{}, error) {
+	symbols, _ := input["symbols"].(string)
+	if symbols == "" {
+		return nil, fmt.Errorf("symbols is required")
+	}
+	quotes, err := s.client.Quotes(ctx, "hk_stock", strings.Split(symbols, ","))
+	if err != nil {
+		return nil, err
+	}
+	var out strings.Builder
+	for _, q := range quotes {
+		fmt.Fprintf(&out, "**%s (%s)**：Bitget Quanto 合约 %s，%.4f HKD，24h 涨跌 %.2f%%（不是现货交易日涨跌）。\n", q.Name, q.Code, q.ProviderSymbol, q.Price, q.ChangePercent)
+	}
+	if out.Len() == 0 {
+		return "该标的暂无已上架的 Bitget 港股 Quanto 合约数据。", nil
+	}
+	return out.String(), nil
+}

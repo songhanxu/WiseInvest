@@ -16,11 +16,11 @@ import (
 	"github.com/songhanxu/wiseinvest/internal/adapter/repository"
 	"github.com/songhanxu/wiseinvest/internal/application/service"
 	"github.com/songhanxu/wiseinvest/internal/domain/agent"
+	infraapns "github.com/songhanxu/wiseinvest/internal/infrastructure/apns"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/auth"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/cache"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/config"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/database"
-	infraapns "github.com/songhanxu/wiseinvest/internal/infrastructure/apns"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/llm"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/logger"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/scheduler"
@@ -105,6 +105,7 @@ func main() {
 	usStockRegistry := skill.NewRegistry()
 	usStockRegistry.Register(skill.NewWebSearchSkill(searcher, ""))
 	usStockRegistry.Register(skill.NewUSStockPriceSkill())
+	usStockRegistry.Register(skill.NewHKStockPriceSkill())
 	log.Infof("US-stock skill registry: %d skills registered", usStockRegistry.Count())
 
 	// Crypto: web search (crypto prefix) + real-time crypto price
@@ -119,6 +120,7 @@ func main() {
 	groupRegistry.Register(skill.NewWebSearchSkill(searcher, ""))
 	groupRegistry.Register(skill.NewASharePriceSkill())
 	groupRegistry.Register(skill.NewUSStockPriceSkill())
+	groupRegistry.Register(skill.NewHKStockPriceSkill())
 	groupRegistry.Register(skill.NewCryptoPriceSkill())
 	groupRegistry.Register(skill.NewAShareSectorSkill())
 	groupRegistry.Register(skill.NewAShareStockDetailSkill())
@@ -182,7 +184,7 @@ func main() {
 
 	// Initialize HTTP server
 	router := api.NewRouter(conversationService, authHandler, deviceHandler, stockHandler, jwtSvc, log)
-	
+
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.Server.Port),
 		Handler:      router,

@@ -16,6 +16,7 @@ import (
 
 // USStockAgent is the AI agent for US stock market analysis
 type USStockAgent struct {
+	marketType    string
 	llmClient     *llm.OpenAIClient
 	searcher      search.Searcher
 	skillRegistry *skill.Registry
@@ -26,9 +27,23 @@ func NewUSStockAgent(llmClient *llm.OpenAIClient, searcher search.Searcher, regi
 	return &USStockAgent{llmClient: llmClient, searcher: searcher, skillRegistry: registry, logger: logger}
 }
 
-func (a *USStockAgent) GetType() string { return TypeUSStock }
+func NewHKStockAgent(client *llm.OpenAIClient, searcher search.Searcher, registry *skill.Registry, log *logger.Logger) *USStockAgent {
+	a := NewUSStockAgent(client, searcher, registry, log)
+	a.marketType = TypeHKStock
+	return a
+}
+
+func (a *USStockAgent) GetType() string {
+	if a.marketType == TypeHKStock {
+		return TypeHKStock
+	}
+	return TypeUSStock
+}
 
 func (a *USStockAgent) GetSystemPrompt() string {
+	if a.marketType == TypeHKStock {
+		return `你是慧投的港股投资研究助手。研究香港上市公司、港交所市场、公司财报、估值及宏观风险。使用 web_search 查询最新港股财报和公告，使用 get_hk_stock_price 查询 Bitget 港股 Quanto 合约报价。必须区分合约行情与港交所现货行情：Quanto 按 HKD 报价、USDT 结算，24小时涨跌并非港股交易日涨跌。基本面属于对应上市公司。不要把美股 ADR 当成港股，也不要编造 EPS、估值或公司指引。`
+	}
 	return `你是慧投(WiseInvest)的美股投资分析助手，专注于美国股票市场的投资研究与分析。
 
 ## 市场覆盖
@@ -73,7 +88,7 @@ func (a *USStockAgent) Process(ctx context.Context, req ProcessRequest) (*Proces
 			Content: resp.Content, FinishReason: resp.FinishReason,
 			PromptTokens: resp.Usage.PromptTokens, CompletionTokens: resp.Usage.CompletionTokens,
 			TotalTokens: resp.Usage.TotalTokens,
-			Metadata:    map[string]interface{}{"agent_type": TypeUSStock},
+			Metadata:    map[string]interface{}{"agent_type": a.GetType()},
 		}, nil
 	}
 
@@ -88,7 +103,7 @@ func (a *USStockAgent) Process(ctx context.Context, req ProcessRequest) (*Proces
 		Content: resp.Content, FinishReason: resp.FinishReason,
 		PromptTokens: resp.Usage.PromptTokens, CompletionTokens: resp.Usage.CompletionTokens,
 		TotalTokens: resp.Usage.TotalTokens,
-		Metadata:    map[string]interface{}{"agent_type": TypeUSStock},
+		Metadata:    map[string]interface{}{"agent_type": a.GetType()},
 	}, nil
 }
 

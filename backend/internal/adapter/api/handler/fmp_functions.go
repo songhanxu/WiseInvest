@@ -149,7 +149,7 @@ func (h *StockHandler) fetchFMPQuotesConcurrent(ctx context.Context, symbols []s
 
 			quote, err := h.fetchFMPQuote(ctx, sym)
 			if err != nil {
-				h.logger.Error("Failed to fetch FMP quote for %s: %v", sym, err)
+				h.logger.Errorf("Failed to fetch FMP quote for %s: %v", sym, err)
 				return
 			}
 

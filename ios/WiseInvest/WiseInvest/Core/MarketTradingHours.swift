@@ -12,6 +12,7 @@ struct MarketTradingHours {
         switch market {
         case .aShare:  return isAShareTrading()
         case .usStock: return isUSStockTrading()
+        case .hkStock: return true // Quanto 合约行情可在港交所休市时更新
         case .crypto:  return true  // 24/7
         }
     }
@@ -25,6 +26,8 @@ struct MarketTradingHours {
             return isAShareTrading() ? 1 : nil
         case .usStock:
             return isUSStockTrading() ? 2 : nil
+        case .hkStock:
+            return 5
         case .crypto:
             return 1  // always on (matches Binance WebSocket stream ~1s push interval)
         }
@@ -51,6 +54,8 @@ struct MarketTradingHours {
             } else {
                 return .closed(nextOpenDescription(market: market))
             }
+        case .hkStock:
+            return .open("Quanto 合约")
         case .crypto:
             return .open("全天交易")
         }
@@ -180,6 +185,8 @@ struct MarketTradingHours {
             return "已收盘"
         case .usStock:
             return "已收盘"
+        case .hkStock:
+            return "Quanto 合约"
         case .crypto:
             return "全天交易"
         }
