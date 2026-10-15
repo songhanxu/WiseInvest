@@ -332,6 +332,10 @@ func (c *Client) Candles(ctx context.Context, market, code, period string, limit
 	if symbol == "" {
 		return nil, fmt.Errorf("stock is not listed on Bitget")
 	}
+	return c.candlesForSymbol(ctx, category(market), symbol, period, limit)
+}
+
+func (c *Client) candlesForSymbol(ctx context.Context, productCategory, symbol, period string, limit int) ([]Candle, error) {
 	intervals := map[string]string{"5m": "5m", "15m": "15m", "30m": "15m", "1h": "1H", "4h": "4H", "1d": "1D", "1w": "1D"}
 	interval, ok := intervals[period]
 	if !ok {
@@ -363,7 +367,7 @@ func (c *Client) Candles(ctx context.Context, market, code, period string, limit
 		if n > max {
 			n = max
 		}
-		params := url.Values{"category": {category(market)}, "symbol": {symbol}, "interval": {interval}, "type": {"market"}, "limit": {strconv.Itoa(n)}}
+		params := url.Values{"category": {productCategory}, "symbol": {symbol}, "interval": {interval}, "type": {"market"}, "limit": {strconv.Itoa(n)}}
 		if end != "" {
 			params.Set("endTime", end)
 		}
@@ -438,4 +442,39 @@ func Aggregate(rows []Candle, period string) []Candle {
 		last.Volume += row.Volume
 	}
 	return out
+}
+
+// Product reads never fall back to a different instrument for the same company.
+func (c *Client) Product(ctx context.Context, productCategory, symbol string) (Quote, error) {
+	items, err := c.StockInventory(ctx, productCategory)
+	if err != nil {
+		return Quote{}, err
+	}
+	for _, item := range items {
+		if item.Symbol == symbol {
+			return HoldingIdentity(item, productCategory), nil
+		}
+	}
+	return Quote{}, fmt.Errorf("stock product unavailable")
+}
+func (c *Client) ProductQuote(ctx context.Context, productCategory, symbol string) (Quote, error) {
+	q, err := c.Product(ctx, productCategory, symbol)
+	if err != nil {
+		return q, err
+	}
+	rows, err := c.InventoryTickers(ctx, productCategory)
+	if err != nil {
+		return q, err
+	}
+	ticker, ok := rows[symbol]
+	if !ok || number(ticker.Last) <= 0 {
+		return q, fmt.Errorf("product quote unavailable")
+	}
+	return ApplyTicker(q, ticker), nil
+}
+func (c *Client) ProductCandles(ctx context.Context, productCategory, symbol, period string, limit int) ([]Candle, error) {
+	if _, err := c.Product(ctx, productCategory, symbol); err != nil {
+		return nil, err
+	}
+	return c.candlesForSymbol(ctx, productCategory, symbol, period, limit)
 }

@@ -1674,12 +1674,13 @@ func (h *StockHandler) AddToWatchlist(c *gin.Context) {
 
 	// Normalize crypto index IDs to real symbols before storing
 	// e.g. "btc_price" → "BTC", "eth_price" → "ETH"
-	stockCode := req.StockCode
+	stockCode := canonicalWatchCode(req.Market, req.StockCode, req.Symbol)
 	if req.Market == "us_stock" || req.Market == "hk_stock" {
 		stockCode = bitget.NormalizeCode(req.Market, stockCode)
 	}
 	symbol := req.Symbol
 	if req.Market == "crypto" {
+		symbol = stockCode + "/USDT"
 		if mapped, ok := cryptoIndexToSymbol[strings.ToLower(stockCode)]; ok {
 			stockCode = mapped
 			symbol = mapped + "/USDT"
@@ -1726,7 +1727,19 @@ func (h *StockHandler) RemoveFromWatchlist(c *gin.Context) {
 		return
 	}
 
-	code := req.StockCode
+	if !validStockMarket(req.Market) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid market type"})
+		return
+	}
+	code := canonicalWatchCode(req.Market, req.StockCode, "")
+	if req.Market == "crypto" {
+		if err := h.watchlistRepo.RemoveCrypto(userID, code); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove watchlist"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "Removed from watchlist"})
+		return
+	}
 	if req.Market == "us_stock" || req.Market == "hk_stock" {
 		code = bitget.NormalizeCode(req.Market, code)
 	}
@@ -1763,6 +1776,9 @@ func (h *StockHandler) RemoveFromWatchlist(c *gin.Context) {
 // ──────────────────────────────────────────────────────────────────────────────
 
 func (h *StockHandler) GetStockQuote(c *gin.Context) {
+	if h.productRequest(c, false) {
+		return
+	}
 	code := c.Query("code")
 	market := c.DefaultQuery("market", "a_share")
 
@@ -1905,6 +1921,9 @@ func defaultLimitForPeriod(period string) int {
 }
 
 func (h *StockHandler) GetKLineData(c *gin.Context) {
+	if h.productRequest(c, true) {
+		return
+	}
 	code := c.Query("code")
 	market := c.DefaultQuery("market", "a_share")
 	period := c.DefaultQuery("period", "1d")
@@ -3942,12 +3961,14 @@ func setAnalysisToMemCache(code, market, analysisType string, resp AnalysisRespo
 // internally, so the client only needs to provide code/market/name.
 func (h *StockHandler) EnhanceAnalysis(c *gin.Context) {
 	var req struct {
-		Code         string `json:"code"`
-		Market       string `json:"market"`
-		Name         string `json:"name"`
-		Type         string `json:"type"`          // ignored now, always "comprehensive"
-		KlineSummary string `json:"kline_summary"` // optional client fallback
-		PriceSummary string `json:"price_summary"` // optional client fallback
+		ProviderSymbol string `json:"provider_symbol"`
+		Category       string `json:"category"`
+		Code           string `json:"code"`
+		Market         string `json:"market"`
+		Name           string `json:"name"`
+		Type           string `json:"type"`          // ignored now, always "comprehensive"
+		KlineSummary   string `json:"kline_summary"` // optional client fallback
+		PriceSummary   string `json:"price_summary"` // optional client fallback
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -3970,8 +3991,16 @@ func (h *StockHandler) EnhanceAnalysis(c *gin.Context) {
 		return
 	}
 
+	cacheCode := code
+	if req.ProviderSymbol != "" || req.Category != "" {
+		if req.ProviderSymbol == "" || len(req.ProviderSymbol) > 60 || (req.Category != "SPOT" && req.Category != "USDT-FUTURES") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product identity"})
+			return
+		}
+		cacheCode += ":" + req.Category + ":" + req.ProviderSymbol
+	}
 	// Check cache — look for "comprehensive" type
-	if cached, ok := getAnalysisFromMemCache(code, market, "comprehensive"); ok {
+	if cached, ok := getAnalysisFromMemCache(cacheCode, market, "comprehensive"); ok {
 		c.JSON(http.StatusOK, cached)
 		return
 	}
@@ -3987,11 +4016,14 @@ func (h *StockHandler) EnhanceAnalysis(c *gin.Context) {
 	}
 
 	// Fetch multi-timeframe K-line data from backend directly
-	multiKlineSummary := h.fetchMultiTimeframeKLineSummary(code, market)
+	multiKlineSummary := h.fetchMultiTimeframeKLineSummary(code, market, req.Category, req.ProviderSymbol)
 	if multiKlineSummary == "" && req.KlineSummary != "" {
 		multiKlineSummary = req.KlineSummary // fallback to client-provided
 	}
 	priceSummary := req.PriceSummary
+	if req.ProviderSymbol != "" {
+		priceSummary += "\n交易产品：Bitget " + req.Category + " " + req.ProviderSymbol + "。按该产品的报价和风险口径分析。"
+	}
 
 	prompt := h.buildComprehensiveAnalysisPrompt(name, code, market, multiKlineSummary, priceSummary)
 
@@ -4052,14 +4084,14 @@ func (h *StockHandler) EnhanceAnalysis(c *gin.Context) {
 	}
 	result.Type = "comprehensive"
 
-	setAnalysisToMemCache(code, market, "comprehensive", result)
+	setAnalysisToMemCache(cacheCode, market, "comprehensive", result)
 	c.JSON(http.StatusOK, result)
 }
 
 // fetchMultiTimeframeKLineSummary fetches K-line data for multiple timeframes from
 // the backend's own data sources, and builds a compact text summary for the AI prompt.
 // This eliminates dependency on the iOS client sending K-line data.
-func (h *StockHandler) fetchMultiTimeframeKLineSummary(code, market string) string {
+func (h *StockHandler) fetchMultiTimeframeKLineSummary(code, market string, product ...string) string {
 	type klineResult struct {
 		period string
 		data   []KLineResponse
@@ -4089,15 +4121,23 @@ func (h *StockHandler) fetchMultiTimeframeKLineSummary(code, market string) stri
 			}
 			var klines []KLineResponse
 			var err error
-			switch market {
-			case "a_share":
-				klines, err = h.fetchAShareKLine(ctx, code, period, limit)
-			case "us_stock":
-				klines, err = h.fetchUSStockKLine(ctx, code, period, limit)
-			case "hk_stock":
-				klines, err = h.fetchBitgetKLine(ctx, "hk_stock", code, period, limit)
-			case "crypto":
-				klines, err = h.fetchCryptoKLine(ctx, code, period, limit)
+			if len(product) == 2 && product[1] != "" {
+				var rows []bitget.Candle
+				rows, err = h.bitget.ProductCandles(ctx, product[0], product[1], period, limit)
+				for _, row := range rows {
+					klines = append(klines, KLineResponse{Date: candleDate(row.Time, period), Open: row.Open, Close: row.Close, High: row.High, Low: row.Low, Volume: row.Volume, Source: "bitget"})
+				}
+			} else {
+				switch market {
+				case "a_share":
+					klines, err = h.fetchAShareKLine(ctx, code, period, limit)
+				case "us_stock":
+					klines, err = h.fetchUSStockKLine(ctx, code, period, limit)
+				case "hk_stock":
+					klines, err = h.fetchBitgetKLine(ctx, "hk_stock", code, period, limit)
+				case "crypto":
+					klines, err = h.fetchCryptoKLine(ctx, code, period, limit)
+				}
 			}
 			results <- klineResult{period: period, data: klines, err: err}
 		}(p)

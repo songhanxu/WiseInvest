@@ -1,6 +1,8 @@
 const MARKETS = [
   {
     id: 'a_share',
+    mark: 'A',
+    focus: '公司 · 行业 · 政策',
     displayName: 'A 股',
     subtitle: '沪深北交所',
     description: '个股分析 · 行业研究 · 政策解读',
@@ -11,6 +13,8 @@ const MARKETS = [
   },
   {
     id: 'us_stock',
+    mark: 'US',
+    focus: '财报 · 成长 · 宏观',
     displayName: '美 股',
     subtitle: 'NYSE · NASDAQ',
     description: '财报分析 · 成长股 · 宏观经济',
@@ -21,6 +25,8 @@ const MARKETS = [
   },
   {
     id: 'crypto',
+    mark: '₿',
+    focus: '市场结构 · 链上数据 · 风险',
     displayName: '币 圈',
     subtitle: '加密货币',
     description: '现货合约 · 链上数据 · DeFi',

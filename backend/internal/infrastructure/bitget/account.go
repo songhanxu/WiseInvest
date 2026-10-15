@@ -106,11 +106,16 @@ type Asset struct {
 }
 
 type Position struct {
-	Symbol      string `json:"symbol"`
-	Total       string `json:"total"`
-	Side        string `json:"posSide"`
-	ClassicSide string `json:"holdSide"`
-	MarginMode  string `json:"marginMode"`
+	EntryPrice        string `json:"avgPrice"`
+	ClassicEntryPrice string `json:"openPriceAvg"`
+	UnrealizedPnL     string `json:"unrealisedPnl"`
+	ClassicPnL        string `json:"unrealizedPL"`
+	MarginCoin        string `json:"marginCoin"`
+	Symbol            string `json:"symbol"`
+	Total             string `json:"total"`
+	Side              string `json:"posSide"`
+	ClassicSide       string `json:"holdSide"`
+	MarginMode        string `json:"marginMode"`
 }
 
 func (c *AccountClient) Assets(ctx context.Context, accountType string) ([]Asset, error) {
@@ -138,6 +143,8 @@ func (c *AccountClient) Positions(ctx context.Context, accountType string) ([]Po
 		err := c.PrivateGET(ctx, "/api/v2/mix/position/all-position", url.Values{"productType": {"USDT-FUTURES"}}, &positions)
 		for i := range positions {
 			positions[i].Side = positions[i].ClassicSide
+			positions[i].EntryPrice = positions[i].ClassicEntryPrice
+			positions[i].UnrealizedPnL = positions[i].ClassicPnL
 		}
 		return positions, err
 	}
@@ -276,4 +283,16 @@ func ApplyTicker(quote Quote, ticker Ticker) Quote {
 	quote.Volume = number(ticker.Volume)
 	quote.Timestamp = ticker.Timestamp
 	return quote
+}
+
+func QuantityValue(quantity string, price float64) string {
+	q, ok := new(big.Rat).SetString(quantity)
+	if !ok || price <= 0 {
+		return ""
+	}
+	p, ok := new(big.Rat).SetString(strconv.FormatFloat(price, 'f', -1, 64))
+	if !ok {
+		return ""
+	}
+	return new(big.Rat).Mul(q, p).FloatString(8)
 }

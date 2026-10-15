@@ -18,26 +18,33 @@ import (
 
 // Nullable values distinguish missing data from zero EPS. Guidance is sourced
 // from an actual company filing, never from analyst consensus or an LLM guess.
+type MetricProvenance struct {
+	Source   string `json:"source"`
+	Currency string `json:"currency,omitempty"`
+	AsOf     string `json:"as_of"`
+}
+
 type FundamentalsResponse struct {
-	EPS                *float64 `json:"eps"`
-	PE                 *float64 `json:"pe"`
-	ForwardPE          *float64 `json:"forward_pe"`
-	ForwardEPS         *float64 `json:"forward_eps"`
-	ForwardPeriod      string   `json:"forward_period,omitempty"`
-	GuidanceEPS        *float64 `json:"guidance_eps"`
-	GuidanceEPSLow     *float64 `json:"guidance_eps_low"`
-	GuidanceEPSHigh    *float64 `json:"guidance_eps_high"`
-	GuidancePeriod     string   `json:"guidance_period,omitempty"`
-	GuidanceBasis      string   `json:"guidance_basis,omitempty"`
-	GuidanceReportDate string   `json:"guidance_report_date,omitempty"`
-	GuidanceSourceURL  string   `json:"guidance_source_url,omitempty"`
-	NextEarningsDate   string   `json:"next_earnings_date,omitempty"`
-	EarningsDateStatus string   `json:"earnings_date_status,omitempty"`
-	Currency           string   `json:"currency,omitempty"`
-	Source             string   `json:"source,omitempty"`
-	AsOf               string   `json:"as_of,omitempty"`
-	Status             string   `json:"status"`
-	Message            string   `json:"message,omitempty"`
+	Metrics            map[string]MetricProvenance `json:"metrics,omitempty"`
+	EPS                *float64                    `json:"eps"`
+	PE                 *float64                    `json:"pe"`
+	ForwardPE          *float64                    `json:"forward_pe"`
+	ForwardEPS         *float64                    `json:"forward_eps"`
+	ForwardPeriod      string                      `json:"forward_period,omitempty"`
+	GuidanceEPS        *float64                    `json:"guidance_eps"`
+	GuidanceEPSLow     *float64                    `json:"guidance_eps_low"`
+	GuidanceEPSHigh    *float64                    `json:"guidance_eps_high"`
+	GuidancePeriod     string                      `json:"guidance_period,omitempty"`
+	GuidanceBasis      string                      `json:"guidance_basis,omitempty"`
+	GuidanceReportDate string                      `json:"guidance_report_date,omitempty"`
+	GuidanceSourceURL  string                      `json:"guidance_source_url,omitempty"`
+	NextEarningsDate   string                      `json:"next_earnings_date,omitempty"`
+	EarningsDateStatus string                      `json:"earnings_date_status,omitempty"`
+	Currency           string                      `json:"currency,omitempty"`
+	Source             string                      `json:"source,omitempty"`
+	AsOf               string                      `json:"as_of,omitempty"`
+	Status             string                      `json:"status"`
+	Message            string                      `json:"message,omitempty"`
 }
 
 type fundamentalsCache struct {
@@ -50,10 +57,11 @@ type FundamentalsService struct {
 	mu                    sync.Mutex
 	cache                 map[string]fundamentalsCache
 	sem                   chan struct{}
+	pending               map[string]chan struct{}
 }
 
 func NewFundamentalsService(key, file string) *FundamentalsService {
-	return &FundamentalsService{APIKey: key, File: file, BaseURL: "https://financialmodelingprep.com/stable", HTTPClient: &http.Client{Timeout: 5 * time.Second}, cache: make(map[string]fundamentalsCache), sem: make(chan struct{}, 4)}
+	return &FundamentalsService{APIKey: key, File: file, BaseURL: "https://financialmodelingprep.com/stable", HTTPClient: &http.Client{Timeout: 5 * time.Second}, cache: make(map[string]fundamentalsCache), sem: make(chan struct{}, 4), pending: make(map[string]chan struct{})}
 }
 
 func (s *FundamentalsService) get(ctx context.Context, path, symbol string, params url.Values, target interface{}) bool {
@@ -97,10 +105,13 @@ func (s *FundamentalsService) loadVerified(market, code string) *FundamentalsRes
 		return nil
 	}
 	// Do not silently accept untraceable or old management guidance.
-	if row.GuidanceSourceURL == "" || row.GuidanceReportDate == "" || row.GuidancePeriod == "" || row.GuidanceBasis == "" {
+	reportDate, dateErr := time.Parse("2006-01-02", row.GuidanceReportDate)
+	sourceURL, sourceErr := url.Parse(row.GuidanceSourceURL)
+	if sourceErr != nil || sourceURL.Scheme != "https" || sourceURL.Host == "" || dateErr != nil || reportDate.After(time.Now()) || time.Since(reportDate) > 180*24*time.Hour || row.GuidancePeriod == "" || row.GuidanceBasis == "" {
 		row.GuidanceEPS = nil
 		row.GuidanceEPSLow = nil
 		row.GuidanceEPSHigh = nil
+		row.GuidancePeriod, row.GuidanceBasis, row.GuidanceReportDate, row.GuidanceSourceURL = "", "", "", ""
 	}
 	row.Status = "available"
 	return &row
@@ -124,40 +135,32 @@ func (s *FundamentalsService) Fetch(ctx context.Context, market, code string) Fu
 	}
 	verified := s.loadVerified(market, code)
 	if s.APIKey != "" {
-		key := market + ":" + code
-		s.mu.Lock()
-		cached, ok := s.cache[key]
-		s.mu.Unlock()
-		if ok && time.Since(cached.Time) < 6*time.Hour {
-			row = cached.Data
-		} else {
-			select {
-			case s.sem <- struct{}{}:
-				defer func() { <-s.sem }()
-			case <-ctx.Done():
-				return row
-			}
-			row = s.fetchFMP(ctx, market, code)
-			ttlNow := time.Now()
-			if row.Status == "unavailable" {
-				ttlNow = ttlNow.Add(-6*time.Hour + time.Minute)
-			}
-			s.mu.Lock()
-			s.cache[key] = fundamentalsCache{row, ttlNow}
-			s.mu.Unlock()
-		}
+
+		row = s.cachedFetch(ctx, market, code)
 	}
+	if row.Status == "not_applicable" {
+		return row
+	}
+	row.Metrics = make(map[string]MetricProvenance)
+	for _, key := range []string{"eps", "pe", "forward_pe", "next_earnings_date"} {
+		row.Metrics[key] = MetricProvenance{Source: row.Source, Currency: row.Currency, AsOf: row.AsOf}
+	}
+
 	if verified != nil {
-		if verified.EPS != nil {
+		if verified.EPS != nil && verified.Currency != "" && (row.Currency == "" || row.Currency == verified.Currency) {
 			row.EPS = verified.EPS
+			row.Metrics["eps"] = MetricProvenance{Source: verified.Source, Currency: verified.Currency, AsOf: verified.AsOf}
 		}
 		if verified.PE != nil {
 			row.PE = verified.PE
+			row.Metrics["pe"] = MetricProvenance{Source: verified.Source, AsOf: verified.AsOf}
 		}
 		if verified.ForwardPE != nil {
 			row.ForwardPE = verified.ForwardPE
+			row.Metrics["forward_pe"] = MetricProvenance{Source: verified.Source, AsOf: verified.AsOf}
 			row.ForwardPeriod = verified.ForwardPeriod
 		}
+		row.Metrics["guidance"] = MetricProvenance{Source: verified.Source, Currency: verified.Currency, AsOf: verified.GuidanceReportDate}
 		row.GuidanceEPS = verified.GuidanceEPS
 		row.GuidanceEPSLow = verified.GuidanceEPSLow
 		row.GuidanceEPSHigh = verified.GuidanceEPSHigh
@@ -167,15 +170,20 @@ func (s *FundamentalsService) Fetch(ctx context.Context, market, code string) Fu
 		row.GuidanceSourceURL = verified.GuidanceSourceURL
 		if verified.NextEarningsDate != "" && verified.NextEarningsDate >= time.Now().UTC().Format("2006-01-02") {
 			row.NextEarningsDate = verified.NextEarningsDate
+			row.Metrics["next_earnings_date"] = MetricProvenance{Source: verified.Source, AsOf: verified.AsOf}
 			row.EarningsDateStatus = verified.EarningsDateStatus
 		}
 		if row.Source != "" {
 			row.Source += " + "
 		}
 		row.Source += verified.Source
-		row.AsOf = verified.AsOf
-		row.Status = "available"
-		row.Message = ""
+		if row.AsOf == "" {
+			row.AsOf = verified.AsOf
+		}
+		if row.EPS != nil || row.PE != nil || row.ForwardPE != nil || row.GuidanceEPS != nil || row.GuidanceEPSLow != nil || row.NextEarningsDate != "" {
+			row.Status = "available"
+			row.Message = ""
+		}
 		if row.Currency == "" {
 			row.Currency = verified.Currency
 		}
@@ -285,4 +293,65 @@ func (h *StockHandler) GetFundamentals(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 8*time.Second)
 	defer cancel()
 	c.JSON(http.StatusOK, h.fundamentals.Fetch(ctx, market, code))
+}
+
+func (s *FundamentalsService) cachedFetch(ctx context.Context, market, code string) FundamentalsResponse {
+	key := market + ":" + code
+	for {
+		s.mu.Lock()
+		if entry, ok := s.cache[key]; ok && time.Since(entry.Time) < 6*time.Hour {
+			s.mu.Unlock()
+			return entry.Data
+		}
+		if done := s.pending[key]; done != nil {
+			s.mu.Unlock()
+			select {
+			case <-done:
+				continue
+			case <-ctx.Done():
+				return FundamentalsResponse{Status: "unavailable", Message: "财报查询超时，请稍后重试"}
+			}
+		}
+		if s.pending == nil {
+			s.pending = make(map[string]chan struct{})
+		}
+		done := make(chan struct{})
+		s.pending[key] = done
+		s.mu.Unlock()
+		go func() {
+			taskCtx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+			defer cancel()
+			row := FundamentalsResponse{Status: "unavailable", Message: "财报查询繁忙，请稍后重试"}
+			select {
+			case s.sem <- struct{}{}:
+				row = s.fetchFMP(taskCtx, market, code)
+				<-s.sem
+			case <-taskCtx.Done():
+			}
+			stamp := time.Now()
+			if row.Status == "unavailable" {
+				stamp = stamp.Add(-6*time.Hour + time.Minute)
+			}
+			s.mu.Lock()
+			for len(s.cache) >= 512 {
+				oldestKey := ""
+				var oldest time.Time
+				for k, v := range s.cache {
+					if oldestKey == "" || v.Time.Before(oldest) {
+						oldestKey, oldest = k, v.Time
+					}
+				}
+				delete(s.cache, oldestKey)
+			}
+			s.cache[key] = fundamentalsCache{Data: row, Time: stamp}
+			delete(s.pending, key)
+			close(done)
+			s.mu.Unlock()
+		}()
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return FundamentalsResponse{Status: "unavailable", Message: "财报查询超时，请稍后重试"}
+		}
+	}
 }

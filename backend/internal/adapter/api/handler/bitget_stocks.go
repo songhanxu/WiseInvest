@@ -294,3 +294,49 @@ func (h *StockHandler) GetAllWatchlist(c *gin.Context) {
 	wg.Wait()
 	c.JSON(http.StatusOK, mergeWatchlistQuotes(items, quotes))
 }
+
+func (h *StockHandler) productRequest(c *gin.Context, candles bool) bool {
+	symbol, category := c.Query("provider_symbol"), c.Query("category")
+	if symbol == "" && category == "" {
+		return false
+	}
+	if symbol == "" || len(symbol) > 60 || (category != "SPOT" && category != "USDT-FUTURES") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product identity"})
+		return true
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+	defer cancel()
+	if !candles {
+		q, err := h.bitget.ProductQuote(ctx, category, symbol)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "该产品行情暂不可用"})
+		} else {
+			c.JSON(http.StatusOK, bitgetStock(q))
+		}
+		return true
+	}
+	period := c.DefaultQuery("period", "1d")
+	if !map[string]bool{"5m": true, "15m": true, "30m": true, "1h": true, "4h": true, "1d": true, "1w": true}[period] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid period"})
+		return true
+	}
+	limit := int(parseFloat(c.DefaultQuery("limit", "150")))
+	rows, err := h.bitget.ProductCandles(ctx, category, symbol, c.DefaultQuery("period", "1d"), limit)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "该产品 K 线暂不可用"})
+		return true
+	}
+	result := make([]KLineResponse, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, KLineResponse{Date: candleDate(row.Time, c.DefaultQuery("period", "1d")), Open: row.Open, Close: row.Close, High: row.High, Low: row.Low, Volume: row.Volume, Source: "bitget"})
+	}
+	c.JSON(http.StatusOK, result)
+	return true
+}
+
+func candleDate(stamp time.Time, period string) string {
+	if period == "1d" || period == "1w" {
+		return stamp.Format("2006-01-02")
+	}
+	return stamp.Format(time.RFC3339)
+}

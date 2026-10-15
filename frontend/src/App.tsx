@@ -1,6 +1,9 @@
 import { FormEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WatchlistPanel } from "./WatchlistPanel";
 import { AccountsPanel } from "./AccountsPanel";
+import { ChatMarkdown } from "./ChatMarkdown";
+import { createConversationDraft, hasUserMessage, readConversationHistory, serializeConversationHistory } from "./conversation-history";
+import type { Message, SavedConversation } from "./conversation-history";
 import type { LucideIcon } from "lucide-react";
 import {
   Activity,
@@ -39,7 +42,6 @@ const DEFAULT_API_BASE = "http://119.91.58.30";
 
 type Tab = "home" | "accounts" | "watchlist" | "chat" | "profile";
 type View = Tab | "market" | "stock";
-type Role = "assistant" | "user";
 export type MarketId = "a_share" | "us_stock" | "hk_stock" | "crypto";
 type KLinePeriod = "5m" | "15m" | "30m" | "1h" | "4h" | "1d" | "1w";
 
@@ -54,22 +56,6 @@ export type Market = {
   colors: [string, string];
   icon: LucideIcon;
   featured: string[];
-};
-
-type Message = {
-  id: string;
-  role: Role;
-  content: string;
-  thinking?: string[];
-};
-
-type SavedConversation = {
-  id: string;
-  marketId: MarketId;
-  title: string;
-  updatedAt: string;
-  messages: Message[];
-  backendId?: number;
 };
 
 type IndexQuote = {
@@ -228,17 +214,11 @@ function uid() {
 }
 
 function getSavedConversations(): SavedConversation[] {
-  const raw = localStorage.getItem(storage.conversations);
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw) as SavedConversation[];
-  } catch {
-    return [];
-  }
+  return readConversationHistory(localStorage.getItem(storage.conversations));
 }
 
 function saveConversations(conversations: SavedConversation[]) {
-  localStorage.setItem(storage.conversations, JSON.stringify(conversations));
+  localStorage.setItem(storage.conversations, serializeConversationHistory(conversations));
 }
 
 export async function requestJson<T>(apiBase: string, path: string, token: string, init: RequestInit = {}): Promise<T> {
@@ -292,16 +272,20 @@ async function searchStocks(apiBase: string, marketId: MarketId, query = "") {
   });
 }
 
-async function fetchQuote(apiBase: string, marketId: MarketId, code: string) {
-  return requestJson<StockQuote>(apiBase, `/api/v1/stocks/quote?market=${marketId}&code=${encodeURIComponent(code)}`, "", {
+function productQuery(stock?: StockQuote) {
+ return stock?.source === "bitget" && stock.provider_symbol ? `&provider_symbol=${encodeURIComponent(stock.provider_symbol)}&category=${stock.product_type === "stock_token" ? "SPOT" : "USDT-FUTURES"}` : "";
+}
+
+async function fetchQuote(apiBase: string, marketId: MarketId, code: string, product?: StockQuote) {
+  return requestJson<StockQuote>(apiBase, `/api/v1/stocks/quote?market=${marketId}&code=${encodeURIComponent(code)}${productQuery(product)}`, "", {
     method: "GET"
   });
 }
 
-async function fetchKline(apiBase: string, marketId: MarketId, code: string, period: KLinePeriod = "1d", limit = defaultKLineLimit(period)) {
+async function fetchKline(apiBase: string, marketId: MarketId, code: string, period: KLinePeriod = "1d", limit = defaultKLineLimit(period), product?: StockQuote) {
   return requestJson<KLinePoint[]>(
     apiBase,
-    `/api/v1/stocks/kline?market=${marketId}&code=${encodeURIComponent(code)}&period=${period}&limit=${limit}`,
+    `/api/v1/stocks/kline?market=${marketId}&code=${encodeURIComponent(code)}&period=${period}&limit=${limit}${productQuery(product)}`,
     "",
     { method: "GET" }
   );
@@ -312,6 +296,8 @@ async function fetchAnalysis(apiBase: string, stock: StockQuote, marketId: Marke
     method: "POST",
     body: JSON.stringify({
       code: stock.id,
+      provider_symbol: stock.source === "bitget" ? stock.provider_symbol : undefined,
+      category: stock.source === "bitget" && stock.provider_symbol ? stock.product_type === "stock_token" ? "SPOT" : "USDT-FUTURES" : undefined,
       market: marketId,
       name: stock.name,
       type: "comprehensive",
@@ -490,8 +476,8 @@ function useStockDetail(apiBase: string, market: Market, stock: StockQuote | nul
     setError(null);
 
     Promise.allSettled([
-      fetchQuote(apiBase, market.id, stock.id),
-      fetchKline(apiBase, market.id, stock.id, period)
+      fetchQuote(apiBase, market.id, stock.id, stock),
+      fetchKline(apiBase, market.id, stock.id, period, defaultKLineLimit(period), stock)
     ]).then((results) => {
       if (cancelled) return;
       if (results[0].status === "fulfilled") setQuote(results[0].value);
@@ -503,7 +489,7 @@ function useStockDetail(apiBase: string, market: Market, stock: StockQuote | nul
     return () => {
       cancelled = true;
     };
-  }, [apiBase, market.id, period, stock?.id]);
+  }, [apiBase, market.id, period, stock?.id, stock?.provider_symbol, stock?.product_type]);
 
   useEffect(() => {
     if (!stock) return;
@@ -545,12 +531,12 @@ function useStockDetail(apiBase: string, market: Market, stock: StockQuote | nul
     return () => {
       cancelled = true;
     };
-  }, [apiBase, market.id, stock?.id]);
+  }, [apiBase, market.id, stock?.id, stock?.provider_symbol, stock?.product_type]);
 
   const loadMoreKline = useCallback(() => {
     if (!stock || loadingMoreKline) return;
     setLoadingMoreKline(true);
-    fetchKline(apiBase, market.id, stock.id, period, Math.max(kline.length + 500, defaultKLineLimit(period) + 500))
+    fetchKline(apiBase, market.id, stock.id, period, Math.max(kline.length + 500, defaultKLineLimit(period) + 500), stock)
       .then((result) => {
         if (Array.isArray(result) && result.length > kline.length) setKline(result);
       })
@@ -600,6 +586,7 @@ export function App() {
   const [apiBase, setApiBase] = useState(() => localStorage.getItem(storage.apiBase) || DEFAULT_API_BASE);
   const [token, setToken] = useState(() => localStorage.getItem(storage.token) || "");
   const [conversations, setConversations] = useState<SavedConversation[]>(getSavedConversations);
+  const [conversationDraft, setConversationDraft] = useState<SavedConversation | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeMarketId, setActiveMarketId] = useState<MarketId>("a_share");
   const [activeStock, setActiveStock] = useState<StockQuote | null>(null);
@@ -608,13 +595,16 @@ export function App() {
   const [isOnline, setIsOnline] = useState<boolean | null>(null);
   const marketPulse = useMarketPulse(apiBase);
 
-  const activeConversation = conversations.find((item) => item.id === activeId);
+  const activeConversation = conversations.find((item) => item.id === activeId)
+    ?? (conversationDraft?.id === activeId ? conversationDraft : undefined);
   const activeMarket = markets.find((market) => market.id === activeMarketId) ?? markets[0];
   const selectedMarket = activeConversation
     ? markets.find((market) => market.id === activeConversation.marketId) ?? markets[0]
     : activeMarket;
 
   usePreventPageZoom();
+
+  useEffect(() => { window.scrollTo(0, 0); }, [view, activeStock?.id, activeStock?.provider_symbol]);
 
   useEffect(() => {
     localStorage.setItem(storage.apiBase, apiBase);
@@ -646,44 +636,32 @@ export function App() {
   };
 
   const openAgentChat = (market: Market, seed?: string) => {
-    if (seed) setDraftPrompt(seed);
     const existing = conversations.find((item) => item.marketId === market.id);
-    if (existing) {
-      setActiveId(existing.id);
-      setView("chat");
-      return;
-    }
-
-    const conversation: SavedConversation = {
-      id: uid(),
-      marketId: market.id,
-      title: market.title,
-      updatedAt: new Date().toISOString(),
-      messages: [
-        {
-          id: uid(),
-          role: "assistant",
-          content: market.welcome
-        }
-      ]
-    };
-    setConversations((prev) => [conversation, ...prev]);
+    const conversation = existing
+      ?? (conversationDraft?.marketId === market.id ? conversationDraft : createConversationDraft(market, uid));
+    if (!existing) setConversationDraft(conversation);
+    if (seed !== undefined || activeId !== conversation.id) setDraftPrompt(seed ?? "");
     setActiveId(conversation.id);
+    setActiveMarketId(market.id);
     setView("chat");
   };
 
   const updateConversation = (next: SavedConversation) => {
+    if (!hasUserMessage(next)) return;
+    setConversationDraft((prev) => prev?.id === next.id ? null : prev);
     setConversations((prev) =>
       [next, ...prev.filter((item) => item.id !== next.id)].sort(
         (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
       )
     );
-    setActiveId(next.id);
   };
 
   const deleteConversation = (id: string) => {
     setConversations((prev) => prev.filter((item) => item.id !== id));
-    if (activeId === id) setActiveId(null);
+    if (activeId === id) {
+      setActiveId(null);
+      setDraftPrompt("");
+    }
   };
 
   return (
@@ -691,18 +669,19 @@ export function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
-            <Sparkles size={22} />
+            <BarChart3 size={22} />
           </div>
           <div>
             <h1>慧投</h1>
-          <p>Decision Terminal</p>
+          <p>投资研究工作台</p>
           </div>
         </div>
 
+        <p className="nav-caption">工作空间</p>
         <nav className="nav-list">
-          <NavButton active={view === "home"} icon={Home} label="总览" onClick={() => setView("home")} />
-          <NavButton active={view === "accounts"} icon={WalletCards} label="实体账户" onClick={() => setView("accounts")} />
-          <NavButton active={view === "watchlist"} icon={ListPlus} label="自选列表" onClick={() => setView("watchlist")} />
+          <NavButton active={view === "home" || view === "market" || (view === "stock" && stockReturnView === "market")} icon={Home} label="总览" onClick={() => setView("home")} />
+          <NavButton active={view === "accounts" || (view === "stock" && stockReturnView === "accounts")} icon={WalletCards} label="实体账户" onClick={() => setView("accounts")} />
+          <NavButton active={view === "watchlist" || (view === "stock" && stockReturnView === "watchlist")} icon={ListPlus} label="自选列表" onClick={() => setView("watchlist")} />
           <NavButton active={view === "chat"} icon={MessageCircle} label="AI 分析" onClick={() => setView("chat")} />
           <NavButton active={view === "profile"} icon={UserCircle} label="设置" onClick={() => setView("profile")} />
         </nav>
@@ -712,19 +691,20 @@ export function App() {
             <Radio size={15} />
             服务状态
           </div>
-          <StatusLine label="API" ok={isOnline === true} pending={isOnline === null} />
-          <StatusLine label="Auth" ok={Boolean(token)} />
-          <StatusLine label="Market feed" ok={!marketPulse.error} pending={marketPulse.loading} />
+          <StatusLine label="数据连接" ok={isOnline === true} pending={isOnline === null} />
+          <StatusLine label="账户登录" ok={Boolean(token)} />
+          <StatusLine label="市场行情" ok={!marketPulse.error} pending={marketPulse.loading} />
         </div>
 
         <div className="sidebar-footer">
-          <Command size={16} />
-          <span>⌘K 快速搜索即将上线</span>
+          <ShieldCheck size={15} />
+          <span>专注研究，审慎决策</span>
         </div>
       </aside>
 
       <main className="main">
         <TopBar
+          pageTitle={{home:"总览",accounts:"实体账户",watchlist:"自选列表",chat:"AI 分析",profile:"设置",market:activeMarket.displayName,stock:activeStock?.name ?? "个股详情"}[view]}
           apiBase={apiBase}
           isOnline={isOnline}
           token={token}
@@ -742,6 +722,7 @@ export function App() {
             onOpenStock={openStock}
             onOpenConversation={(id) => {
               setActiveId(id);
+              setDraftPrompt("");
               setView("chat");
             }}
             onNeedToken={() => setView("profile")}
@@ -790,7 +771,10 @@ export function App() {
             market={selectedMarket}
             marketPulse={marketPulse}
             draftPrompt={draftPrompt}
-            onSelect={setActiveId}
+            onSelect={(id) => {
+              setActiveId(id);
+              setDraftPrompt("");
+            }}
             onDraftPromptChange={setDraftPrompt}
             onOpenMarket={openAgentChat}
             onDelete={deleteConversation}
@@ -813,8 +797,8 @@ export function App() {
 
       <nav className="mobile-tabs">
         <NavButton active={view === "home" || view === "market" || view === "stock"} icon={Home} label="首页" onClick={() => setView("home")} compact />
-        <NavButton active={view === "accounts"} icon={WalletCards} label="账户" onClick={() => setView("accounts")} compact />
-        <NavButton active={view === "watchlist"} icon={ListPlus} label="自选" onClick={() => setView("watchlist")} compact />
+        <NavButton active={view === "accounts" || (view === "stock" && stockReturnView === "accounts")} icon={WalletCards} label="账户" onClick={() => setView("accounts")} compact />
+        <NavButton active={view === "watchlist" || (view === "stock" && stockReturnView === "watchlist")} icon={ListPlus} label="自选" onClick={() => setView("watchlist")} compact />
         <NavButton active={view === "chat"} icon={MessageCircle} label="对话" onClick={() => setView("chat")} compact />
         <NavButton active={view === "profile"} icon={UserCircle} label="我的" onClick={() => setView("profile")} compact />
       </nav>
@@ -823,12 +807,14 @@ export function App() {
 }
 
 function TopBar({
+  pageTitle,
   apiBase,
   isOnline,
   token,
   onOpenSettings,
   onOpenStock
 }: {
+  pageTitle: string;
   apiBase: string;
   isOnline: boolean | null;
   token: string;
@@ -889,6 +875,7 @@ function TopBar({
 
   return (
     <header className="topbar">
+      <div className="topbar-location"><span>工作台</span><ChevronRight size={13} /><strong>{pageTitle}</strong></div>
       <form className="search-shell" onSubmit={submitSearch}>
         <div className="search-box">
           <Search size={17} />
@@ -929,8 +916,8 @@ function TopBar({
         )}
       </form>
       <div className="topbar-actions">
-        <Badge tone={isOnline ? "green" : "red"}>{isOnline === null ? "Checking" : isOnline ? "Live API" : "Offline"}</Badge>
-        <Badge tone={token ? "blue" : "muted"}>{token ? "Token Ready" : "Token Required"}</Badge>
+        <span className={`connection-indicator ${isOnline ? "online" : ""}`}><i />{isOnline === null ? "连接中" : isOnline ? "数据已连接" : "连接待恢复"}</span>
+        <button className="topbar-account" aria-label={token ? "我的账户" : "登录账户"} onClick={onOpenSettings}><UserCircle size={18}/><span>{token ? "我的账户" : "登录账户"}</span></button>
         <button className="icon-button" onClick={onOpenSettings} aria-label="打开设置">
           <Settings size={18} />
         </button>
@@ -966,10 +953,10 @@ function HomePanel({
     <section className="workspace home-workspace">
       <div className="hero-panel">
         <div>
-          <p className="eyebrow">Market Decision Console</p>
-          <h2>今日市场决策驾驶舱</h2>
+          <p className="eyebrow">市场 · 研究 · 决策</p>
+          <h2>看清市场，从容决策。</h2>
           <p className="hero-copy">
-            汇总多市场指数、自选标的与 AI 风险提示，优先回答：今天该关注什么，风险在哪里，下一步看哪只股票。
+            关注你的市场、自选与持仓，让每一次研究更有依据。
           </p>
         </div>
         <div className="hero-metrics">
@@ -986,7 +973,7 @@ function HomePanel({
 
       <div className="dashboard-grid">
         <div className="main-column">
-          <SectionHeader title="市场雷达" subtitle="实时指数、涨跌关系与市场入口" />
+          <SectionHeader title="全球市场" subtitle="主要指数与市场动态" />
           <div className="market-matrix">
             {markets.map((market) => (
               <MarketDeskCard
@@ -1025,12 +1012,12 @@ function HomePanel({
           <DecisionPanel leadingQuote={leadingQuote} conversations={conversations.length} />
 
           <section className="surface-card">
-            <SectionHeader title="下一步动作" subtitle="先看板块，再进个股" compact />
+            <SectionHeader title="快速研究" subtitle="选择一个市场，开始分析" compact />
             <div className="prompt-stack">
               {markets.map((market) => (
                 <button key={market.id} onClick={() => onOpenMarket(market)}>
                   <MarketIcon market={market} small />
-                  <span>查看 {market.displayName} 自选股与行情分析</span>
+                  <span>{market.displayName} 市场研究</span>
                 </button>
               ))}
             </div>
@@ -1256,7 +1243,7 @@ function StockDetailPanel({
         <div>
           <p className="eyebrow">Stock Analysis</p>
           <h2>{display.name}</h2>
-          <p>{display.symbol} · {market.displayName} · {display.currency || (market.id === "a_share" ? "CNY" : "USD")} · {display.source === "bitget" ? (display.product_type === "quanto_perpetual" ? "Bitget Quanto 合约" : "Bitget 股票代币") : "股票行情"}{display.change_basis === "24h" ? " · 24h 涨跌" : ""}</p>
+          <p>{display.symbol} · {market.displayName} · {display.currency || (market.id === "a_share" ? "CNY" : "USD")} · {display.source === "bitget" ? (display.product_type === "quanto_perpetual" ? "Bitget Quanto 合约" : display.product_type === "stock_perpetual" ? "Bitget 股票永续" : "Bitget 股票代币") : "股票行情"}{display.change_basis === "24h" ? " · 24h 涨跌" : ""}</p>
         </div>
         <button
           className="primary-action"
@@ -1272,7 +1259,7 @@ function StockDetailPanel({
           <section className="price-panel">
             <div>
               <span>最新价</span>
-              <strong className={display.change_percent >= 0 ? "up" : "down"}>{formatNumber(display.current_price)}</strong>
+              <strong className={display.change_percent >= 0 ? "up" : "down"}>{display.quote_available === false || display.current_price <= 0 ? "—" : formatNumber(display.current_price)}</strong>
             </div>
             <ChangePill value={display.change_percent} />
             <div className="price-stats">
@@ -1299,6 +1286,7 @@ function StockDetailPanel({
                 ))}
               </div>
             </div>
+            {detail.error && <p className="form-note danger" role="alert">{detail.error}</p>}
             {detail.loading ? (
               <div className="chart-skeleton"><div className="skeleton-lines"><span /><span /><span /></div></div>
             ) : detail.kline.length > 0 ? (
@@ -1523,6 +1511,7 @@ function ChatPanel({
       <div className="chat-main">
         {activeConversation ? (
           <ConversationView
+            key={activeConversation.id}
             apiBase={apiBase}
             token={token}
             market={market}
@@ -1675,7 +1664,11 @@ function ConversationView({
                 ))}
               </div>
             )}
-            <p>{message.content || (isLoading && message.role === "assistant" ? "正在思考..." : "")}</p>
+            {message.role === "assistant" ? (
+              <ChatMarkdown content={message.content || (isLoading ? "正在思考..." : "")} />
+            ) : (
+              <p>{message.content}</p>
+            )}
           </div>
         ))}
         <div ref={bottomRef} />
@@ -1735,9 +1728,9 @@ function ProfilePanel({
     <section className="workspace profile-workspace">
       <div className="profile-header">
         <div>
-          <p className="eyebrow">Account Center</p>
-          <h2>账户、连接与部署状态</h2>
-          <p>这里管理 Web 端调用后端所需的地址、凭证和健康状态。</p>
+          <p className="eyebrow">偏好与连接</p>
+          <h2>账户与设置</h2>
+          <p>管理账户登录与服务连接。</p>
         </div>
         <div className="profile-status">
           <CheckCircle2 size={22} />
@@ -1749,8 +1742,8 @@ function ProfilePanel({
         <section className="settings-card primary">
           <Settings size={22} />
           <div>
-            <h3>后端地址</h3>
-            <p>当前指向腾讯云公网实例，健康检查直接访问 `/health`。</p>
+            <h3>服务连接</h3>
+            <p>设置慧投服务地址，检查当前连接状态。</p>
           </div>
           <input value={apiBase} onChange={(event) => onApiBaseChange(event.target.value)} />
           <button onClick={onRefreshHealth}>检测连接</button>
@@ -1759,44 +1752,31 @@ function ProfilePanel({
         <section className="settings-card">
           <KeyRound size={22} />
           <div>
-            <h3>JWT Token</h3>
+            <h3>登录凭证</h3>
             <p>{maskedToken}</p>
           </div>
           <textarea
             value={token}
             onChange={(event) => onTokenChange(event.target.value.trim())}
-            placeholder="粘贴登录后拿到的 JWT Token。"
+            placeholder="粘贴你的慧投登录凭证"
           />
           <button onClick={handleDevLogin} disabled={loginState === "loading"}>
             {loginState === "loading" ? "登录中..." : "开发登录"}
           </button>
-          {loginState === "error" && <span className="form-note danger">当前环境可能已启用正式微信登录，请手动填入 Token。</span>}
-          {loginState === "done" && <span className="form-note success">Token 已写入本地。</span>}
+          {loginState === "error" && <span className="form-note danger">此服务未开放测试登录，请使用已有的登录凭证。</span>}
+          {loginState === "done" && <span className="form-note success">登录凭证已保存到当前设备。</span>}
         </section>
 
         <section className="settings-card">
           <ShieldCheck size={22} />
           <div>
-            <h3>安全边界</h3>
-            <p>Token 仅保存在浏览器 localStorage，便于本地调试。生产环境建议接入正式 Web 登录。</p>
+            <h3>你的研究空间</h3>
+            <p>登录后同步自选列表与已绑定的实体账户。登录凭证保存在当前设备。</p>
           </div>
           <div className="check-list">
-            <span>HTTPS / 域名接入</span>
-            <span>刷新 Token 策略</span>
-            <span>服务端会话撤销</span>
-          </div>
-        </section>
-
-        <section className="settings-card">
-          <Bell size={22} />
-          <div>
-            <h3>后续能力</h3>
-            <p>Web 终端可以继续接入自选股、行情 WebSocket、新闻增强和圆桌多 Agent。</p>
-          </div>
-          <div className="check-list">
-            <span>实时行情订阅</span>
-            <span>自选组合看板</span>
-            <span>AI 报告导出</span>
+            <span>多市场自选</span>
+            <span>只读持仓同步</span>
+            <span>行情与基本面研究</span>
           </div>
         </section>
       </div>
@@ -1846,7 +1826,7 @@ function MarketDeskCard({
           <Sparkline values={main.sparkline_data ?? []} positive={main.change_percent >= 0} />
         </>
       ) : (
-        <div className="quote-empty">暂无实时指数，仍可进入 Agent 分析。</div>
+        <div className="quote-empty">行情暂不可用，可继续查看市场。</div>
       )}
 
       <div className="capability-list">

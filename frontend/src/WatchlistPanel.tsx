@@ -103,7 +103,7 @@ export function WatchlistPanel({ apiBase, token, markets, onOpenStock, onNeedTok
   const financialUnavailable = stocks.some(stock => fundamentals[stockKey(stock)]?.status === "unavailable");
   return <section className="workspace watchlist-workspace">
     <div className="watchlist-heading">
-      <div><p className="eyebrow">Unified Watchlist</p><h2>自选列表</h2><p>汇总 A 股、美股、港股和加密货币自选，点击名称查看行情与分析。</p></div>
+      <div><p className="eyebrow">我的投资</p><h2>自选列表</h2><p>值得关注的公司与资产，汇成一份清晰的研究清单。</p></div>
       <button className="ghost-button" onClick={() => void refresh()} disabled={loading || !token}><RefreshCw size={16} className={loading ? "spin" : ""} />刷新</button>
     </div>
 

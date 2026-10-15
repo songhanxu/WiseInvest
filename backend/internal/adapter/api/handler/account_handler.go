@@ -29,6 +29,10 @@ type AccountSummary struct {
 }
 
 type AccountHolding struct {
+	EntryPrice     string `json:"entry_price,omitempty"`
+	UnrealizedPnL  string `json:"unrealized_pnl,omitempty"`
+	MarginCurrency string `json:"margin_currency,omitempty"`
+	MarketValue    string `json:"market_value,omitempty"`
 	StockResponse
 	HoldingID   string `json:"holding_id"`
 	HoldingType string `json:"holding_type"`
@@ -38,11 +42,13 @@ type AccountHolding struct {
 }
 
 type HoldingsSnapshot struct {
-	AccountID string           `json:"account_id"`
-	Holdings  []AccountHolding `json:"holdings"`
-	AsOf      string           `json:"as_of"`
-	Complete  bool             `json:"complete"`
-	Warnings  []string         `json:"warnings"`
+	AccountID   string           `json:"account_id"`
+	Holdings    []AccountHolding `json:"holdings"`
+	AsOf        string           `json:"as_of"`
+	Stale       bool             `json:"stale"`
+	LastSuccess string           `json:"last_success,omitempty"`
+	Complete    bool             `json:"complete"`
+	Warnings    []string         `json:"warnings"`
 }
 
 type AccountHandler struct {
@@ -52,6 +58,10 @@ type AccountHandler struct {
 	mu       sync.Mutex
 	snapshot *HoldingsSnapshot
 	cachedAt time.Time
+	flight   chan struct{}
+	latest   *HoldingsSnapshot
+	lastErr  error
+	retryAt  time.Time
 }
 
 func NewAccountHandler(cfg config.BitgetConfig) *AccountHandler {
@@ -96,25 +106,76 @@ func (h *AccountHandler) GetHoldings(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Bitget 账户尚未连接"})
 		return
 	}
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 12*time.Second)
-	defer cancel()
-	// Cache is reachable only after ownership checks, including on cache hits.
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.snapshot != nil && time.Since(h.cachedAt) < 10*time.Second {
-		c.JSON(http.StatusOK, h.snapshot)
-		return
-	}
-	data, err := h.readHoldings(ctx)
+
+	data, err := h.holdings(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	if data.Complete {
-		h.snapshot = &data
-		h.cachedAt = time.Now()
-	}
 	c.JSON(http.StatusOK, data)
+}
+
+func (h *AccountHandler) holdings(ctx context.Context) (HoldingsSnapshot, error) {
+	for {
+		h.mu.Lock()
+		if h.snapshot != nil && time.Since(h.cachedAt) < 10*time.Second {
+			data := *h.snapshot
+			h.mu.Unlock()
+			return data, nil
+		}
+		if time.Now().Before(h.retryAt) {
+			data, err := h.latest, h.lastErr
+			h.mu.Unlock()
+			if data != nil {
+				return *data, nil
+			}
+			return HoldingsSnapshot{}, err
+		}
+		if h.flight == nil {
+			h.flight = make(chan struct{})
+			go h.syncHoldings()
+		}
+		done := h.flight
+		h.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return HoldingsSnapshot{}, ctx.Err()
+		case <-done:
+		}
+	}
+}
+
+func (h *AccountHandler) syncHoldings() {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	data, err := h.readHoldings(ctx)
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.lastErr = err
+	if err == nil && data.Complete {
+		data.LastSuccess = data.AsOf
+		h.snapshot, h.latest = &data, &data
+		h.cachedAt = time.Now()
+		h.retryAt = time.Time{}
+	} else {
+		h.retryAt = time.Now().Add(15 * time.Second)
+		if h.snapshot != nil {
+			stale := *h.snapshot
+			stale.Stale, stale.Complete = true, false
+			stale.Warnings = append([]string{}, data.Warnings...)
+			stale.Warnings = append(stale.Warnings, "本次同步未完成，当前展示上次完整快照")
+			if err != nil {
+				stale.Warnings = append(stale.Warnings, err.Error())
+			}
+			h.latest = &stale
+		} else if err == nil {
+			h.latest = &data
+		} else {
+			h.latest = nil
+		}
+	}
+	close(h.flight)
+	h.flight = nil
 }
 
 func (h *AccountHandler) readHoldings(ctx context.Context) (HoldingsSnapshot, error) {
@@ -212,7 +273,7 @@ func (h *AccountHandler) readHoldings(ctx context.Context) (HoldingsSnapshot, er
 				stock := bitgetStock(bitget.HoldingIdentity(item, productCategory))
 				unavailable := false
 				stock.QuoteAvailable = &unavailable
-				pending = append(pending, AccountHolding{StockResponse: stock, HoldingID: "futures:" + position.Symbol + ":" + position.Side + ":" + position.MarginMode, HoldingType: "futures", Side: position.Side, Quantity: position.Total, MarginMode: position.MarginMode})
+				pending = append(pending, AccountHolding{StockResponse: stock, HoldingID: "futures:" + position.Symbol + ":" + position.Side + ":" + position.MarginMode, HoldingType: "futures", Side: position.Side, Quantity: position.Total, MarginMode: position.MarginMode, EntryPrice: position.EntryPrice, UnrealizedPnL: position.UnrealizedPnL, MarginCurrency: position.MarginCoin})
 			}
 		}
 		if len(pending) > 0 {
@@ -225,6 +286,9 @@ func (h *AccountHandler) readHoldings(ctx context.Context) (HoldingsSnapshot, er
 					quote := bitget.ApplyTicker(bitget.Quote{Code: pending[i].ID, Name: pending[i].Name, Market: pending[i].Market, ProviderSymbol: pending[i].ProviderSymbol, Currency: pending[i].Currency, ProductType: pending[i].ProductType}, ticker)
 					if quote.Price > 0 {
 						pending[i].StockResponse = bitgetStock(quote)
+						if pending[i].HoldingType == "spot" {
+							pending[i].MarketValue = bitget.QuantityValue(pending[i].Quantity, quote.Price)
+						}
 					}
 				}
 			}

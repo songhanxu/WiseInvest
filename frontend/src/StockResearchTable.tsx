@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { requestJson } from "./App";
 import type { Market, StockQuote } from "./App";
 
 export type Fundamentals = {
+  metrics?: Record<string, { source: string; currency?: string; as_of: string }>;
   eps: number | null;
   pe: number | null;
   forward_pe: number | null;
@@ -34,6 +35,7 @@ export function useStockFundamentals(apiBase: string, stocks: StockQuote[], scop
   const financialKeys = stocks.map(stockKey).sort().join("|");
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     setFinancialLoading(Boolean(financialKeys));
     setFundamentals({});
     const rows = [...new Map(stocks.map(stock => [stockKey(stock), stock])).values()];
@@ -42,13 +44,13 @@ export function useStockFundamentals(apiBase: string, stocks: StockQuote[], scop
       while (cursor < rows.length && !cancelled) {
         const stock = rows[cursor++];
         let value: Fundamentals;
-        try { value = await requestJson<Fundamentals>(apiBase, `/api/v1/stocks/fundamentals?market=${stock.market}&code=${encodeURIComponent(stock.id)}`, ""); }
+        try { value = await requestJson<Fundamentals>(apiBase, `/api/v1/stocks/fundamentals?market=${stock.market}&code=${encodeURIComponent(stock.id)}`, "", { signal: controller.signal }); }
         catch { value = { eps: null, pe: null, forward_pe: null, forward_eps: null, guidance_eps: null, guidance_eps_low: null, guidance_eps_high: null, status: "unavailable", message: "财报数据暂不可用，请检查后端与基本面数据源" }; }
         if (!cancelled) setFundamentals(previous => ({ ...previous, [stockKey(stock)]: value }));
       }
     }
     Promise.all(Array.from({ length: Math.min(4, rows.length) }, worker)).finally(() => { if (!cancelled) setFinancialLoading(false); });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); };
     // Quote refreshes retain the same membership and don't refetch slow financial data.
   }, [apiBase, scope, financialKeys]);
 
@@ -65,30 +67,55 @@ export function StockResearchTable<T extends StockQuote>({ stocks, markets, fund
   renderAction?: (stock: T) => ReactNode;
   emptyMessage: string;
 }) {
-  return <div className="surface-card watchlist-table-container">
+  const [sort, setSort] = useState("original");
+  const [hidden, setHidden] = useState<string[]>(["guidance"]);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const columnLabels: Record<string, string> = { eps: "EPS", pe: "PE", forward: "远期 PE", guidance: "公司指引", earnings: "财报日期" };
+  const sorted = [...stocks].sort((a, b) => {
+    if (sort === "name") return a.name.localeCompare(b.name, "zh-CN");
+    const value = (stock: T) => {
+      if (sort === "price") return stock.quote_available === false || stock.current_price <= 0 ? null : stock.current_price;
+      const row = fundamentals[stockKey(stock)];
+      if (sort === "pe") return row?.pe != null && row.pe > 0 ? row.pe : null;
+      return row?.next_earnings_date;
+    };
+    if (sort === "original") return 0;
+    const av = value(a), bv = value(b);
+    if (av == null || av === "") return bv == null || bv === "" ? 0 : 1;
+    if (bv == null || bv === "") return -1;
+    return typeof av === "number" && typeof bv === "number" ? sort === "price" ? bv - av : av - bv : String(av).localeCompare(String(bv));
+  });
+  const metricHint = (f: Fundamentals | undefined, key: string) => {
+    const metric = f?.metrics?.[key];
+    return [metric?.source || f?.source, (key === "eps" || key === "guidance") ? metric?.currency || f?.currency : "", metric?.as_of || f?.as_of].filter(Boolean).join(" · ");
+  };
+  return <div className={`surface-card watchlist-table-container ${renderHolding ? "has-holdings" : ""} ${hidden.map(key => `hide-${key}`).join(" ")}`}>
+    <div className="research-table-controls"><label>排序 <select aria-label="列表排序" value={sort} onChange={event => setSort(event.target.value)}><option value="original">默认顺序</option><option value="name">名称</option><option value="price">价格从高到低</option><option value="pe">PE 从低到高</option><option value="earnings">最近财报日期</option></select></label><details className="research-columns"><summary>显示列</summary><div>{Object.entries(columnLabels).map(([key, label]) => <label key={key}><input type="checkbox" checked={!hidden.includes(key)} onChange={() => setHidden(previous => previous.includes(key) ? previous.filter(item => item !== key) : [...previous, key])} />{label}</label>)}</div></details><span className="watchlist-note">{stocks.length} 项标的</span></div>
+    <div className="research-table-scroll">
     <table className="unified-watchlist-table">
-      <thead><tr><th>名称</th><th>代码</th><th>市场</th><th>价格</th><th>EPS <small>TTM</small></th><th>PE <small>TTM</small></th><th>远期 PE</th><th>最新财报预期 EPS <small>公司指引</small></th><th>下份财报时间</th>{renderAction && <th><span className="sr-only">操作</span></th>}</tr></thead>
-      <tbody>{stocks.map(stock => {
+      <thead><tr><th>标的</th><th>最新价格</th>{renderHolding && <th>持仓详情</th>}<th className="col-eps">EPS <small>TTM</small></th><th className="col-pe">PE <small>TTM</small></th><th className="col-forward">远期 PE</th><th className="col-guidance">公司指引 EPS</th><th className="col-earnings">下份财报时间</th>{renderAction && <th><span className="sr-only">操作</span></th>}</tr></thead>
+      <tbody>{sorted.map(stock => {
         const market = markets.find(item => item.id === stock.market); const key = stockKey(stock); const f = fundamentals[key];
         const na = stock.market === "crypto" || f?.status === "not_applicable" || /\bETF\b|基金/i.test(stock.name);
         const empty = na ? "不适用" : "—";
         const guidance = f?.guidance_eps != null ? numeric(f.guidance_eps) : f?.guidance_eps_low != null && f.guidance_eps_high != null ? `${numeric(f.guidance_eps_low)}–${numeric(f.guidance_eps_high)}` : empty;
-        const financialHint = [f?.message, f?.source, f?.currency ? `EPS 币种：${f.currency}` : "", f?.as_of ? `数据时间：${f.as_of}` : ""].filter(Boolean).join(" · ");
+        const financialHint = [f?.message, metricHint(f, "eps")].filter(Boolean).join(" · ");
         const product = stock.product_type === "quanto_perpetual" ? "Quanto 合约" : stock.product_type === "stock_perpetual" ? "股票永续" : "股票代币";
-        return <tr key={getRowKey ? getRowKey(stock) : key}>
-          <td><button className="watchlist-name" disabled={!market} onClick={() => market && onOpenStock(market, stock)}>{stock.name}</button><small>{stock.source === "bitget" ? `Bitget · ${product}` : stock.source === "tencent" ? "腾讯 · 兜底行情" : ""}</small>{renderHolding?.(stock)}</td>
-          <td className="mono" title={stock.provider_symbol}>{stock.symbol || stock.id}</td>
-          <td><span className="watchlist-market-tag">{market?.displayName ?? (stock.market === "jp_stock" ? "日股" : stock.market)}</span></td>
-          <td className="mono">{stock.quote_available === false || stock.current_price <= 0 ? "—" : numeric(stock.current_price)}<small>{stock.currency || (stock.market === "a_share" ? "CNY" : stock.market === "hk_stock" ? "HKD" : stock.market === "crypto" ? "USDT" : "USD")}{stock.change_basis === "24h" ? " · 24h" : ""}</small></td>
-          <td className="mono" title={financialHint}>{f?.eps != null ? numeric(f.eps) : empty}{f?.eps != null && <small>{f.currency}</small>}</td>
-          <td className="mono" title={financialHint}>{f?.pe != null && f.pe > 0 ? numeric(f.pe) : f?.eps != null && f.eps < 0 ? "亏损" : empty}</td>
-          <td className="mono" title={financialHint}>{f?.forward_pe != null ? numeric(f.forward_pe) : empty}{f?.forward_period && <small>年度期末 {f.forward_period}</small>}</td>
-          <td className="mono" title={f?.guidance_report_date ? `财报发布 ${f.guidance_report_date}` : financialHint}>{f?.guidance_source_url && /^https?:\/\//.test(f.guidance_source_url) ? <a href={f.guidance_source_url} target="_blank" rel="noreferrer">{guidance}</a> : guidance}<small>{f?.guidance_period ? `${f.guidance_period} · ${f.guidance_basis || ""}` : na ? "" : "未取得公司指引"}</small></td>
-          <td className="mono">{f?.next_earnings_date || empty}{f?.next_earnings_date && <small>{f.earnings_date_status === "confirmed" ? "公司已确认" : "预计日期"}</small>}</td>
-          {renderAction && <td>{renderAction(stock)}</td>}
-        </tr>;
+        const rowKey = getRowKey ? getRowKey(stock) : key;
+        return <Fragment key={rowKey}><tr>
+          <td data-label="标的" className="research-identity"><div className="research-name-line"><button className="watchlist-name" disabled={!market} onClick={() => market && onOpenStock(market, stock)}>{stock.name}</button><button className="source-toggle" aria-label={`${stock.name}数据来源`} aria-expanded={expanded === rowKey} onClick={() => setExpanded(previous => previous === rowKey ? null : rowKey)}>ⓘ</button></div><small title={stock.provider_symbol}>{stock.symbol || stock.id}<span className="identity-dot">·</span>{market?.displayName ?? stock.market}{stock.source === "bitget" ? ` · ${product}` : stock.source === "tencent" ? " · 股票" : ""}</small></td>
+          <td data-label="价格" className="mono">{stock.quote_available === false || stock.current_price <= 0 ? "—" : numeric(stock.current_price)}<small>{stock.currency || (stock.market === "a_share" ? "CNY" : stock.market === "hk_stock" ? "HKD" : stock.market === "crypto" ? "USDT" : "USD")}{stock.change_basis === "24h" ? " · 24h" : ""}</small></td>
+          {renderHolding && <td data-label="持仓详情" className="holding-detail-cell">{renderHolding(stock)}</td>}
+          <td data-label="EPS" className="mono col-eps" title={financialHint}>{f?.eps != null ? numeric(f.eps) : empty}{f?.eps != null && <small>{f.metrics?.eps?.currency || f.currency}</small>}</td>
+          <td data-label="PE" className="mono col-pe" title={metricHint(f, "pe")}>{f?.pe != null && f.pe > 0 ? numeric(f.pe) : f?.eps != null && f.eps < 0 ? "亏损" : empty}</td>
+          <td data-label="远期 PE" className="mono col-forward" title={metricHint(f, "forward_pe")}>{f?.forward_pe != null ? numeric(f.forward_pe) : empty}{f?.forward_period && <small>年度期末 {f.forward_period}</small>}</td>
+          <td data-label="公司指引" className="mono col-guidance" title={f?.guidance_report_date ? `财报发布 ${f.guidance_report_date}` : financialHint}>{f?.guidance_source_url && /^https?:\/\//.test(f.guidance_source_url) ? <a href={f.guidance_source_url} target="_blank" rel="noreferrer">{guidance}</a> : guidance}<small>{f?.guidance_period ? `${f.guidance_period} · ${f.guidance_basis || ""} · ${f.metrics?.guidance?.currency || f.currency || ""}` : na ? "" : "未取得有效公司指引"}</small></td>
+          <td data-label="财报日期" className="mono col-earnings">{f?.next_earnings_date || empty}{f?.next_earnings_date && <small>{f.earnings_date_status === "confirmed" ? "公司已确认" : "预计日期"}</small>}</td>
+          {renderAction && <td data-label="操作">{renderAction(stock)}</td>}
+        </tr>{expanded === rowKey && <tr className="research-expanded-row"><td colSpan={7 + (renderHolding ? 1 : 0) + (renderAction ? 1 : 0) - hidden.length}><div className="research-provenance"><p>{f?.message || "公司财报指标对应标的股票；价格对应当前交易产品。"}</p><div>{Object.entries({eps:"EPS",pe:"PE",forward_pe:"远期 PE",guidance:"公司指引",next_earnings_date:"财报日期"}).map(([metric,label]) => <span key={metric}><b>{label}</b>{metricHint(f,metric) || "暂无来源数据"}</span>)}</div></div></td></tr>}</Fragment>;
       })}</tbody>
     </table>
+    </div>
     {!stocks.length && <div className="empty-state">{emptyMessage}</div>}
   </div>;
 }

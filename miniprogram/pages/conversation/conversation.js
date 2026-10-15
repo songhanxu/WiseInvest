@@ -38,7 +38,6 @@ function generateTitle(firstUserMessage) {
 
 Page({
   data: {
-    statusBarHeight: 20,
     market: getMarketById('a_share'),
     conversationId: '',
     backendConversationId: 0,
@@ -50,7 +49,6 @@ Page({
     lastRegeneratableAssistantId: '',
     createdAt: '',
     keyboardHeight: 0,
-    errorBottom: 114,
     windowHeight: 812,
   },
 
@@ -59,13 +57,12 @@ Page({
 
   async onLoad(options) {
     const windowInfo = wx.getWindowInfo ? wx.getWindowInfo() : { statusBarHeight: 20, windowHeight: 812 };
-    const statusBarHeight = windowInfo.statusBarHeight || 20;
     const windowHeight = windowInfo.windowHeight || 812;
     const marketId = options.market || 'a_share';
     const conversationId = options.conversationId || '';
     const market = getMarketById(marketId);
 
-    this.setData({ statusBarHeight, windowHeight, market, conversationId });
+    this.setData({ windowHeight, market, conversationId });
 
     if (conversationId) {
       const found = loadConversations().find((item) => item.id === conversationId);
@@ -99,11 +96,11 @@ Page({
   },
 
   onShow() {
-    this.setData({ keyboardHeight: 0, errorBottom: 114 });
+    this.setData({ keyboardHeight: 0 });
   },
 
   onHide() {
-    this.setData({ keyboardHeight: 0, errorBottom: 114 });
+    this.setData({ keyboardHeight: 0 });
   },
 
   onUnload() {
@@ -126,17 +123,21 @@ Page({
     }
   },
 
+  onResize(e) {
+    const windowHeight = Number(e.size && e.size.windowHeight);
+    if (windowHeight > 0) this.setData({ windowHeight });
+  },
+
   onInput(e) {
     this.setData({ inputText: e.detail.value || '' });
   },
 
   onKeyboardHeightChange(e) {
-    const rawHeight = Math.max(0, Number(e?.detail?.height || 0));
-    const maxLift = Math.floor((this.data.windowHeight || 812) * 0.58);
-    const keyboardHeight = Math.min(rawHeight, maxLift);
+    const reportedHeight = Number(e && e.detail && e.detail.height);
+    const rawHeight = Number.isFinite(reportedHeight) ? Math.max(0, reportedHeight) : 0;
+    const keyboardHeight = Math.min(rawHeight, this.data.windowHeight || 812);
     this.setData({
       keyboardHeight,
-      errorBottom: keyboardHeight + 114,
     }, () => {
       if (keyboardHeight > 0) {
         this.scrollToBottom();
@@ -145,7 +146,7 @@ Page({
   },
 
   onInputBlur() {
-    this.setData({ keyboardHeight: 0, errorBottom: 114 });
+    this.setData({ keyboardHeight: 0 });
   },
 
   async sendMessage() {
@@ -277,10 +278,15 @@ Page({
   },
 
   openMenu() {
+    if (this.data.isLoading) return;
     wx.showActionSheet({
-      itemList: ['清空对话'],
+      itemList: ['返回首页', '清空对话'],
       success: ({ tapIndex }) => {
         if (tapIndex === 0) {
+          wx.reLaunch({ url: '/pages/home/home' });
+          return;
+        }
+        if (tapIndex === 1) {
           const welcome = {
             id: createId(),
             role: 'assistant',

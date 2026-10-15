@@ -1,38 +1,8 @@
 <view class="login-page">
-  <view class="aurora aurora-1"></view>
-  <view class="aurora aurora-2"></view>
-
   <view class="content safe-area-bottom">
-    <view class="brand-block">
-      <view class="brand-cn">慧投</view>
-      <view class="brand-en">WiseInvest</view>
-      <view class="brand-desc">你的 AI 投资研究助手</view>
-    </view>
-
-    <view class="login-card">
-      <view class="card-title">欢迎登录</view>
-      <view class="card-subtitle">使用微信一键登录，继续你的投资对话</view>
-
-      <button class="wechat-btn" loading="{{isLoading}}" disabled="{{isLoading}}" bindtap="loginWithWeChat">
-        {{isLoading ? '登录中...' : '微信一键登录'}}
-      </button>
-
-      <view class="tips">安全登录 · 仅用于账号识别</view>
-
-      <view class="feature-row">
-        <view class="feature-item">
-          <text class="feature-icon">🔐</text>
-          <text class="feature-text">数据安全</text>
-        </view>
-        <view class="feature-item">
-          <text class="feature-icon">📈</text>
-          <text class="feature-text">实时行情</text>
-        </view>
-        <view class="feature-item">
-          <text class="feature-icon">🧠</text>
-          <text class="feature-text">AI 分析</text>
-        </view>
-      </view>
-    </view>
+    <view class="brand-block"><view class="brand-symbol"><view class="brand-bar short"></view><view class="brand-bar tall"></view><view class="brand-bar medium"></view></view><view class="brand-cn">慧投</view><view class="brand-en">WISEINVEST</view></view>
+    <view class="login-intro"><view class="intro-eyebrow">你的投资研究助手</view><view class="intro-title">让研究有条理，<view>让决策有依据。</view></view><view class="brand-desc">关注市场、理解公司，继续每一个值得深入的问题。</view></view>
+    <view class="login-card"><view class="card-title">开始你的研究</view><view class="card-subtitle">使用微信登录，保存并继续你的研究对话。</view><button class="wechat-btn" loading="{{isLoading}}" disabled="{{isLoading}}" bindtap="loginWithWeChat" hover-class="is-pressed">{{isLoading ? '正在登录' : '微信登录'}}</button><view class="feature-row"><text>多市场研究</text><text class="feature-dot">·</text><text>AI 辅助分析</text><text class="feature-dot">·</text><text>对话留存</text></view></view>
+    <view class="login-note">专注研究，审慎决策。</view>
   </view>
 </view>

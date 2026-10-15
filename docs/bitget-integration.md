@@ -152,3 +152,15 @@ sudo docker compose logs --tail=80 backend
 后端重建后 reload Nginx，使其重新解析后端容器地址；健康检查应返回 `status: ok`。上面手动命令适用于现代 Compose；V1 请使用已修复的部署脚本或前面的手动恢复命令，不能直接把命令名换成 `docker-compose` 后重复重建。现有服务可通过任一部署脚本进入后端更新流程，无需删除数据库或卷。生产环境文件已被 Git 忽略，并从 Docker 构建上下文排除，凭证通过运行时环境注入。
 
 登录前端后进入「实体账户」验证真实持仓。没有凭证时接口返回未连接；`/health` 正常仅代表后端运行，不代表 Bitget 凭证验证成功。当前 Compose 只部署 API，不构建或托管 Web 前端；本地前端「设置」切换到云端 API 地址即可使用新接口。
+
+
+## 持仓、财报与自选的一致性
+
+- 从具体 Bitget 产品进入详情时，网页传递 `provider_symbol` 和 `category`（`SPOT` / `USDT-FUTURES`）；行情、K 线及综合分析的缓存和请求均按产品区分。已指定的产品不可用时返回错误，不切换到同名产品。省略产品参数的旧客户端保持原有按市场和股票代码查询的行为。
+- 持仓读取合并并发请求，成功快照缓存 10 秒，失败或不完整结果退避 15 秒。已有完整快照时返回它并设置 `stale=true`、`complete=false`、`last_success` 和警告；`as_of` 保留该快照时间。没有完整快照时允许返回部分结果，完全失败仍返回 502。取消单个请求不影响其他等待者。
+- 现货估算市值为数量乘以该代币最新报价；合约开仓均价和未实现盈亏直接读取账户接口，盈亏使用保证金币种。现货账户资产接口不提供成本，因此不推测现货成本或盈亏；也不把合约数量乘报价误当成账户净资产。字段参见 [UTA 持仓接口](https://www.bitget.com/legacy-docs/uta/trade/Get-Position) 和 [经典账户持仓接口](https://www.bitget.com/docs/catalog/classic-contract-position/classic-contract-position)。
+- 财报按标的合并并发查询，最多缓存 512 个标的；正常结果缓存 6 小时，失败结果缓存 1 分钟。请求结束或切换账户后，网页取消不再需要的财报请求。
+- 财报响应的 `metrics` 为 EPS、PE、远期 PE、指引和财报日期分别记录来源、币种及数据时间。本地 EPS 与线上币种冲突时不覆盖线上 EPS；指引使用自己的币种。指引必须包含 HTTPS 来源、有效发布日期、期间和会计口径，发布日期超过 180 天或在未来时隐藏指引数值和元数据。此规则只表示当前页面的有效期策略，不保证报告发布后未被公司修订。
+- 后端首次升级时，在事务内规范化旧自选代码，合并同一用户、市场和代码的重复记录，保留最早记录，并创建唯一索引 `idx_watchlist_identity`。后续新增使用冲突忽略，删除兼容旧加密货币代码。迁移在后端启动时执行，未直接修改线上数据库。
+
+验证：`go test ./...`；并发检查：`go test -race ./internal/adapter/api/handler ./internal/infrastructure/bitget`。设置 `WISEINVEST_TEST_POSTGRES_DSN` 可执行 `go test ./internal/infrastructure/database -run TestWatchlistMigrationAndConcurrentMembership`；测试只在新建的临时 schema 中工作，结束后移除该 schema。

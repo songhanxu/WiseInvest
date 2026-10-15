@@ -5,7 +5,7 @@ App({
       user: null,
     },
     ui: {
-      theme: 'dark',
+      theme: 'light',
     },
   },
 

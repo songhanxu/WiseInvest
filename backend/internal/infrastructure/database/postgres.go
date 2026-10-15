@@ -36,14 +36,38 @@ func NewPostgresDB(cfg config.DatabaseConfig) (*gorm.DB, error) {
 
 // AutoMigrate runs database migrations
 func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
-		&model.User{},
-		&model.Conversation{},
-		&model.Message{},
-		&model.AgentSession{},
-		&model.DeviceToken{},
-		&model.WatchlistItem{},
-	)
+	return db.Transaction(func(tx *gorm.DB) error {
+		if tx.Migrator().HasTable(&model.WatchlistItem{}) && !tx.Migrator().HasIndex(&model.WatchlistItem{}, "idx_watchlist_identity") {
+			if err := tx.Exec(`LOCK TABLE watchlist_items IN ACCESS EXCLUSIVE MODE`).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec(`UPDATE watchlist_items SET stock_code = CASE
+ WHEN market='crypto' AND LOWER(TRIM(stock_code))='btc_price' THEN 'BTC'
+ WHEN market='crypto' AND LOWER(TRIM(stock_code))='eth_price' THEN 'ETH'
+ WHEN market='crypto' THEN REGEXP_REPLACE(UPPER(TRIM(stock_code)), '/?USDT$', '')
+ WHEN market='us_stock' THEN UPPER(TRIM(stock_code))
+ WHEN market='hk_stock' AND REGEXP_REPLACE(UPPER(TRIM(stock_code)), '^HK|[.]HK$', '', 'g') ~ '^[0-9]{1,5}$' THEN LPAD(REGEXP_REPLACE(UPPER(TRIM(stock_code)), '^HK|[.]HK$', '', 'g'),5,'0')
+ WHEN market='a_share' AND TRIM(stock_code) ~ '^[0-9]{6}$' THEN (CASE WHEN LOWER(symbol) LIKE 'sz%' OR (symbol='' AND LEFT(stock_code,1) IN ('0','3')) THEN 'sz' ELSE 'sh' END)||TRIM(stock_code)
+ WHEN market='a_share' THEN LOWER(TRIM(stock_code))
+ ELSE TRIM(stock_code) END`).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec(`DELETE FROM watchlist_items a USING watchlist_items b WHERE a.user_id=b.user_id AND a.market=b.market AND a.stock_code=b.stock_code AND a.id>b.id`).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.AutoMigrate(
+			&model.User{},
+			&model.Conversation{},
+			&model.Message{},
+			&model.AgentSession{},
+			&model.DeviceToken{},
+			&model.WatchlistItem{},
+		); err != nil {
+			return err
+		}
+		return tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_watchlist_identity ON watchlist_items(user_id,market,stock_code)`).Error
+	})
 }
 
 // SeedDefaultData creates default data if not exists

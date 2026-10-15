@@ -1,4 +1,5 @@
 Component({
+  options: { styleIsolation: 'apply-shared' },
   properties: {
     message: {
       type: Object,
@@ -26,13 +27,11 @@ Component({
 
   methods: {
     copyContent(e) {
-      e.stopPropagation();
       const content = this.properties.message?.content || '';
       wx.setClipboardData({ data: content });
     },
 
     regenerate(e) {
-      e.stopPropagation();
       this.triggerEvent('regenerate');
     },
   },
