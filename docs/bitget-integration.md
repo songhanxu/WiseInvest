@@ -98,6 +98,21 @@ bash deploy-update.sh
 
 脚本自动定位项目目录，兼容 Compose V2/V1，按需使用 sudo。读取现有 `backend/.env.production`，确认 PostgreSQL、Redis、Nginx 已在运行后构建镜像并重建后端容器，等待健康检查、刷新 Nginx、验证代理。失败时退出并显示后端日志。默认每次健康检查最多等待 120 秒，可用 `DEPLOY_HEALTH_TIMEOUT=180 bash deploy-update.sh` 调整。脚本不拉取 Git、不安装或升级系统、不改写环境文件，也不重建数据库和 Redis。它只更新后端 API；首次部署仍参考 `deploy.sh`。
 
+如果服务器只有旧版 `docker-compose 1.29.2`，重建可能报 `KeyError: 'ContainerConfig'`。[Docker 官方说明](https://docs.docker.com/engine/deprecated/#container-and-containerconfig-fields-in-image-inspect)解释了该镜像字段的移除，旧 Compose 已停止维护。脚本优先使用现代 `docker compose`；回退到 V1 时，在镜像构建成功后先运行 `rm -s -f backend`，再创建后端，避开旧版的 recreate 路径。该命令按当前 Compose 项目和 backend 服务定位容器，也能清理失败后被改名的旧容器；不使用 `-v`，不删除数据库、Redis 或生产配置。本仓库后端容器没有持久化数据卷，所有持久化业务数据存储在独立 PostgreSQL/Redis 服务中。
+
+已经遇到上述错误时，拉取修复后重新运行 `bash deploy-update.sh` 即可。手动恢复也可在项目根目录执行：
+
+```bash
+sudo docker-compose rm -s -f backend
+sudo docker-compose up -d --no-deps backend
+curl -fsS --retry 20 --retry-connrefused --retry-delay 3 http://127.0.0.1:8080/health
+sudo docker-compose exec -T nginx nginx -t
+sudo docker-compose exec -T nginx nginx -s reload
+curl -fsS http://127.0.0.1/health
+```
+
+手动恢复使用已经构建成功的镜像；长期建议迁移到仍受支持的 Docker Compose。不要通过 `docker-compose down -v` 清理此错误，那会删除数据卷。
+
 以下适用于本仓库 `docker-compose.yml` 的现有 Docker 部署，数据库、Redis 和 Nginx 已在运行。通过腾讯云控制台或 SSH 登录服务器，在 **服务器原有 WiseInvest 仓库目录** 执行：
 
 ```bash

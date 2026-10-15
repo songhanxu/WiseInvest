@@ -45,7 +45,11 @@ if args[:2] == ["ps", "-q"]:
 elif args == ["build", "backend"]:
     sys.exit(2 if os.environ.get("MOCK_BUILD_FAILURE") else 0)
 elif args == ["up", "-d", "--no-deps", "--force-recreate", "backend"]:
-    pass
+    if os.environ.get("MOCK_LEGACY_BUG") and not Path(os.environ["MOCK_LOG"] + ".removed").exists():
+        print("KeyError: 'ContainerConfig'", file=sys.stderr)
+        sys.exit(1)
+elif args == ["rm", "-s", "-f", "backend"]:
+    Path(os.environ["MOCK_LOG"] + ".removed").touch()
 elif args[:1] == ["exec"]:
     assert args in [["exec", "-T", "nginx", "nginx", "-t"], ["exec", "-T", "nginx", "nginx", "-s", "reload"]], args
     if os.environ.get("MOCK_NGINX_FAILURE"):
@@ -112,10 +116,27 @@ class DeployUpdateTests(unittest.TestCase):
         self.assertFalse(any("build" in c for c in calls))
 
     def test_build_failure_preserves_running_backend(self):
-        result, calls = self.run_deploy(MOCK_BUILD_FAILURE="1")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertFalse(any("up" in c for c in calls))
-        self.assertTrue(any("logs" in c for c in calls))
+        for flags in ({}, {"MOCK_V1": "1", "MOCK_LEGACY_BUG": "1"}):
+            with self.subTest(flags=flags):
+                result, calls = self.run_deploy(MOCK_BUILD_FAILURE="1", **flags)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(any("up" in c or "rm" in c for c in calls))
+                self.assertTrue(any("logs" in c for c in calls))
+
+    def test_legacy_containerconfig_failure_avoided_after_build(self):
+        result, calls = self.run_deploy(MOCK_V1="1", MOCK_LEGACY_BUG="1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        build = next(i for i, c in enumerate(calls) if c[-2:] == ["build", "backend"])
+        remove = next(i for i, c in enumerate(calls) if c[-4:] == ["rm", "-s", "-f", "backend"])
+        up = next(i for i, c in enumerate(calls) if "--force-recreate" in c)
+        self.assertLess(build, remove)
+        self.assertLess(remove, up)
+        self.assertFalse(any("-v" in c or "down" in c for c in calls))
+
+    def test_modern_compose_keeps_normal_recreation(self):
+        result, calls = self.run_deploy()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any("rm" in c for c in calls))
 
     def test_unhealthy_backend_does_not_reload_nginx(self):
         result, calls = self.run_deploy(MOCK_UNHEALTHY="1")

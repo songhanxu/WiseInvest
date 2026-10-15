@@ -24,12 +24,14 @@ if ! docker info >/dev/null 2>&1; then
 fi
 "${DOCKER[@]}" info >/dev/null 2>&1 || fail '无法连接 Docker 服务'
 
+LEGACY_COMPOSE=false
 if "${DOCKER[@]}" compose version >/dev/null 2>&1; then
     COMPOSE=("${DOCKER[@]}" compose)
 elif command -v docker-compose >/dev/null; then
     COMPOSE=(docker-compose)
     if [[ "$USE_SUDO" == true ]]; then COMPOSE=(sudo docker-compose); fi
     "${COMPOSE[@]}" version >/dev/null 2>&1 || fail 'Docker Compose 不可用'
+    LEGACY_COMPOSE=true
 else
     fail '需要安装 Docker Compose V2 或 docker-compose V1'
 fi
@@ -68,6 +70,13 @@ printf '[1/4] 构建后端镜像…\n'
 "${COMPOSE[@]}" build backend
 
 printf '[2/4] 更新后端容器，加载生产环境配置…\n'
+if [[ "$LEGACY_COMPOSE" == true ]]; then
+    # Compose 1.29.2 的 recreate 会读取新镜像中已缺失的 ContainerConfig。
+    # 按项目/服务清理，也能匹配失败后被改成 <ID>_wiseinvest-api 的旧容器。
+    # 后端无持久化卷；不传 -v，不触碰 PostgreSQL、Redis 或配置文件。
+    printf '使用旧版 Compose：先清理旧后端容器，避开 ContainerConfig 兼容问题…\n'
+    "${COMPOSE[@]}" rm -s -f backend
+fi
 "${COMPOSE[@]}" up -d --no-deps --force-recreate backend
 
 printf '[3/4] 等待后端健康检查（最多 %s 秒）…\n' "$TIMEOUT"
