@@ -135,3 +135,17 @@ func TestEmptyAccountDoesNotRequirePublicMarket(t *testing.T) {
 		t.Fatalf("empty account %+v: %v", data, err)
 	}
 }
+
+func TestHoldingsExposeSeparateSafeProviderErrors(t *testing.T) {
+	f := &accountFixture{assetErr: &bitget.AccountError{Code: "40038", HTTPStatus: 400}, positionErr: &bitget.AccountError{Code: "40014", HTTPStatus: 400}}
+	h := &AccountHandler{cfg: config.BitgetConfig{AccountType: "uta", IncludeFutures: true}, private: f}
+	_, err := h.readHoldings(context.Background())
+	if err == nil {
+		t.Fatal("failure accepted")
+	}
+	for _, want := range []string{"资产查询", "40038", "合约查询", "40014", "uta"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("missing diagnostic %s: %v", want, err)
+		}
+	}
+}

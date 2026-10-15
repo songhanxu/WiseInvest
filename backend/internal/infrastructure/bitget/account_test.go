@@ -19,6 +19,9 @@ func TestPrivateSignatureReadOnlyAndSanitizedErrors(t *testing.T) {
 		if r.Method != "GET" || r.URL.RawQuery != "category=USDT-FUTURES&symbol=TSLAUSDT" {
 			t.Errorf("unexpected signed request: %s %s", r.Method, r.URL)
 		}
+		if r.Header.Get("Content-Type") != "application/json" {
+			t.Error("required JSON Content-Type missing")
+		}
 		if r.Header.Get("ACCESS-KEY") != "test-key" || r.Header.Get("ACCESS-PASSPHRASE") != "test-pass" || r.Header.Get("ACCESS-TIMESTAMP") != "1700000000000" || r.Header.Get("ACCESS-SIGN") != "JwxDh1cVXAS+bZVM0d1MdFNnbdnGL+a0pDQuzkue47Y=" {
 			t.Error("incorrect authentication headers")
 		}
@@ -39,6 +42,34 @@ func TestPrivateSignatureReadOnlyAndSanitizedErrors(t *testing.T) {
 	encoded, _ := json.Marshal(c.credentials)
 	if string(encoded) != "{}" {
 		t.Fatal("credentials serialized")
+	}
+}
+
+func TestAccountErrorsKeepSafeCodeEvenOnHTTPFailure(t *testing.T) {
+	for _, code := range []string{"40007", "40014", "40036", "40038", "40008", "40009", "99999", "unsafe-secret"} {
+		t.Run(code, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]any{"code": code, "msg": "private-key private-secret private-pass private-account", "data": nil})
+			}))
+			defer server.Close()
+			c := NewAccountClient(Credentials{APIKey: "private-key", Secret: "private-secret", Passphrase: "private-pass"})
+			c.BaseURL = server.URL
+			_, err := c.Assets(context.Background(), "uta")
+			if err == nil {
+				t.Fatal("provider rejection accepted")
+			}
+			message := AccountErrorDescription(err)
+			if strings.Contains(message, "private-") || strings.Contains(message, "unsafe-secret") || !strings.Contains(message, "HTTP 400") {
+				t.Fatalf("unsafe or missing HTTP diagnostic: %s", message)
+			}
+			if code != "unsafe-secret" && !strings.Contains(message, code) {
+				t.Fatalf("provider code lost: %s", message)
+			}
+		})
+	}
+	if message := AccountErrorDescription(accountConnectionError(context.DeadlineExceeded)); !strings.Contains(message, "超时") {
+		t.Fatal("timeout not identified")
 	}
 }
 

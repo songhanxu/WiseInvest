@@ -1958,6 +1958,7 @@ p {
 .account-selector select { min-width: 200px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: #10172b; color: var(--text); font: inherit; }
 .account-connection-status { margin-left: auto; padding: 5px 10px; border-radius: 5px; background: rgba(255,255,255,.05); color: var(--muted); font-size: 12px; }
 .account-connection-status.ready { background: rgba(45,180,130,.12); color: #65d9ac; }
+.account-connection-status.failed { background: rgba(235,90,100,.12); color: #ff8994; }
 .account-description { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; margin-top: 16px; }
 .account-description svg { color: #65d9ac; }
 .account-connect-note { display: flex; gap: 12px; align-items: flex-start; border: 1px solid var(--line); padding: 18px; border-radius: 8px; background: rgba(74,144,226,.045); }

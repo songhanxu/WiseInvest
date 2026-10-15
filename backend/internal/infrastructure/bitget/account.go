@@ -59,33 +59,39 @@ func (c *AccountClient) PrivateGET(ctx context.Context, path string, params url.
 	req.Header.Set("ACCESS-TIMESTAMP", timestamp)
 	req.Header.Set("ACCESS-SIGN", base64.StdEncoding.EncodeToString(mac.Sum(nil)))
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("Bitget account connection failed")
+		return accountConnectionError(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Bitget account HTTP %d", resp.StatusCode)
-	}
 	var envelope struct {
 		Code string          `json:"code"`
 		Data json.RawMessage `json:"data"`
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&envelope) != nil {
-		return fmt.Errorf("invalid Bitget account response")
+		kind := "response"
+		if resp.StatusCode != http.StatusOK {
+			kind = "http"
+		}
+		return &AccountError{HTTPStatus: resp.StatusCode, Kind: kind}
 	}
 	if envelope.Code != "00000" {
 		// Never relay upstream messages, which can contain account identifiers.
-		if _, err := strconv.Atoi(envelope.Code); err == nil {
-			return fmt.Errorf("Bitget account error %s", envelope.Code)
+		code := ""
+		if safeAccountCode(envelope.Code) {
+			code = envelope.Code
 		}
-		return fmt.Errorf("Bitget account request rejected")
+		return &AccountError{Code: code, HTTPStatus: resp.StatusCode, Kind: "rejected"}
+	}
+	if resp.StatusCode != http.StatusOK {
+		return &AccountError{HTTPStatus: resp.StatusCode, Kind: "http"}
 	}
 	if string(envelope.Data) == "null" || len(envelope.Data) == 0 {
-		return fmt.Errorf("Bitget account returned no data")
+		return &AccountError{Kind: "response"}
 	}
 	if json.Unmarshal(envelope.Data, target) != nil {
-		return fmt.Errorf("invalid Bitget account data")
+		return &AccountError{Kind: "response"}
 	}
 	return nil
 }
@@ -121,7 +127,7 @@ func (c *AccountClient) Assets(ctx context.Context, accountType string) ([]Asset
 		return nil, err
 	}
 	if data.Assets == nil {
-		return nil, fmt.Errorf("invalid Bitget assets response")
+		return nil, &AccountError{Kind: "response"}
 	}
 	return *data.Assets, nil
 }
@@ -143,7 +149,7 @@ func (c *AccountClient) Positions(ctx context.Context, accountType string) ([]Po
 		return nil, err
 	}
 	if data.List == nil {
-		return nil, fmt.Errorf("invalid Bitget positions response")
+		return nil, &AccountError{Kind: "response"}
 	}
 	return *data.List, nil
 }

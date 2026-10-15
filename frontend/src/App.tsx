@@ -253,7 +253,13 @@ export async function requestJson<T>(apiBase: string, path: string, token: strin
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    let message = text || `HTTP ${res.status}`;
+    try {
+      const body: { error?: unknown; message?: unknown } = JSON.parse(text);
+      if (typeof body?.error === "string") message = body.error;
+      else if (typeof body?.message === "string") message = body.message;
+    } catch { /* Plain-text errors remain readable. */ }
+    throw new Error(message);
   }
 
   return res.json() as Promise<T>;

@@ -131,13 +131,17 @@ func (h *AccountHandler) readHoldings(ctx context.Context) (HoldingsSnapshot, er
 	}
 	wg.Wait()
 	if assetErr != nil && (!h.cfg.IncludeFutures || positionErr != nil) {
-		return result, fmt.Errorf("Bitget 持仓读取失败，请检查 API 凭证、只读权限、IP 白名单和账户类型")
+		details := "资产查询：" + bitget.AccountErrorDescription(assetErr)
+		if positionErr != nil {
+			details += "；合约查询：" + bitget.AccountErrorDescription(positionErr)
+		}
+		return result, fmt.Errorf("Bitget 持仓读取失败（%s）：%s", h.cfg.AccountType, details)
 	}
 	if assetErr != nil {
-		result.Warnings = append(result.Warnings, "现货持仓暂未读取，当前列表不完整")
+		result.Warnings = append(result.Warnings, "资产查询失败："+bitget.AccountErrorDescription(assetErr)+"；当前列表不完整")
 	}
 	if positionErr != nil {
-		result.Warnings = append(result.Warnings, "合约持仓暂未读取，请检查合约查询权限；当前列表不完整")
+		result.Warnings = append(result.Warnings, "合约查询失败："+bitget.AccountErrorDescription(positionErr)+"；当前列表不完整")
 	}
 	// Fetch inventory only for nonzero holdings. A genuine empty account can
 	// return an empty list even if the public market API is temporarily offline.
