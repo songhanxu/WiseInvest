@@ -88,6 +88,16 @@ BITGET_INCLUDE_FUTURES=true
 
 ## 腾讯云已部署后端的更新
 
+日常更新可使用根目录的 `deploy-update.sh`。在服务器执行：
+
+```bash
+cd /root/WiseInvest
+git pull --ff-only origin 'feature/整体功能优化'
+bash deploy-update.sh
+```
+
+脚本自动定位项目目录，兼容 Compose V2/V1，按需使用 sudo。读取现有 `backend/.env.production`，确认 PostgreSQL、Redis、Nginx 已在运行后构建镜像并重建后端容器，等待健康检查、刷新 Nginx、验证代理。失败时退出并显示后端日志。默认每次健康检查最多等待 120 秒，可用 `DEPLOY_HEALTH_TIMEOUT=180 bash deploy-update.sh` 调整。脚本不拉取 Git、不安装或升级系统、不改写环境文件，也不重建数据库和 Redis。它只更新后端 API；首次部署仍参考 `deploy.sh`。
+
 以下适用于本仓库 `docker-compose.yml` 的现有 Docker 部署，数据库、Redis 和 Nginx 已在运行。通过腾讯云控制台或 SSH 登录服务器，在 **服务器原有 WiseInvest 仓库目录** 执行：
 
 ```bash
