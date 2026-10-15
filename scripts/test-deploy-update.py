@@ -22,7 +22,19 @@ if name == "sudo":
 if name == "sleep":
     time.sleep(0.05)
     sys.exit(0)
+if name in ("apt", "ufw", "systemctl", "mkdir"):
+    sys.exit(0)  # Never change the host while testing the bootstrap entry point.
+if name == "tee":
+    sys.stdin.read()
+    sys.exit(0)
+if name == "grep":
+    if args[-1] == "/etc/docker/daemon.json":
+        sys.exit(0)
+    os.execv("/usr/bin/grep", ["grep", *args])
 if name == "curl":
+    if args[-1] == "https://api.ipify.org":
+        print("127.0.0.1")
+        sys.exit(0)
     assert "-fsS" in args, "HTTP failures must be rejected"
     log = Path(os.environ["MOCK_LOG"]).read_text()
     calls = sum(json.loads(line)[0] == "curl" for line in log.splitlines())
@@ -30,7 +42,13 @@ if name == "curl":
     sys.exit(22 if os.environ.get("MOCK_UNHEALTHY") or proxy_failed or (os.environ.get("MOCK_RETRY") and calls == 1) else 0)
 if name == "docker" and args == ["info"]:
     sys.exit(1 if os.environ.get("MOCK_NEED_SUDO") and not os.environ.get("MOCK_SUDO") else 0)
+if name == "docker" and args == ["--version"]:
+    print("Docker version test")
+    sys.exit(0)
 if name == "docker" and args[:1] == ["inspect"]:
+    if args[-3:] == ["wiseinvest-db", "wiseinvest-redis", "wiseinvest-nginx"]:
+        print("false\nfalse\nfalse" if os.environ.get("MOCK_INITIAL_DEPLOY") else "true\ntrue\ntrue")
+        sys.exit(0)
     print("false" if args[-1] == os.environ.get("MOCK_STOPPED") else "true")
     sys.exit(0)
 if name == "docker":
@@ -44,7 +62,7 @@ if args[:2] == ["ps", "-q"]:
     print("container-" + args[-1])
 elif args == ["build", "backend"]:
     sys.exit(2 if os.environ.get("MOCK_BUILD_FAILURE") else 0)
-elif args == ["up", "-d", "--no-deps", "--force-recreate", "backend"]:
+elif args in (["up", "-d", "--no-deps", "--force-recreate", "backend"], ["up", "-d", "--no-recreate"], ["up", "-d"]):
     if os.environ.get("MOCK_LEGACY_BUG") and not Path(os.environ["MOCK_LOG"] + ".removed").exists():
         print("KeyError: 'ContainerConfig'", file=sys.stderr)
         sys.exit(1)
@@ -62,7 +80,7 @@ else:
 
 
 class DeployUpdateTests(unittest.TestCase):
-    def run_deploy(self, *, missing_env=False, **flags):
+    def run_deploy(self, *, missing_env=False, entrypoint="deploy-update.sh", **flags):
         with tempfile.TemporaryDirectory(prefix="wiseinvest deploy test ") as tmp:
             root = Path(tmp)
             project, commands = root / "project with spaces", root / "commands"
@@ -74,15 +92,16 @@ class DeployUpdateTests(unittest.TestCase):
             secret = "FMP_API_KEY=must-not-print-this-value\n"
             if not missing_env:
                 production.write_text(secret)
-            shutil.copyfile(SCRIPT, project / SCRIPT.name)
-            for name in ("docker", "docker-compose", "sudo", "curl", "sleep"):
+            for source in (SCRIPT, SCRIPT.parent / "deploy.sh"):
+                shutil.copyfile(source, project / source.name)
+            for name in ("docker", "docker-compose", "sudo", "curl", "sleep", "apt", "ufw", "systemctl", "mkdir", "tee", "grep"):
                 path = commands / name
                 path.write_text(MOCK)
                 path.chmod(0o755)
             log = root / "commands.jsonl"
             env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
                        MOCK_LOG=str(log), DEPLOY_HEALTH_TIMEOUT="1", **flags)
-            result = subprocess.run(["bash", str(project / SCRIPT.name)], cwd=root,
+            result = subprocess.run(["bash", str(project / entrypoint)], cwd=root,
                                     env=env, text=True, capture_output=True, timeout=15)
             calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
             if not missing_env:
@@ -157,6 +176,36 @@ class DeployUpdateTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertNotIn("更新成功", result.stdout)
                 self.assertTrue(any("logs" in c for c in calls))
+
+    def test_deploy_entrypoint_reuses_update_without_system_changes(self):
+        for flags in ({}, {"MOCK_V1": "1", "MOCK_LEGACY_BUG": "1"}):
+            with self.subTest(flags=flags):
+                result, calls = self.run_deploy(entrypoint="deploy.sh", **flags)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("切换到后端更新流程", result.stdout)
+                self.assertFalse(any(c[0] in ("apt", "ufw", "systemctl", "tee", "mkdir") for c in calls))
+
+    def test_initial_deploy_handles_both_compose_versions(self):
+        for flags in ({}, {"MOCK_V1": "1", "MOCK_LEGACY_BUG": "1"}):
+            with self.subTest(flags=flags):
+                result, calls = self.run_deploy(entrypoint="deploy.sh", MOCK_INITIAL_DEPLOY="1", **flags)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("部署成功", result.stdout)
+                self.assertTrue(any(c[0] == "apt" for c in calls))
+                self.assertFalse(any("-v" in c or "down" in c for c in calls))
+                if flags:
+                    build = next(i for i, c in enumerate(calls) if c[-2:] == ["build", "backend"])
+                    remove = next(i for i, c in enumerate(calls) if c[-4:] == ["rm", "-s", "-f", "backend"])
+                    up = next(i for i, c in enumerate(calls) if c[-3:] == ["up", "-d", "--no-recreate"])
+                    self.assertLess(build, remove)
+                    self.assertLess(remove, up)
+
+    def test_initial_deploy_rejects_http_failure(self):
+        result, calls = self.run_deploy(entrypoint="deploy.sh", MOCK_INITIAL_DEPLOY="1", MOCK_UNHEALTHY="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("部署成功", result.stdout)
+        self.assertFalse(any("reload" in c for c in calls))
+        self.assertTrue(any("logs" in c for c in calls))
 
 
 if __name__ == "__main__":

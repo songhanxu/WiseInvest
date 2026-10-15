@@ -96,6 +96,8 @@ git pull --ff-only origin 'feature/整体功能优化'
 bash deploy-update.sh
 ```
 
+`deploy.sh` 也包含相同兼容处理：检测到 PostgreSQL、Redis 和 Nginx 均在运行且已有生产配置时，直接转入 `deploy-update.sh`，不再执行系统安装步骤。首次部署或基础服务未全部运行时继续初始化流程；其 V1 分支也先构建再清理旧后端，并保留已有基础服务容器。两个入口均需通过后端和 Nginx 代理健康检查才报告成功，HTTP 404/502 不再被当成成功。
+
 脚本自动定位项目目录，兼容 Compose V2/V1，按需使用 sudo。读取现有 `backend/.env.production`，确认 PostgreSQL、Redis、Nginx 已在运行后构建镜像并重建后端容器，等待健康检查、刷新 Nginx、验证代理。失败时退出并显示后端日志。默认每次健康检查最多等待 120 秒，可用 `DEPLOY_HEALTH_TIMEOUT=180 bash deploy-update.sh` 调整。脚本不拉取 Git、不安装或升级系统、不改写环境文件，也不重建数据库和 Redis。它只更新后端 API；首次部署仍参考 `deploy.sh`。
 
 如果服务器只有旧版 `docker-compose 1.29.2`，重建可能报 `KeyError: 'ContainerConfig'`。[Docker 官方说明](https://docs.docker.com/engine/deprecated/#container-and-containerconfig-fields-in-image-inspect)解释了该镜像字段的移除，旧 Compose 已停止维护。脚本优先使用现代 `docker compose`；回退到 V1 时，在镜像构建成功后先运行 `rm -s -f backend`，再创建后端，避开旧版的 recreate 路径。该命令按当前 Compose 项目和 backend 服务定位容器，也能清理失败后被改名的旧容器；不使用 `-v`，不删除数据库、Redis 或生产配置。本仓库后端容器没有持久化数据卷，所有持久化业务数据存储在独立 PostgreSQL/Redis 服务中。
@@ -133,6 +135,6 @@ sudo docker compose ps backend
 sudo docker compose logs --tail=80 backend
 ```
 
-后端重建后 reload Nginx，使其重新解析后端容器地址；健康检查应返回 `status: ok`。如果服务器只有 Compose V1，把所有 `sudo docker compose` 替换成 `sudo docker-compose`。这是现有服务更新，无需重跑执行系统升级和 Docker 安装的 `deploy.sh`，也无需删除数据库或卷。生产环境文件已被 Git 忽略，并从 Docker 构建上下文排除，凭证通过运行时环境注入。
+后端重建后 reload Nginx，使其重新解析后端容器地址；健康检查应返回 `status: ok`。上面手动命令适用于现代 Compose；V1 请使用已修复的部署脚本或前面的手动恢复命令，不能直接把命令名换成 `docker-compose` 后重复重建。现有服务可通过任一部署脚本进入后端更新流程，无需删除数据库或卷。生产环境文件已被 Git 忽略，并从 Docker 构建上下文排除，凭证通过运行时环境注入。
 
 登录前端后进入「实体账户」验证真实持仓。没有凭证时接口返回未连接；`/health` 正常仅代表后端运行，不代表 Bitget 凭证验证成功。当前 Compose 只部署 API，不构建或托管 Web 前端；本地前端「设置」切换到云端 API 地址即可使用新接口。
