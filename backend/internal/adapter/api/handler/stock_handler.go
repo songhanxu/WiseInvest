@@ -26,11 +26,19 @@ import (
 	"golang.org/x/text/transform"
 )
 
+type watchlistRepository interface {
+	GetByUserContext(context.Context, uint) ([]model.WatchlistItem, error)
+	GetByUserAndMarket(uint, string) ([]model.WatchlistItem, error)
+	Add(*model.WatchlistItem) error
+	Remove(uint, string, string) error
+	RemoveCrypto(uint, string) error
+}
+
 // StockHandler provides real-time market data endpoints.
 type StockHandler struct {
 	bitget        *bitget.Client
 	fundamentals  *FundamentalsService
-	watchlistRepo *repository.WatchlistRepository
+	watchlistRepo watchlistRepository
 	logger        *logger.Logger
 	httpClient    *http.Client
 	cache         *cache.QuoteCache // Redis-backed quote cache (may be nil if cache is disabled)

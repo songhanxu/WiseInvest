@@ -63,6 +63,8 @@ func AutoMigrate(db *gorm.DB) error {
 			&model.AgentSession{},
 			&model.DeviceToken{},
 			&model.WatchlistItem{},
+			&model.PriceAlert{},
+			&model.PriceAlertSettings{},
 		); err != nil {
 			return err
 		}

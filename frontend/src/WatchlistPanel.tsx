@@ -3,6 +3,7 @@ import { Check, Loader2, Plus, RefreshCw, Search, Trash2, ListPlus } from "lucid
 import { requestJson } from "./App";
 import { StockResearchTable, numeric, stockKey, useStockFundamentals } from "./StockResearchTable";
 import type { Market, MarketId, StockQuote } from "./App";
+import { PriceAlertSettings, TargetPriceCell, usePriceAlerts } from "./PriceAlerts";
 
 export function WatchlistPanel({ apiBase, token, markets, onOpenStock, onNeedToken }: {
   apiBase: string;
@@ -11,6 +12,7 @@ export function WatchlistPanel({ apiBase, token, markets, onOpenStock, onNeedTok
   onOpenStock: (market: Market, stock: StockQuote) => void;
   onNeedToken: () => void;
 }) {
+  const priceAlerts = usePriceAlerts(apiBase, token);
   const [stocks, setStocks] = useState<StockQuote[]>([]);
   const { fundamentals, financialLoading } = useStockFundamentals(apiBase, stocks, token);
   const [loading, setLoading] = useState(false);
@@ -104,7 +106,7 @@ export function WatchlistPanel({ apiBase, token, markets, onOpenStock, onNeedTok
   return <section className="workspace watchlist-workspace">
     <div className="watchlist-heading">
       <div><p className="eyebrow">我的投资</p><h2>自选列表</h2><p>值得关注的公司与资产，汇成一份清晰的研究清单。</p></div>
-      <button className="ghost-button" onClick={() => void refresh()} disabled={loading || !token}><RefreshCw size={16} className={loading ? "spin" : ""} />刷新</button>
+      <button className="ghost-button" onClick={() => void Promise.all([refresh(), priceAlerts.refresh()])} disabled={loading || !token}><RefreshCw size={16} className={loading ? "spin" : ""} />刷新</button>
     </div>
 
     {!token && <div className="auth-callout"><ListPlus size={18} /><span>登录后读取并保存你的全部自选列表。</span><button onClick={onNeedToken}>去登录</button></div>}
@@ -133,8 +135,10 @@ export function WatchlistPanel({ apiBase, token, markets, onOpenStock, onNeedTok
     {actionError && <p className="form-note danger" role="alert">{actionError}</p>}
     {financialUnavailable && <p className="watchlist-note">部分财报指标暂未取得，悬停单元格可查看原因；价格和自选功能不受影响。</p>}
 
+    {token && <PriceAlertSettings alerts={priceAlerts} />}
     <StockResearchTable stocks={visible} markets={markets} fundamentals={fundamentals} onOpenStock={onOpenStock}
       emptyMessage={loading ? "正在汇总自选列表…" : token ? "暂无自选，在上方搜索并添加标的。" : "登录后展示你的自选列表。"}
+      renderTarget={stock => <TargetPriceCell stock={{ ...stock, holding_id: `watchlist:${stockKey(stock)}`, account_id: "watchlist", currency: stock.currency || ({ a_share: "CNY", us_stock: "USD", hk_stock: "HKD", crypto: "USDT" } as Record<string, string>)[stock.market] }} alerts={priceAlerts} />}
       renderAction={stock => <button className="watchlist-remove" aria-label={`移除 ${stock.name}`} disabled={busy.includes(stockKey(stock))} onClick={() => void changeMembership(stock, true)}>{busy.includes(stockKey(stock)) ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} />}</button>}
     />
     <p className="watchlist-data-note">美股优先显示 Bitget 股票代币行情，港股显示 Quanto 合约行情。EPS、PE 和远期 PE 属于标的公司；公司指引与分析师预测分别列示。缺失数据显示「—」，加密货币及基金的公司财报指标显示「不适用」。</p>

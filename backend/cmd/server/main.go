@@ -21,6 +21,7 @@ import (
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/cache"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/config"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/database"
+	infraemail "github.com/songhanxu/wiseinvest/internal/infrastructure/email"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/llm"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/logger"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/scheduler"
@@ -175,6 +176,18 @@ func main() {
 	quoteCache := cache.NewQuoteCache(redisClient, log)
 	stockHandler := handler.NewStockHandler(watchlistRepo, log, quoteCache, searcher, llmClient)
 	accountHandler := handler.NewAccountHandler(cfg.Bitget)
+	accountHandler.AddExchange(cfg.BinanceAccount)
+	accountHandler.AddExchange(cfg.GateAccount)
+	mailClient := infraemail.New(infraemail.Config{Host: cfg.Notification.SMTPHost, Port: cfg.Notification.SMTPPort, Username: cfg.Notification.SMTPUsername, Password: cfg.Notification.SMTPPassword, From: cfg.Notification.SMTPFrom, TLSMode: cfg.Notification.SMTPTLSMode})
+	alertService := &service.PriceAlertService{Store: repository.NewPriceAlertRepository(db), Quotes: func(ctx context.Context, user uint, source string) ([]service.AlertQuote, error) {
+		if source == "watchlist" {
+			return stockHandler.WatchlistPriceAlertQuotes(ctx, user)
+		}
+		return accountHandler.PriceAlertQuotes(ctx, user, source)
+	}, Mailer: mailClient}
+	alertHandler := &handler.PriceAlertHandler{Service: alertService}
+	stopAlerts := alertService.Start()
+	defer stopAlerts()
 	defer stockHandler.Stop() // gracefully stop background tickers
 
 	// ── Scheduler ────────────────────────────────────────────────────────────
@@ -184,7 +197,7 @@ func main() {
 	defer sched.Stop()
 
 	// Initialize HTTP server
-	router := api.NewRouter(conversationService, authHandler, deviceHandler, stockHandler, accountHandler, jwtSvc, log)
+	router := api.NewRouter(conversationService, authHandler, deviceHandler, stockHandler, accountHandler, alertHandler, jwtSvc, log)
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.Server.Port),

@@ -29,6 +29,11 @@ type AccountSummary struct {
 }
 
 type AccountHolding struct {
+	AccountID      string `json:"account_id"`
+	AccountName    string `json:"account_name"`
+	QuantityUnit   string `json:"quantity_unit,omitempty"`
+	SnapshotTime   string `json:"snapshot_time,omitempty"`
+	Stale          bool   `json:"stale,omitempty"`
 	EntryPrice     string `json:"entry_price,omitempty"`
 	UnrealizedPnL  string `json:"unrealized_pnl,omitempty"`
 	MarginCurrency string `json:"margin_currency,omitempty"`
@@ -42,26 +47,30 @@ type AccountHolding struct {
 }
 
 type HoldingsSnapshot struct {
-	AccountID   string           `json:"account_id"`
-	Holdings    []AccountHolding `json:"holdings"`
-	AsOf        string           `json:"as_of"`
-	Stale       bool             `json:"stale"`
-	LastSuccess string           `json:"last_success,omitempty"`
-	Complete    bool             `json:"complete"`
-	Warnings    []string         `json:"warnings"`
+	Accounts    []AccountSyncState `json:"accounts,omitempty"`
+	AccountID   string             `json:"account_id"`
+	Holdings    []AccountHolding   `json:"holdings"`
+	AsOf        string             `json:"as_of"`
+	Stale       bool               `json:"stale"`
+	LastSuccess string             `json:"last_success,omitempty"`
+	Complete    bool               `json:"complete"`
+	Warnings    []string           `json:"warnings"`
 }
 
 type AccountHandler struct {
-	cfg      config.BitgetConfig
-	private  accountReader
-	market   *bitget.Client
-	mu       sync.Mutex
-	snapshot *HoldingsSnapshot
-	cachedAt time.Time
-	flight   chan struct{}
-	latest   *HoldingsSnapshot
-	lastErr  error
-	retryAt  time.Time
+	others         map[string]*AccountHandler
+	exchangeConfig *config.ExchangeAccountConfig
+	loader         func(context.Context) (HoldingsSnapshot, error)
+	cfg            config.BitgetConfig
+	private        accountReader
+	market         *bitget.Client
+	mu             sync.Mutex
+	snapshot       *HoldingsSnapshot
+	cachedAt       time.Time
+	flight         chan struct{}
+	latest         *HoldingsSnapshot
+	lastErr        error
+	retryAt        time.Time
 }
 
 func NewAccountHandler(cfg config.BitgetConfig) *AccountHandler {
@@ -69,6 +78,9 @@ func NewAccountHandler(cfg config.BitgetConfig) *AccountHandler {
 }
 
 func (h *AccountHandler) summary(userID uint) AccountSummary {
+	if h.exchangeConfig != nil {
+		return exchangeSummary(*h.exchangeConfig, userID)
+	}
 	// Never expose the server owner's label/account type to another user.
 	item := AccountSummary{ID: "bitget", Provider: "bitget", Name: "Bitget", AccountType: "", Status: "not_configured", Message: "账户尚未连接"}
 	if !h.cfg.HasCredentials() || h.cfg.OwnerUserID == 0 {
@@ -88,31 +100,45 @@ func (h *AccountHandler) summary(userID uint) AccountSummary {
 
 func (h *AccountHandler) GetAccounts(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, []AccountSummary{h.summary(c.GetUint("userID"))})
+	c.JSON(http.StatusOK, h.summaries(c.GetUint("userID")))
 }
 
 func (h *AccountHandler) GetHoldings(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
-	if c.Param("accountID") != "bitget" {
+	id := c.Param("accountID")
+	user := c.GetUint("userID")
+	if id == "all" {
+		data, err := h.allHoldings(c.Request.Context(), user)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, data)
+		return
+	}
+	target := h
+	if id != "bitget" {
+		target = h.others[id]
+	}
+	if target == nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "账户不存在"})
 		return
 	}
-	state := h.summary(c.GetUint("userID"))
+	state := target.summary(user)
 	if state.Status == "unbound" {
 		c.JSON(http.StatusForbidden, gin.H{"error": state.Message})
 		return
 	}
 	if state.Status != "ready" {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Bitget 账户尚未连接"})
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "账户尚未连接"})
 		return
 	}
-
-	data, err := h.holdings(c.Request.Context())
+	data, err := target.holdings(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, data)
+	c.JSON(http.StatusOK, decorateSnapshot(data, state))
 }
 
 func (h *AccountHandler) holdings(ctx context.Context) (HoldingsSnapshot, error) {
@@ -148,7 +174,13 @@ func (h *AccountHandler) holdings(ctx context.Context) (HoldingsSnapshot, error)
 func (h *AccountHandler) syncHoldings() {
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
-	data, err := h.readHoldings(ctx)
+	var data HoldingsSnapshot
+	var err error
+	if h.loader != nil {
+		data, err = h.loader(ctx)
+	} else {
+		data, err = h.readHoldings(ctx)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.lastErr = err
@@ -231,10 +263,9 @@ func (h *AccountHandler) readHoldings(ctx context.Context) (HoldingsSnapshot, er
 				continue
 			}
 		}
-		inventory, err := h.market.StockInventory(ctx, productCategory)
+		inventory, err := h.market.AccountInventory(ctx, productCategory)
 		if err != nil {
-			result.Warnings = append(result.Warnings, productCategory+" 股票资料暂不可用，无法完整识别股票持仓")
-			continue
+			result.Warnings = append(result.Warnings, productCategory+" 产品资料暂不可用，未识别资产保留在其他分类")
 		}
 		byCoin := make(map[string]bitget.Instrument)
 		bySymbol := make(map[string]bitget.Instrument)
@@ -254,12 +285,17 @@ func (h *AccountHandler) readHoldings(ctx context.Context) (HoldingsSnapshot, er
 				}
 				item, ok := byCoin[strings.ToUpper(asset.Coin)]
 				if !ok {
-					continue
+					item = bitget.Instrument{BaseCoin: asset.Coin, QuoteCoin: "USDT"}
+				}
+				// USDT is the valuation unit itself. Its listed fiat pairs (e.g.
+				// USDT/VND) must not replace the identity price of 1 USDT.
+				if strings.EqualFold(asset.Coin, "USDT") {
+					item = bitget.Instrument{BaseCoin: "USDT", QuoteCoin: "USDT", SymbolType: "crypto"}
 				}
 				stock := bitgetStock(bitget.HoldingIdentity(item, productCategory))
 				unavailable := false
 				stock.QuoteAvailable = &unavailable
-				pending = append(pending, AccountHolding{StockResponse: stock, HoldingID: "spot:" + item.Symbol, HoldingType: "spot", Side: "long", Quantity: quantity})
+				pending = append(pending, AccountHolding{StockResponse: stock, HoldingID: "spot:" + asset.Coin, HoldingType: "spot", Side: "long", Quantity: quantity, QuantityUnit: asset.Coin})
 			}
 		} else {
 			for _, position := range positions {
@@ -268,12 +304,12 @@ func (h *AccountHandler) readHoldings(ctx context.Context) (HoldingsSnapshot, er
 				}
 				item, ok := bySymbol[position.Symbol]
 				if !ok {
-					continue
+					item = bitget.Instrument{BaseCoin: position.Symbol, Symbol: position.Symbol, QuoteCoin: position.MarginCoin}
 				}
 				stock := bitgetStock(bitget.HoldingIdentity(item, productCategory))
 				unavailable := false
 				stock.QuoteAvailable = &unavailable
-				pending = append(pending, AccountHolding{StockResponse: stock, HoldingID: "futures:" + position.Symbol + ":" + position.Side + ":" + position.MarginMode, HoldingType: "futures", Side: position.Side, Quantity: position.Total, MarginMode: position.MarginMode, EntryPrice: position.EntryPrice, UnrealizedPnL: position.UnrealizedPnL, MarginCurrency: position.MarginCoin})
+				pending = append(pending, AccountHolding{StockResponse: stock, HoldingID: "futures:" + position.Symbol + ":" + position.Side + ":" + position.MarginMode, HoldingType: "futures", Side: position.Side, Quantity: position.Total, QuantityUnit: item.BaseCoin, MarginMode: position.MarginMode, EntryPrice: position.EntryPrice, UnrealizedPnL: position.UnrealizedPnL, MarginCurrency: position.MarginCoin})
 			}
 		}
 		if len(pending) > 0 {
@@ -282,6 +318,12 @@ func (h *AccountHandler) readHoldings(ctx context.Context) (HoldingsSnapshot, er
 				result.Warnings = append(result.Warnings, "部分持仓的最新行情暂不可用，持仓数量已保留")
 			}
 			for i := range pending {
+				if pending[i].HoldingType == "spot" && strings.EqualFold(pending[i].ID, "USDT") {
+					pending[i].Market = "crypto"
+					pending[i].CurrentPrice = 1
+					pending[i].MarketValue = pending[i].Quantity
+					pending[i].QuoteAvailable = nil
+				}
 				if ticker, ok := tickers[pending[i].ProviderSymbol]; ok {
 					quote := bitget.ApplyTicker(bitget.Quote{Code: pending[i].ID, Name: pending[i].Name, Market: pending[i].Market, ProviderSymbol: pending[i].ProviderSymbol, Currency: pending[i].Currency, ProductType: pending[i].ProductType}, ticker)
 					if quote.Price > 0 {

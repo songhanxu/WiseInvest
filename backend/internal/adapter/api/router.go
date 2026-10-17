@@ -16,6 +16,7 @@ func NewRouter(
 	deviceHandler *handler.DeviceHandler,
 	stockHandler *handler.StockHandler,
 	accountHandler *handler.AccountHandler,
+	alertHandler *handler.PriceAlertHandler,
 	jwtSvc *auth.JWTService,
 	logger *logger.Logger,
 ) *gin.Engine {
@@ -102,6 +103,10 @@ func NewRouter(
 			}
 
 			// ── Watchlist CRUD (requires auth, bound to UserID) ──────────
+			protected.GET("/price-alerts", alertHandler.List)
+			protected.PUT("/price-alerts/settings", alertHandler.Settings)
+			protected.PUT("/price-alerts", alertHandler.Save)
+			protected.DELETE("/price-alerts", alertHandler.Remove)
 			protected.GET("/accounts", accountHandler.GetAccounts)
 			protected.GET("/accounts/:accountID/holdings", accountHandler.GetHoldings)
 			watchlist := protected.Group("/stocks")

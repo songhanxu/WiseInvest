@@ -1984,3 +1984,22 @@ p {
  .research-table-controls { gap:12px; }
  .hide-eps .col-eps, .hide-pe .col-pe, .hide-forward .col-forward, .hide-guidance .col-guidance, .hide-earnings .col-earnings { display:none; }
 }
+
+.account-provider-statuses { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px; }
+
+.price-alert-settings { padding:20px; margin-bottom:16px; }
+.price-alert-settings h3 { margin:0 0 6px; }
+.price-alert-settings p { margin:8px 0; }
+.price-alert-settings form { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin:14px 0; }
+.price-alert-settings input { flex:1; min-width:200px; max-width:420px; padding:9px 12px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--text); }
+.target-price-column { min-width:200px; max-width:240px; }
+.target-price-cell { display:flex; flex-direction:column; gap:5px; }
+.target-price-cell form { display:flex; flex-direction:column; gap:6px; }
+.target-price-input { display:flex; align-items:center; gap:6px; }
+.target-price-input input { width:135px; min-width:0; }
+.target-price-input span { color:var(--muted); font-size:11px; }
+.target-price-cell input { padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--text); font:inherit; font-size:12px; }
+.target-price-actions { display:flex; gap:10px; }
+.target-price-actions button { border:0; background:transparent; color:var(--blue); cursor:pointer; padding:2px 0; font-size:12px; }
+.target-price-cell button:disabled { opacity:.5; cursor:default; }
+.target-price-cell small { white-space:normal; line-height:1.5; }

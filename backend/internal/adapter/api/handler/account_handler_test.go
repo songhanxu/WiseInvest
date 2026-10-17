@@ -89,11 +89,11 @@ func accountMarketFixture(t *testing.T, failQuotes bool) *bitget.Client {
 	return bitget.NewClient(server.URL)
 }
 
-func TestAccountStockFilterQuantityAndHedgedPositions(t *testing.T) {
+func TestAccountKeepsStocksCryptoUnknownAssetsAndHedgedPositions(t *testing.T) {
 	f := &accountFixture{assets: []bitget.Asset{{Coin: "rAAPL", Balance: "0.100000001"}, {Coin: "RANDOM", Balance: "10"}, {Coin: "BTC", Balance: "1"}}, positions: []bitget.Position{{Symbol: "TENCENTHKDUSDT", Total: "2", Side: "long", MarginMode: "crossed"}, {Symbol: "TENCENTHKDUSDT", Total: "1", Side: "short", MarginMode: "crossed"}, {Symbol: "BTCUSDT", Total: "10", Side: "long"}}}
 	h := &AccountHandler{cfg: config.BitgetConfig{AccountType: "uta", IncludeFutures: true}, private: f, market: accountMarketFixture(t, false)}
 	data, err := h.readHoldings(context.Background())
-	if err != nil || !data.Complete || len(data.Holdings) != 3 {
+	if err != nil || !data.Complete || len(data.Holdings) != 6 {
 		t.Fatalf("holdings %+v: %v", data, err)
 	}
 	ids := make(map[string]bool)
@@ -102,6 +102,12 @@ func TestAccountStockFilterQuantityAndHedgedPositions(t *testing.T) {
 			t.Fatal("hedged positions merged")
 		}
 		ids[row.HoldingID] = true
+		if row.Market == "crypto" || row.Market == "other" {
+			if row.ID != "BTC" && row.ID != "RANDOM" {
+				t.Fatal("unexpected crypto identity")
+			}
+			continue
+		}
 		if row.HoldingType == "spot" {
 			if row.ID != "AAPL" || row.Quantity != "0.100000001" || row.Currency != "USDT" || row.CurrentPrice != 210 {
 				t.Fatalf("invalid spot: %+v", row)
@@ -147,5 +153,27 @@ func TestHoldingsExposeSeparateSafeProviderErrors(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("missing diagnostic %s: %v", want, err)
 		}
+	}
+}
+
+func TestUSDTBalanceNeverUsesFiatTradingPair(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var data any
+		if r.URL.Path == "/api/v3/market/instruments" {
+			data = []bitget.Instrument{{Symbol: "USDT_VND", BaseCoin: "USDT", QuoteCoin: "VND", SymbolType: "crypto"}}
+		} else {
+			data = []bitget.Ticker{{Symbol: "USDT_VND", Last: "25951"}}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"code": "00000", "data": data})
+	}))
+	defer server.Close()
+	h := &AccountHandler{cfg: config.BitgetConfig{AccountType: "uta"}, private: &accountFixture{assets: []bitget.Asset{{Coin: "USDT", Balance: "1454.69"}}}, market: bitget.NewClient(server.URL)}
+	data, err := h.readHoldings(context.Background())
+	if err != nil || len(data.Holdings) != 1 {
+		t.Fatalf("holdings: %+v %v", data, err)
+	}
+	row := data.Holdings[0]
+	if row.CurrentPrice != 1 || row.Currency != "USDT" || row.MarketValue != "1454.69" || row.ProviderSymbol != "" {
+		t.Fatalf("USDT identity price overwritten by fiat quote: %+v", row)
 	}
 }

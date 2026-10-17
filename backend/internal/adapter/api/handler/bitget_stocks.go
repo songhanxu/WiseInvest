@@ -233,12 +233,20 @@ func canonicalWatchCode(market, code, symbol string) string {
 // GetAllWatchlist reads the existing per-market records, scoped to the same
 // authenticated user as iOS. Persisted entries survive quote/provider failures.
 func (h *StockHandler) GetAllWatchlist(c *gin.Context) {
-	items, err := h.watchlistRepo.GetByUser(c.GetUint("userID"))
+	rows, err := h.readWatchlist(c.Request.Context(), c.GetUint("userID"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get watchlist"})
 		return
 	}
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	c.JSON(http.StatusOK, rows)
+}
+
+func (h *StockHandler) readWatchlist(parent context.Context, user uint) ([]StockResponse, error) {
+	items, err := h.watchlistRepo.GetByUserContext(parent, user)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -292,7 +300,7 @@ func (h *StockHandler) GetAllWatchlist(c *gin.Context) {
 		}(market, codes)
 	}
 	wg.Wait()
-	c.JSON(http.StatusOK, mergeWatchlistQuotes(items, quotes))
+	return mergeWatchlistQuotes(items, quotes), nil
 }
 
 func (h *StockHandler) productRequest(c *gin.Context, candles bool) bool {

@@ -149,16 +149,25 @@ func (c *AccountClient) Positions(ctx context.Context, accountType string) ([]Po
 		return positions, err
 	}
 	var data struct {
-		List *[]Position `json:"list"`
+		List json.RawMessage `json:"list"`
 	}
 	err := c.PrivateGET(ctx, "/api/v3/position/current-position", url.Values{"category": {"USDT-FUTURES"}}, &data)
 	if err != nil {
 		return nil, err
 	}
-	if data.List == nil {
+	if len(data.List) == 0 {
 		return nil, &AccountError{Kind: "response"}
 	}
-	return *data.List, nil
+	// UTA returns an explicit null list when there are no positions. A missing
+	// list is still a malformed response and must not erase a cached portfolio.
+	positions := []Position{}
+	if string(data.List) == "null" {
+		return positions, nil
+	}
+	if json.Unmarshal(data.List, &positions) != nil {
+		return nil, &AccountError{Kind: "response"}
+	}
+	return positions, nil
 }
 
 func PositiveQuantity(quantity string) bool {
@@ -198,7 +207,7 @@ func AssetQuantity(asset Asset, accountType string) string {
 // Inventory includes legacy stock tokens and listed stock perpetuals as well
 // as Reality tokens. Crypto assets are identified by instrument metadata, not
 // by guessing that any coin beginning with R must be a stock.
-func (c *Client) StockInventory(ctx context.Context, productCategory string) ([]Instrument, error) {
+func (c *Client) AccountInventory(ctx context.Context, productCategory string) ([]Instrument, error) {
 	if productCategory != "SPOT" && productCategory != "USDT-FUTURES" {
 		return nil, fmt.Errorf("unsupported stock category")
 	}
@@ -212,12 +221,7 @@ func (c *Client) StockInventory(ctx context.Context, productCategory string) ([]
 	if err := c.get(ctx, "/api/v3/market/instruments", url.Values{"category": {productCategory}}, &all); err != nil {
 		return nil, err
 	}
-	rows := make([]Instrument, 0)
-	for _, item := range all {
-		if item.SymbolType == "stock" {
-			rows = append(rows, item)
-		}
-	}
+	rows := all
 	entry.Instruments = rows
 	entry.InstrumentTime = time.Now()
 	return rows, nil
@@ -232,6 +236,17 @@ func (c *Client) InventoryTickers(ctx context.Context, productCategory string) (
 }
 
 func HoldingIdentity(item Instrument, productCategory string) Quote {
+	if item.SymbolType != "stock" {
+		product := "crypto_spot"
+		if productCategory != "SPOT" {
+			product = "crypto_perpetual"
+		}
+		market := "crypto"
+		if item.SymbolType == "" {
+			market = "other"
+		}
+		return Quote{Code: item.BaseCoin, Name: item.BaseCoin, Market: market, Currency: item.QuoteCoin, ProviderSymbol: item.Symbol, ProductType: product}
+	}
 	market := "us_stock"
 	currency := item.QuoteCoin
 	product := "stock_token"
@@ -295,4 +310,19 @@ func QuantityValue(quantity string, price float64) string {
 		return ""
 	}
 	return new(big.Rat).Mul(q, p).FloatString(8)
+}
+
+// StockInventory remains available for consumers that explicitly request equities.
+func (c *Client) StockInventory(ctx context.Context, category string) ([]Instrument, error) {
+	all, err := c.AccountInventory(ctx, category)
+	if err != nil {
+		return nil, err
+	}
+	rows := []Instrument{}
+	for _, item := range all {
+		if item.SymbolType == "stock" {
+			rows = append(rows, item)
+		}
+	}
+	return rows, nil
 }

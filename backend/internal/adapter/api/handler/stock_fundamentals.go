@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -64,7 +65,8 @@ func NewFundamentalsService(key, file string) *FundamentalsService {
 	return &FundamentalsService{APIKey: key, File: file, BaseURL: "https://financialmodelingprep.com/stable", HTTPClient: &http.Client{Timeout: 5 * time.Second}, cache: make(map[string]fundamentalsCache), sem: make(chan struct{}, 4), pending: make(map[string]chan struct{})}
 }
 
-func (s *FundamentalsService) get(ctx context.Context, path, symbol string, params url.Values, target interface{}) bool {
+// Return only controlled diagnostics, never upstream bodies or URLs with keys.
+func (s *FundamentalsService) get(ctx context.Context, path, symbol string, params url.Values, target interface{}) string {
 	if params == nil {
 		params = url.Values{}
 	}
@@ -72,17 +74,31 @@ func (s *FundamentalsService) get(ctx context.Context, path, symbol string, para
 	params.Set("apikey", s.APIKey)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.BaseURL+"/"+path+"?"+params.Encode(), nil)
 	if err != nil {
-		return false
+		return "请求配置无效"
 	}
 	resp, err := s.HTTPClient.Do(req)
 	if err != nil {
-		return false
+		return "连接失败或查询超时"
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return false
+		switch resp.StatusCode {
+		case http.StatusPaymentRequired:
+			return "当前 FMP 订阅无接口权限（HTTP 402）"
+		case http.StatusUnauthorized:
+			return "FMP 密钥校验失败（HTTP 401）"
+		case http.StatusForbidden:
+			return "FMP 拒绝访问（HTTP 403）"
+		case http.StatusTooManyRequests:
+			return "FMP 请求额度或频率受限（HTTP 429）"
+		default:
+			return fmt.Sprintf("FMP 接口暂不可用（HTTP %d）", resp.StatusCode)
+		}
 	}
-	return json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(target) == nil
+	if json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(target) != nil {
+		return "FMP 返回格式异常"
+	}
+	return ""
 }
 
 func (s *FundamentalsService) loadVerified(market, code string) *FundamentalsResponse {
@@ -229,17 +245,19 @@ func (s *FundamentalsService) fetchFMP(ctx context.Context, market, code string)
 		IsFund   bool     `json:"isFund"`
 	}
 	var wg sync.WaitGroup
-	for _, job := range []func(){
-		func() { s.get(ctx, "income-statement-ttm", symbol, nil, &income) },
-		func() { s.get(ctx, "ratios-ttm", symbol, nil, &ratios) },
-		func() {
-			s.get(ctx, "analyst-estimates", symbol, url.Values{"period": {"annual"}, "limit": {"10"}}, &estimates)
+	labels := []string{"EPS", "PE", "分析师预期", "财报日期", "公司资料"}
+	failures := make([]string, len(labels))
+	for i, job := range []func() string{
+		func() string { return s.get(ctx, "income-statement-ttm", symbol, nil, &income) },
+		func() string { return s.get(ctx, "ratios-ttm", symbol, nil, &ratios) },
+		func() string {
+			return s.get(ctx, "analyst-estimates", symbol, url.Values{"period": {"annual"}, "limit": {"10"}}, &estimates)
 		},
-		func() { s.get(ctx, "earnings", symbol, url.Values{"limit": {"20"}}, &earnings) },
-		func() { s.get(ctx, "profile", symbol, nil, &profiles) },
+		func() string { return s.get(ctx, "earnings", symbol, url.Values{"limit": {"20"}}, &earnings) },
+		func() string { return s.get(ctx, "profile", symbol, nil, &profiles) },
 	} {
 		wg.Add(1)
-		go func(job func()) { defer wg.Done(); job() }(job)
+		go func(i int, job func() string) { defer wg.Done(); failures[i] = job() }(i, job)
 	}
 	wg.Wait()
 	if len(profiles) > 0 && (profiles[0].IsETF || profiles[0].IsFund) {
@@ -280,6 +298,15 @@ func (s *FundamentalsService) fetchFMP(ctx context.Context, market, code string)
 		row.Source = "FMP（标的股票）"
 		row.AsOf = time.Now().UTC().Format(time.RFC3339)
 		row.Message = "公司指引 EPS 需经核验的最新财报；分析师预期仅用于远期 PE"
+	}
+	var diagnostics []string
+	for i, failure := range failures {
+		if failure != "" {
+			diagnostics = append(diagnostics, labels[i]+"："+failure)
+		}
+	}
+	if len(diagnostics) > 0 {
+		row.Message = strings.Join(diagnostics, "；")
 	}
 	return row
 }

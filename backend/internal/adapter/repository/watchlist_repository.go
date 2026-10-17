@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"github.com/songhanxu/wiseinvest/internal/domain/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -18,8 +19,12 @@ func NewWatchlistRepository(db *gorm.DB) *WatchlistRepository {
 }
 
 func (r *WatchlistRepository) GetByUser(userID uint) ([]model.WatchlistItem, error) {
+	return r.GetByUserContext(context.Background(), userID)
+}
+
+func (r *WatchlistRepository) GetByUserContext(ctx context.Context, userID uint) ([]model.WatchlistItem, error) {
 	var items []model.WatchlistItem
-	err := r.db.Where("user_id = ?", userID).Order("market ASC, sort_order ASC, id ASC").Find(&items).Error
+	err := r.db.WithContext(ctx).Where("user_id = ?", userID).Order("market ASC, sort_order ASC, id ASC").Find(&items).Error
 	return items, err
 }
 

@@ -106,3 +106,39 @@ func TestFMPForwardPENeverMixesEPSCurrencyOrConsensusWithGuidance(t *testing.T) 
 		t.Fatalf("misleading fundamental values: %+v", row)
 	}
 }
+
+func TestFMPSubscriptionErrorsAreExplicitAndSanitized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/profile" {
+			w.Write([]byte(`[{"price":100,"currency":"USD"}]`))
+			return
+		}
+		if r.URL.Query().Get("symbol") == "PARTIAL" && r.URL.Path == "/ratios-ttm" {
+			w.Write([]byte(`[{"priceToEarningsRatioTTM":12}]`))
+			return
+		}
+		w.WriteHeader(http.StatusPaymentRequired)
+		w.Write([]byte("Restricted Endpoint: private-api-key https://example.com/?apikey=private-api-key"))
+	}))
+	defer server.Close()
+	s := NewFundamentalsService("private-api-key", "")
+	s.BaseURL = server.URL
+	for _, symbol := range []string{"AVGO", "PARTIAL"} {
+		row := s.Fetch(context.Background(), "us_stock", symbol)
+		if !strings.Contains(row.Message, "EPS：当前 FMP 订阅无接口权限（HTTP 402）") || !strings.Contains(row.Message, "财报日期：") {
+			t.Fatalf("missing subscription diagnosis: %+v", row)
+		}
+		if strings.Contains(row.Message, "private-api-key") || strings.Contains(row.Message, "https://") {
+			t.Fatal("upstream credential leaked")
+		}
+		if row.EPS != nil || row.NextEarningsDate != "" || row.ForwardPE != nil {
+			t.Fatal("fabricated restricted data")
+		}
+		if symbol == "PARTIAL" && (row.PE == nil || *row.PE != 12 || row.Status != "available") {
+			t.Fatal("partial available data lost")
+		}
+		if symbol == "AVGO" && row.Status != "unavailable" {
+			t.Fatal("restricted data marked available")
+		}
+	}
+}

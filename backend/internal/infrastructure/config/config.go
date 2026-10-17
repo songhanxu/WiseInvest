@@ -9,21 +9,29 @@ import (
 
 // Config holds all configuration for the application
 type Config struct {
-	Server       ServerConfig
-	Database     DatabaseConfig
-	Redis        RedisConfig
-	OpenAI       OpenAIConfig
-	Binance      BinanceConfig
-	Bitget       BitgetConfig
-	Search       SearchConfig
-	JWT          JWTConfig
-	CORS         CORSConfig
-	WeChat       WeChatConfig
-	Notification NotificationConfig
+	Server         ServerConfig
+	Database       DatabaseConfig
+	Redis          RedisConfig
+	OpenAI         OpenAIConfig
+	Binance        BinanceConfig
+	Bitget         BitgetConfig
+	BinanceAccount ExchangeAccountConfig
+	GateAccount    ExchangeAccountConfig
+	Search         SearchConfig
+	JWT            JWTConfig
+	CORS           CORSConfig
+	WeChat         WeChatConfig
+	Notification   NotificationConfig
 }
 
 // NotificationConfig holds push notification configuration
 type NotificationConfig struct {
+	SMTPHost     string
+	SMTPPort     string
+	SMTPUsername string
+	SMTPPassword string `json:"-"`
+	SMTPFrom     string
+	SMTPTLSMode  string
 	// 企业微信机器人 Webhook URL
 	WxWorkWebhookURL string
 	// APNs (.p8 token-based auth)
@@ -95,6 +103,14 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	binanceAccount, err := loadExchangeAccount("BINANCE", "binance", "币安")
+	if err != nil {
+		return nil, err
+	}
+	gateAccount, err := loadExchangeAccount("GATE", "gate", "Gate")
+	if err != nil {
+		return nil, err
+	}
 	redisDB, err := strconv.Atoi(getEnv("REDIS_DB", "0"))
 	if err != nil {
 		return nil, fmt.Errorf("invalid REDIS_DB: %w", err)
@@ -106,7 +122,8 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		Bitget: bitgetConfig,
+		Bitget:         bitgetConfig,
+		BinanceAccount: binanceAccount, GateAccount: gateAccount,
 		Server: ServerConfig{
 			Port: getEnv("SERVER_PORT", "8080"),
 			Mode: getEnv("SERVER_MODE", "debug"),
@@ -154,6 +171,7 @@ func Load() (*Config, error) {
 			AppSecret: getEnv("WECHAT_APP_SECRET", ""),
 		},
 		Notification: NotificationConfig{
+			SMTPHost: getEnv("SMTP_HOST", ""), SMTPPort: getEnv("SMTP_PORT", "587"), SMTPUsername: getEnv("SMTP_USERNAME", ""), SMTPPassword: getEnv("SMTP_PASSWORD", ""), SMTPFrom: getEnv("SMTP_FROM", ""), SMTPTLSMode: getEnv("SMTP_TLS_MODE", "starttls"),
 			WxWorkWebhookURL: getEnv("WXWORK_WEBHOOK_URL", ""),
 			APNSKeyID:        getEnv("APNS_KEY_ID", ""),
 			APNSTeamID:       getEnv("APNS_TEAM_ID", ""),

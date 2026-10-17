@@ -143,3 +143,32 @@ func TestMissingAccountListIsNotAnEmptyPortfolio(t *testing.T) {
 		t.Fatal("missing positions accepted")
 	}
 }
+
+func TestUTAPositionNullListIsEmptyButMalformedListFails(t *testing.T) {
+	for _, tc := range []struct {
+		name, data string
+		valid      bool
+	}{
+		{"explicit null", `{"list":null}`, true},
+		{"empty array", `{"list":[]}`, true},
+		{"missing list", `{}`, false},
+		{"invalid object", `{"list":{}}`, false},
+		{"null envelope data", `null`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte(`{"code":"00000","data":` + tc.data + `}`))
+			}))
+			defer srv.Close()
+			client := NewAccountClient(Credentials{APIKey: "key", Secret: "secret", Passphrase: "pass"})
+			client.BaseURL = srv.URL
+			positions, err := client.Positions(context.Background(), "uta")
+			if tc.valid && (err != nil || positions == nil || len(positions) != 0) {
+				t.Fatalf("valid empty positions rejected: %v", err)
+			}
+			if !tc.valid && err == nil {
+				t.Fatal("malformed positions accepted")
+			}
+		})
+	}
+}
