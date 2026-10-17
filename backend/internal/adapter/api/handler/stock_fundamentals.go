@@ -26,6 +26,7 @@ type MetricProvenance struct {
 }
 
 type FundamentalsResponse struct {
+	Description        string                      `json:"description,omitempty"`
 	Metrics            map[string]MetricProvenance `json:"metrics,omitempty"`
 	EPS                *float64                    `json:"eps"`
 	PE                 *float64                    `json:"pe"`
@@ -163,6 +164,9 @@ func (s *FundamentalsService) Fetch(ctx context.Context, market, code string) Fu
 	}
 
 	if verified != nil {
+		if row.Description == "" {
+			row.Description = verified.Description
+		}
 		if verified.EPS != nil && verified.Currency != "" && (row.Currency == "" || row.Currency == verified.Currency) {
 			row.EPS = verified.EPS
 			row.Metrics["eps"] = MetricProvenance{Source: verified.Source, Currency: verified.Currency, AsOf: verified.AsOf}
@@ -239,10 +243,11 @@ func (s *FundamentalsService) fetchFMP(ctx context.Context, market, code string)
 		Date string `json:"date"`
 	}
 	var profiles []struct {
-		Price    *float64 `json:"price"`
-		Currency string   `json:"currency"`
-		IsETF    bool     `json:"isEtf"`
-		IsFund   bool     `json:"isFund"`
+		Description string   `json:"description"`
+		Price       *float64 `json:"price"`
+		Currency    string   `json:"currency"`
+		IsETF       bool     `json:"isEtf"`
+		IsFund      bool     `json:"isFund"`
 	}
 	var wg sync.WaitGroup
 	labels := []string{"EPS", "PE", "分析师预期", "财报日期", "公司资料"}
@@ -260,6 +265,9 @@ func (s *FundamentalsService) fetchFMP(ctx context.Context, market, code string)
 		go func(i int, job func() string) { defer wg.Done(); failures[i] = job() }(i, job)
 	}
 	wg.Wait()
+	if len(profiles) > 0 {
+		row.Description = strings.TrimSpace(profiles[0].Description)
+	}
 	if len(profiles) > 0 && (profiles[0].IsETF || profiles[0].IsFund) {
 		row.Status = "not_applicable"
 		row.Message = "ETF / 基金不适用公司 EPS 与财报指引"

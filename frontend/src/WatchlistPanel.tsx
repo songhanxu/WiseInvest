@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, Loader2, Plus, RefreshCw, Search, Trash2, ListPlus } from "lucide-react";
+import { Check, ChevronDown, Loader2, Plus, RefreshCw, Search, Trash2, ListPlus } from "lucide-react";
 import { requestJson } from "./App";
 import { StockResearchTable, numeric, stockKey, useStockFundamentals } from "./StockResearchTable";
 import type { Market, MarketId, StockQuote } from "./App";
 import { PriceAlertSettings, TargetPriceCell, usePriceAlerts } from "./PriceAlerts";
+import { useDismissiblePopover } from "./useDismissiblePopover";
 
 export function WatchlistPanel({ apiBase, token, markets, onOpenStock, onNeedToken }: {
   apiBase: string;
@@ -13,6 +14,7 @@ export function WatchlistPanel({ apiBase, token, markets, onOpenStock, onNeedTok
   onNeedToken: () => void;
 }) {
   const priceAlerts = usePriceAlerts(apiBase, token);
+  const { rootRef: searchRef, isOpen: searchOpen, setIsOpen: setSearchOpen } = useDismissiblePopover<HTMLElement>();
   const [stocks, setStocks] = useState<StockQuote[]>([]);
   const { fundamentals, financialLoading } = useStockFundamentals(apiBase, stocks, token);
   const [loading, setLoading] = useState(false);
@@ -71,7 +73,7 @@ export function WatchlistPanel({ apiBase, token, markets, onOpenStock, onNeedTok
     let cancelled = false;
     const text = query.trim();
     setSearchError("");
-    if (!text) { setResults([]); setSearching(false); return; }
+    if (!text || !searchOpen) { setResults([]); setSearching(false); return; }
     setResults([]); setSearching(true);
     const timer = window.setTimeout(async () => {
       const targets = markets.filter(market => searchMarket === "all" || market.id === searchMarket);
@@ -83,7 +85,7 @@ export function WatchlistPanel({ apiBase, token, markets, onOpenStock, onNeedTok
       setSearching(false);
     }, 350);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [apiBase, query, searchMarket, markets]);
+  }, [apiBase, query, searchMarket, markets, searchOpen]);
 
   async function changeMembership(stock: StockQuote, remove: boolean) {
     if (!token) { onNeedToken(); return; }
@@ -106,19 +108,19 @@ export function WatchlistPanel({ apiBase, token, markets, onOpenStock, onNeedTok
   return <section className="workspace watchlist-workspace">
     <div className="watchlist-heading">
       <div><p className="eyebrow">我的投资</p><h2>自选列表</h2><p>值得关注的公司与资产，汇成一份清晰的研究清单。</p></div>
-      <button className="ghost-button" onClick={() => void Promise.all([refresh(), priceAlerts.refresh()])} disabled={loading || !token}><RefreshCw size={16} className={loading ? "spin" : ""} />刷新</button>
     </div>
 
     {!token && <div className="auth-callout"><ListPlus size={18} /><span>登录后读取并保存你的全部自选列表。</span><button onClick={onNeedToken}>去登录</button></div>}
 
-    <section className="surface-card watchlist-search-card">
+    <section className="surface-card watchlist-search-card" ref={searchRef}>
       <div className="watchlist-search-controls">
-        <label className="watchlist-search-input"><Search size={18} /><input aria-label="搜索添加自选" value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索名称或代码，如苹果、AAPL、腾讯、00700、BTC" /></label>
-        <select aria-label="搜索市场" value={searchMarket} onChange={event => setSearchMarket(event.target.value as MarketId | "all")}><option value="all">所有市场</option>{markets.map(market => <option value={market.id} key={market.id}>{market.displayName}</option>)}</select>
+        <label className="watchlist-search-input"><Search size={18} /><input aria-label="搜索添加自选" value={query} onChange={event => { setQuery(event.target.value); setSearchOpen(true); }} onFocus={() => setSearchOpen(true)} onClick={() => setSearchOpen(true)} placeholder="搜索名称或代码，如苹果、AAPL、腾讯、00700、BTC" /></label>
+        <label className="watchlist-search-scope"><select aria-label="搜索市场" value={searchMarket} onChange={event => { setSearchMarket(event.target.value as MarketId | "all"); setSearchOpen(true); }}><option value="all">全部市场</option>{markets.map(market => <option value={market.id} key={market.id}>{market.displayName}</option>)}</select><ChevronDown size={13} aria-hidden="true" /></label>
       </div>
-      {searching && <p className="watchlist-note"><Loader2 size={15} className="spin" />搜索中…</p>}
-      {searchError && <p className="form-note danger" role="status">{searchError}</p>}
-      {query.trim() && !searching && !results.length && !searchError && <p className="watchlist-note">未找到匹配标的，试试股票代码或切换市场。</p>}
+      {searchOpen && query.trim() && <div className="watchlist-search-dropdown" role="region" aria-label="自选搜索结果">
+      {searching && <p className="search-empty"><Loader2 size={15} className="spin" />搜索中…</p>}
+      {searchError && <p className="search-empty danger" role="status">{searchError}</p>}
+      {!searching && !results.length && !searchError && <p className="search-empty">未找到匹配标的，试试股票代码或切换市场。</p>}
       {results.length > 0 && <div className="watchlist-search-results">{results.map(stock => {
         const market = markets.find(item => item.id === stock.market);
         const key = stockKey(stock); const saved = membership.has(key);
@@ -128,9 +130,12 @@ export function WatchlistPanel({ apiBase, token, markets, onOpenStock, onNeedTok
           <button className="ghost-button" disabled={saved || busy.includes(key)} onClick={() => void changeMembership(stock, false)}>{busy.includes(key) ? <Loader2 size={15} className="spin" /> : saved ? <Check size={15} /> : <Plus size={15} />}{saved ? "已添加" : "添加自选"}</button>
         </div>;
       })}</div>}
+      </div>}
     </section>
 
-    <div className="watchlist-toolbar"><div className="watchlist-filters">{[{ id: "all", displayName: "全部" }, ...markets].map(market => <button key={market.id} className={filter === market.id ? "active" : ""} onClick={() => setFilter(market.id as MarketId | "all")}>{market.displayName}<span>{market.id === "all" ? stocks.length : stocks.filter(stock => stock.market === market.id).length}</span></button>)}</div><span className="watchlist-note">{financialLoading ? "财报数据加载中…" : updatedAt ? `行情更新 ${updatedAt}` : ""}</span></div>
+    <div className="watchlist-toolbar"><div className="watchlist-filters">{[{ id: "all", displayName: "全部" }, ...markets].map(market => <button key={market.id} className={filter === market.id ? "active" : ""} onClick={() => setFilter(market.id as MarketId | "all")}>{market.displayName}<span>{market.id === "all" ? stocks.length : stocks.filter(stock => stock.market === market.id).length}</span></button>)}</div>
+      <div className="watchlist-update"><span className="watchlist-note" role="status">{loading ? "行情更新中…" : updatedAt ? `更新于 ${updatedAt}` : financialLoading ? "财报加载中…" : ""}</span><button type="button" className="watchlist-update-button" aria-label="更新自选行情" title="更新自选报价和提醒状态" onClick={() => void Promise.all([refresh(), priceAlerts.refresh()])} disabled={loading || !token}><RefreshCw size={13} className={loading ? "spin" : ""} /><span>更新行情</span></button></div>
+    </div>
     {error && <p className="form-note danger" role="alert">{error}</p>}
     {actionError && <p className="form-note danger" role="alert">{actionError}</p>}
     {financialUnavailable && <p className="watchlist-note">部分财报指标暂未取得，悬停单元格可查看原因；价格和自选功能不受影响。</p>}

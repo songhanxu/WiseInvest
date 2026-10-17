@@ -2,6 +2,7 @@ import { FormEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useSt
 import { WatchlistPanel } from "./WatchlistPanel";
 import { AccountsPanel } from "./AccountsPanel";
 import { ChatMarkdown } from "./ChatMarkdown";
+import { useDismissiblePopover } from "./useDismissiblePopover";
 import { createConversationDraft, hasUserMessage, readConversationHistory, serializeConversationHistory } from "./conversation-history";
 import type { Message, SavedConversation } from "./conversation-history";
 import type { LucideIcon } from "lucide-react";
@@ -704,6 +705,7 @@ export function App() {
 
       <main className="main">
         <TopBar
+          key={`${view}:${activeMarketId}:${activeStock?.id ?? ""}:${activeStock?.provider_symbol ?? ""}:${activeId ?? ""}:${apiBase}`}
           pageTitle={{home:"总览",accounts:"实体账户",watchlist:"自选列表",chat:"AI 分析",profile:"设置",market:activeMarket.displayName,stock:activeStock?.name ?? "个股详情"}[view]}
           apiBase={apiBase}
           isOnline={isOnline}
@@ -825,10 +827,11 @@ function TopBar({
   const [results, setResults] = useState<Array<{ market: Market; stock: StockQuote }>>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const { rootRef, isOpen, setIsOpen } = useDismissiblePopover<HTMLFormElement>();
 
   useEffect(() => {
     const trimmed = query.trim();
-    if (!trimmed) {
+    if (!trimmed || !isOpen) {
       setResults([]);
       setSearchError(null);
       setIsSearching(false);
@@ -836,6 +839,7 @@ function TopBar({
     }
 
     let cancelled = false;
+    setResults([]);
     setIsSearching(true);
     setSearchError(null);
 
@@ -862,32 +866,35 @@ function TopBar({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [apiBase, query]);
+  }, [apiBase, query, isOpen]);
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
-    if (results[0]) {
+    if (isOpen && results[0]) {
       onOpenStock(results[0].market, results[0].stock);
       setQuery("");
       setResults([]);
+      setIsOpen(false);
     }
   };
 
   return (
     <header className="topbar">
       <div className="topbar-location"><span>工作台</span><ChevronRight size={13} /><strong>{pageTitle}</strong></div>
-      <form className="search-shell" onSubmit={submitSearch}>
+      <form className="search-shell" ref={rootRef} onSubmit={submitSearch}>
         <div className="search-box">
           <Search size={17} />
           <input
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => { setQuery(event.target.value); setIsOpen(true); }}
+            onFocus={() => setIsOpen(true)}
+            onClick={() => setIsOpen(true)}
             placeholder="搜索股票、币种、指数代码"
           />
           {isSearching && <Loader2 className="spin" size={16} />}
         </div>
-        {(query.trim() || searchError) && (
-          <div className="search-results">
+        {isOpen && (query.trim() || searchError) && (
+          <div className="search-results" role="region" aria-label="顶部搜索结果">
             {searchError ? (
               <div className="search-empty">{searchError}</div>
             ) : results.length > 0 ? (
@@ -899,6 +906,7 @@ function TopBar({
                     onOpenStock(market, stock);
                     setQuery("");
                     setResults([]);
+                    setIsOpen(false);
                   }}
                 >
                   <MarketIcon market={market} mini />

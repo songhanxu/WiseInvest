@@ -83,7 +83,7 @@ func TestFundamentalFlightCacheAndCurrencyProvenance(t *testing.T) {
 		case "/income-statement-ttm":
 			w.Write([]byte(`[{"epsDiluted":5,"reportedCurrency":"USD"}]`))
 		case "/profile":
-			w.Write([]byte(`[{"price":100,"currency":"USD"}]`))
+			w.Write([]byte(`[{"price":100,"currency":"USD","description":"Company profile."}]`))
 		default:
 			w.Write([]byte(`[]`))
 		}
@@ -103,7 +103,7 @@ func TestFundamentalFlightCacheAndCurrencyProvenance(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			row := s.Fetch(context.Background(), "us_stock", "AAPL")
-			if row.EPS == nil || *row.EPS != 5 || row.Currency != "USD" || row.Metrics["eps"].Currency != "USD" || row.GuidanceEPS != nil || row.GuidancePeriod != "" {
+			if row.EPS == nil || *row.EPS != 5 || row.Currency != "USD" || row.Metrics["eps"].Currency != "USD" || row.GuidanceEPS != nil || row.GuidancePeriod != "" || row.Description != "Company profile." {
 				t.Errorf("mixed data: %+v", row)
 			}
 		}()

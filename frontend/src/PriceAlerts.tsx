@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { requestJson } from "./App";
+import { Bell, Check, Loader2, RotateCcw, X } from "lucide-react";
+import { useDismissiblePopover } from "./useDismissiblePopover";
 
 export type PriceAlert = {
   id: number; holding_id: string; account_id: string; target_price: number;
@@ -51,16 +53,29 @@ export function PriceAlertSettings({ alerts }: { alerts: PriceAlertsController }
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [failed, setFailed] = useState(false);
-  useEffect(() => { setEmail(alerts.data?.email || ""); setMessage(""); }, [alerts.data?.email]);
-  return <section className="surface-card price-alert-settings"><div><h3>到价邮件提醒</h3><p>填写期望价格并保存，系统按保存时的现价自动判断涨到或跌到，每次设置只提醒一次。</p></div>
-    <form onSubmit={async event => { event.preventDefault(); setBusy(true); setMessage(""); try { await alerts.saveEmail(email.trim()); setMessage(email.trim() ? "提醒邮箱已保存" : "提醒邮箱已清除，邮件提醒暂停"); setFailed(false); } catch (err) { setMessage(err instanceof Error ? err.message : "邮箱保存失败"); setFailed(true); } finally { setBusy(false); } }}>
-      <label htmlFor="price-alert-email">收件邮箱</label><input id="price-alert-email" type="email" autoComplete="email" placeholder="填写接收提醒的邮箱" value={email} onChange={event => setEmail(event.target.value)} disabled={busy || !alerts.data} /><button className="ghost-button" type="submit" disabled={busy || !alerts.data}>{busy ? "保存中…" : "保存邮箱"}</button>
-    </form>
-    {alerts.error && <p className="form-note danger" role="alert">{alerts.error}</p>}
-    {message && <p className={`form-note ${failed ? "danger" : "success"}`} role="status">{message}</p>}
-    {alerts.data && !alerts.data.mailer_configured && <p className="form-note danger" role="status">邮件发送服务尚未启用，目标价可以先保存；配置完成后才会发送提醒。</p>}
-    {alerts.data && !alerts.data.email && <p className="watchlist-note">请先保存收件邮箱，才能接收到价提醒。</p>}
-    <p className="watchlist-data-note">后端每分钟检查一次；关闭页面后继续监控，需后端保持运行且行情连接正常。提醒使用对应行的报价币种；移出自选或持仓、行情不可用时暂停检测。发送失败会显示状态，检查配置后重新保存目标价即可启用。</p>
+  const { rootRef, isOpen: editing, setIsOpen: setEditing } = useDismissiblePopover<HTMLElement>(!busy);
+  const savedEmail = alerts.data?.email || "";
+  useEffect(() => { if (!editing) setEmail(savedEmail); }, [savedEmail, editing]);
+
+  return <section className="surface-card price-alert-settings" ref={rootRef}>
+    <div className="price-alert-summary"><Bell size={17} /><div><h3>到价邮件提醒</h3><p>自动判断涨跌，每次设置只提醒一次。后端每分钟检查，需保持运行。</p></div></div>
+    {!savedEmail || editing ? <form onSubmit={async event => {
+      event.preventDefault();
+      const next = email.trim();
+      if (next === savedEmail) { setEditing(false); return; }
+      setBusy(true); setMessage("");
+      try {
+        await alerts.saveEmail(next);
+        setEditing(false); setMessage(next ? "邮箱已保存" : "邮件提醒已暂停"); setFailed(false);
+      } catch (err) { setMessage(err instanceof Error ? err.message : "邮箱保存失败"); setFailed(true); }
+      finally { setBusy(false); }
+    }}>
+      <input aria-label="收件邮箱" type="email" autoComplete="email" placeholder="填写接收提醒的邮箱" value={email} onChange={event => setEmail(event.target.value)} disabled={busy || !alerts.data} autoFocus={editing} />
+      <button className="alert-confirm" type="submit" aria-label="保存收件邮箱" title="保存收件邮箱" disabled={busy || !alerts.data || email.trim() === savedEmail}>{busy ? <Loader2 size={15} className="spin" /> : <Check size={15} />}</button>
+    </form> : <div className="price-alert-recipient"><span title={savedEmail}>{savedEmail}</span><button type="button" className="alert-text-button" aria-label="修改收件邮箱" onClick={() => { setEmail(savedEmail); setMessage(""); setEditing(true); }}>修改</button></div>}
+    {alerts.error && <p className="form-note danger alert-setting-note" role="alert">{alerts.error}</p>}
+    {message && <p className={`form-note alert-setting-note ${failed ? "danger" : "success"}`} role="status">{message}</p>}
+    {alerts.data && !alerts.data.mailer_configured && <p className="form-note danger alert-setting-note" role="status">邮件服务尚未启用，暂不发送提醒。</p>}
   </section>;
 }
 
@@ -69,11 +84,48 @@ export function TargetPriceCell({ stock, alerts }: { stock: AlertHolding; alerts
   const [draft, setDraft] = useState(row ? String(row.target_price) : "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => { setDraft(row ? String(row.target_price) : ""); setError(""); }, [row?.target_price, stock.holding_id]);
+  useEffect(() => { setDraft(row ? String(row.target_price) : ""); setError(""); }, [row?.target_price, row?.revision, stock.holding_id]);
   const canSave = Boolean(alerts.data) && !stock.stale && stock.quote_available !== false && stock.current_price > 0;
-  const status = !row ? "" : row.status === "sent" ? "已邮件提醒" : row.status === "sending" ? "发送中 / 结果待确认" : row.status === "error" ? "发送失败 / 待确认" : !alerts.data?.email ? "待设置收件邮箱" : !alerts.data?.mailer_configured ? "待启用邮件服务" : row.last_error ? "行情暂不可用" : "监控中";
-  return <div className="target-price-cell"><form onSubmit={async event => { event.preventDefault(); const value = Number(draft); if (!draft.trim() || !Number.isFinite(value) || value <= 0) { setError("请输入大于 0 的价格"); return; } setBusy(true); setError(""); try { await alerts.save(stock, value); } catch (err) { setError(err instanceof Error ? err.message : "保存失败"); } finally { setBusy(false); } }}>
-    <div className="target-price-input"><input type="number" step="any" min="0" max="1000000000000000" aria-label={`${stock.name}期望价格`} placeholder="设置期望价格" value={draft} onChange={event => setDraft(event.target.value)} disabled={busy || !alerts.data} /><span>{stock.currency}</span></div>
-    <div className="target-price-actions"><button type="submit" disabled={busy || !canSave}>{busy ? "保存中…" : row ? row.status === "sent" || row.status === "error" ? "重新启用" : "保存" : "设置提醒"}</button>{row && <button type="button" disabled={busy} onClick={async () => { setBusy(true); setError(""); try { await alerts.remove(stock.holding_id); } catch (err) { setError(err instanceof Error ? err.message : "删除失败"); } finally { setBusy(false); } }}>删除</button>}</div>
-  </form>{row && <small className={row.status === "error" ? "danger" : ""} title={row.last_error}>{row.direction === "above" ? "≥" : "≤"} {row.target_price} {row.currency} · {status}</small>}{row?.sent_at && <small>{new Date(row.sent_at).toLocaleString("zh-CN", { hour12: false })}</small>}{row?.last_checked_at && row.status === "armed" && <small>检查于 {new Date(row.last_checked_at).toLocaleTimeString("zh-CN", {hour12:false})}</small>}{error && <small className="danger" role="alert">{error}</small>}{!canSave && alerts.data && <small>等待有效行情后可保存</small>}</div>;
+  const value = Number(draft);
+  const hasDraft = Boolean(draft.trim());
+  const valid = hasDraft && Number.isFinite(value) && value > 0 && value <= 1e15;
+  const changed = Boolean(row) && (!hasDraft || value !== row?.target_price);
+  const rearm = row?.status === "sent" || row?.status === "error";
+  const sending = row?.status === "sending";
+  const showSave = !row || changed || rearm;
+  const pending = Boolean(row) && (!alerts.data?.email || !alerts.data?.mailer_configured || Boolean(row?.last_error) || !canSave);
+  const status = !row ? "" : row.status === "sent" ? "已提醒" : sending ? "发送中" : row.status === "error" ? "发送失败 / 结果待确认" : !alerts.data?.email ? "等待设置收件邮箱" : !alerts.data?.mailer_configured ? "等待启用邮件服务" : row.last_error || !canSave ? "等待有效行情" : "监控中";
+  const detail = row ? [`${status}：${row.direction === "above" ? "涨至" : "跌至"} ${row.target_price} ${row.currency}`, row.last_error, row.sent_at ? `提醒时间 ${new Date(row.sent_at).toLocaleString("zh-CN", {hour12:false})}` : row.last_checked_at ? `上次检查 ${new Date(row.last_checked_at).toLocaleString("zh-CN", {hour12:false})}` : ""].filter(Boolean).join("；") : "";
+  const saveLabel = `${rearm ? "重新启用" : row ? "保存" : "开启"}${stock.name}提醒`;
+  const saveTitle = !canSave ? "等待有效行情后可保存" : !valid ? "请输入大于 0 的价格" : rearm ? `${detail}；点击重新启用` : row ? "保存新的期望价格" : "开启到价提醒";
+  async function remove() {
+    if (busy || sending) return;
+    setBusy(true); setError("");
+    try { await alerts.remove(stock.holding_id); }
+    catch (err) { setError(err instanceof Error ? err.message : "关闭失败"); }
+    finally { setBusy(false); }
+  }
+
+  return <div className="price-alert-cell">
+    <form className="price-alert-form" onSubmit={async event => {
+      event.preventDefault();
+      if (!valid) { setError("请输入有效的期望价格"); return; }
+      if (!showSave || sending || !canSave || busy) return;
+      setBusy(true); setError("");
+      try { await alerts.save(stock, value); }
+      catch (err) { setError(err instanceof Error ? err.message : "保存失败"); }
+      finally { setBusy(false); }
+    }}>
+      <label className="target-price-input"><input type="number" step="any" min="0" max="1000000000000000" required aria-label={`${stock.name}期望价格`} value={draft} onChange={event => { setDraft(event.target.value); setError(""); }} onKeyDown={event => { if (event.key === "Escape") { setDraft(row ? String(row.target_price) : ""); setError(""); } }} disabled={busy || !alerts.data || sending} /><span>{stock.currency}</span></label>
+      <span className="target-price-action-slot">
+        {busy || sending ? <span className="target-price-progress" role="status" aria-label={sending ? "提醒发送中" : "保存中"}><Loader2 size={13} className="spin" /></span>
+          : row && !hasDraft ? <button className="target-price-action clear" type="button" aria-label={`清除${stock.name}提醒`} title="清除提醒" onClick={() => void remove()}><X size={13} /></button>
+          : hasDraft && (!row || changed) ? <button className="target-price-action confirm" type="submit" aria-label={saveLabel} title={saveTitle} disabled={!valid || !canSave}><Check size={14} /></button>
+          : rearm ? <button className="target-price-action" type="submit" aria-label={saveLabel} title={saveTitle} disabled={!valid || !canSave}><RotateCcw size={13} /></button>
+          : row ? <button className={`target-price-action active ${pending ? "pending" : ""}`} type="button" aria-label={`关闭${stock.name}提醒`} title={`${detail}；点击关闭提醒`} onClick={() => void remove()}><Bell size={13} /></button>
+          : null}
+      </span>
+    </form>
+    {error && <small className="danger" role="alert">{error}</small>}
+  </div>;
 }
