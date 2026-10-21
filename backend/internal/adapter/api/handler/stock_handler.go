@@ -149,11 +149,12 @@ func (h *StockHandler) backgroundRefreshLoop(ctx context.Context) {
 					Market: "a_share",
 					Code:   idx.ID,
 					Data: StockResponse{
-						ID:            idx.ID,
-						Symbol:        idx.ID,
-						Name:          idx.Name,
-						Market:        "a_share",
-						CurrentPrice:  idx.Value,
+						ID:           idx.ID,
+						Symbol:       idx.ID,
+						Name:         idx.Name,
+						Market:       "a_share",
+						CurrentPrice: idx.Value,
+						Source:       idx.Source, Currency: idx.Currency, ProductType: idx.ProductType, QuoteTime: idx.QuoteTime, QuoteSession: idx.QuoteSession,
 						Change:        idx.Change,
 						ChangePercent: idx.ChangePercent,
 					},
@@ -182,11 +183,12 @@ func (h *StockHandler) backgroundRefreshLoop(ctx context.Context) {
 					Market: "us_stock",
 					Code:   idx.ID,
 					Data: StockResponse{
-						ID:            idx.ID,
-						Symbol:        idx.ID,
-						Name:          idx.Name,
-						Market:        "us_stock",
-						CurrentPrice:  idx.Value,
+						ID:           idx.ID,
+						Symbol:       idx.ID,
+						Name:         idx.Name,
+						Market:       "us_stock",
+						CurrentPrice: idx.Value,
+						Source:       idx.Source, Currency: idx.Currency, ProductType: idx.ProductType, QuoteTime: idx.QuoteTime, QuoteSession: idx.QuoteSession,
 						Change:        idx.Change,
 						ChangePercent: idx.ChangePercent,
 					},
@@ -195,17 +197,14 @@ func (h *StockHandler) backgroundRefreshLoop(ctx context.Context) {
 		}
 	})
 
-	// Crypto slow data — 60 s (sparklines + fear/greed index are slow-changing)
+	// Crypto sparklines — 60 s.
 	go tick("crypto_slow_data", 60*time.Second, func() {
 		var btcSp, ethSp []float64
-		var fg IndexResponse
-		var fgErr error
 		var wg sync.WaitGroup
 
-		wg.Add(3)
+		wg.Add(2)
 		go func() { defer wg.Done(); btcSp = h.fetchCryptoSparkline(ctx, "BTCUSDT") }()
 		go func() { defer wg.Done(); ethSp = h.fetchCryptoSparkline(ctx, "ETHUSDT") }()
-		go func() { defer wg.Done(); fg, fgErr = h.fetchFearGreedIndex(ctx) }()
 		wg.Wait()
 
 		h.cryptoSlowMu.Lock()
@@ -215,15 +214,12 @@ func (h *StockHandler) backgroundRefreshLoop(ctx context.Context) {
 		if len(ethSp) > 0 {
 			h.cryptoETHSparkline = ethSp
 		}
-		if fgErr == nil {
-			h.cryptoFearGreed = &fg
-		}
 		h.cryptoSlowMu.Unlock()
 	})
 
 	// Crypto real-time data — fixed 2s HTTP polling.
-	// Binance WS is unreliable in current network, so we use simple HTTP polling
-	// as the primary (and only) data source for crypto indices.
+	// Public market data uses Bitget HTTP polling
+	// with Binance as the secondary source for unavailable symbols.
 	go tick("crypto_indices", 2*time.Second, func() {
 		data, err := h.fetchCryptoIndices(ctx)
 		if err != nil || len(data) == 0 {
@@ -239,11 +235,12 @@ func (h *StockHandler) backgroundRefreshLoop(ctx context.Context) {
 					base = "ETH"
 				}
 				_ = h.cache.SetJSON(ctx, cache.StockQuoteKey("crypto", idx.ID), StockResponse{
-					ID:            idx.ID,
-					Symbol:        base,
-					Name:          idx.Name,
-					Market:        "crypto",
-					CurrentPrice:  idx.Value,
+					ID:           idx.ID,
+					Symbol:       base,
+					Name:         idx.Name,
+					Market:       "crypto",
+					CurrentPrice: idx.Value,
+					Source:       idx.Source, Currency: idx.Currency, ProductType: idx.ProductType, QuoteTime: idx.QuoteTime, QuoteSession: idx.QuoteSession,
 					Change:        idx.Change,
 					ChangePercent: idx.ChangePercent,
 				}, 10*time.Second)
@@ -253,11 +250,12 @@ func (h *StockHandler) backgroundRefreshLoop(ctx context.Context) {
 						Market: "crypto",
 						Code:   idx.ID,
 						Data: StockResponse{
-							ID:            idx.ID,
-							Symbol:        base,
-							Name:          idx.Name,
-							Market:        "crypto",
-							CurrentPrice:  idx.Value,
+							ID:           idx.ID,
+							Symbol:       base,
+							Name:         idx.Name,
+							Market:       "crypto",
+							CurrentPrice: idx.Value,
+							Source:       idx.Source, Currency: idx.Currency, ProductType: idx.ProductType, QuoteTime: idx.QuoteTime, QuoteSession: idx.QuoteSession,
 							Change:        idx.Change,
 							ChangePercent: idx.ChangePercent,
 						},
@@ -337,11 +335,12 @@ func (h *StockHandler) onBinanceWSUpdate(ctx context.Context, tickers map[string
 				base = "ETH"
 			}
 			stock := StockResponse{
-				ID:            base,
-				Symbol:        base + "/USDT",
-				Name:          idx.Name,
-				Market:        "crypto",
-				CurrentPrice:  idx.Value,
+				ID:           base,
+				Symbol:       base + "/USDT",
+				Name:         idx.Name,
+				Market:       "crypto",
+				CurrentPrice: idx.Value,
+				Source:       idx.Source, Currency: idx.Currency, ProductType: idx.ProductType, QuoteTime: idx.QuoteTime, QuoteSession: idx.QuoteSession,
 				Change:        idx.Change,
 				ChangePercent: idx.ChangePercent,
 			}
@@ -384,6 +383,8 @@ type IndexResponse struct {
 	Source        string    `json:"source,omitempty"`
 	Currency      string    `json:"currency,omitempty"`
 	ProductType   string    `json:"product_type,omitempty"`
+	QuoteTime     string    `json:"quote_time,omitempty"`
+	QuoteSession  string    `json:"quote_session,omitempty"`
 }
 
 func (h *StockHandler) GetIndices(c *gin.Context) {
@@ -393,7 +394,7 @@ func (h *StockHandler) GetIndices(c *gin.Context) {
 	if h.cache != nil {
 		cacheKey := cache.IndicesKey(market)
 		var cached []IndexResponse
-		if hit, _ := h.cache.GetJSON(c.Request.Context(), cacheKey, &cached); hit && len(cached) > 0 {
+		if hit, _ := h.cache.GetJSON(c.Request.Context(), cacheKey, &cached); hit && len(cached) > 0 && bitgetBoardCacheAllowed(market, cached) {
 			c.JSON(http.StatusOK, cached)
 			return
 		}
@@ -422,6 +423,10 @@ func (h *StockHandler) GetIndices(c *gin.Context) {
 
 	if err != nil {
 		h.logger.WithField("market", market).WithField("error", err).Warn("Failed to fetch indices, returning empty")
+		if len(indices) == 0 {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "市场行情暂不可用，请稍后重试"})
+			return
+		}
 	}
 	// Ensure we never return null — always return [] for JSON
 	if indices == nil {
@@ -666,107 +671,9 @@ func (h *StockHandler) fetchSinaSparkline(ctx context.Context, code string) ([]f
 // ── US Stock Indices (Yahoo Finance) ─────────────────────────────────────────
 
 func (h *StockHandler) fetchUSStockIndices(ctx context.Context) ([]IndexResponse, error) {
-	// Use Tencent Finance API (accessible from mainland China, Yahoo is blocked)
-	indices := []struct {
-		code      string // Tencent Finance code
-		id        string
-		name      string
-		shortName string
-	}{
-		{"us.DJI", "DJI", "道琼斯工业平均指数", "道指"},
-		{"us.INX", "GSPC", "标普500指数", "标普"},
-		{"us.IXIC", "IXIC", "纳斯达克综合指数", "纳指"},
-	}
-
-	// Batch fetch all indices in one request
-	codes := make([]string, len(indices))
-	for i, idx := range indices {
-		codes[i] = idx.code
-	}
-	apiURL := fmt.Sprintf("https://qt.gtimg.cn/q=%s", strings.Join(codes, ","))
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		h.logger.WithField("error", err).Warn("fetchUSStockIndices: HTTP request failed")
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	h.logger.Debugf("fetchUSStockIndices: got %d bytes from Tencent Finance", len(body))
-	// Tencent Finance returns GBK encoding, convert to UTF-8
-	utf8Body, _, err := transform.Bytes(simplifiedchinese.GBK.NewDecoder(), body)
-	if err != nil {
-		utf8Body = body // fallback
-	}
-	bodyStr := string(utf8Body)
-
-	var results []IndexResponse
-	// codeForSparkline tracks the Tencent code for each result index (for parallel sparkline fetch)
-	var sparklineCodes []string
-	for _, idx := range indices {
-		// Parse: v_us.DJI="200~道琼斯~.DJI~45577.47~46021.43~..."
-		prefix := fmt.Sprintf("v_%s=\"", idx.code)
-		start := strings.Index(bodyStr, prefix)
-		if start == -1 {
-			h.logger.Warnf("US index %s not found in response", idx.code)
-			continue
-		}
-		start += len(prefix)
-		end := strings.Index(bodyStr[start:], "\"")
-		if end == -1 {
-			continue
-		}
-		fields := strings.Split(bodyStr[start:start+end], "~")
-		// Tencent US stock fields: [0]=status, [1]=name, [2]=code, [3]=currentPrice,
-		// [4]=previousClose, [5]=open, [6]=volume, ..., [31]=change, [32]=changePercent,
-		// [33]=high, [34]=low
-		if len(fields) < 35 {
-			h.logger.Warnf("US index %s insufficient fields: %d", idx.code, len(fields))
-			continue
-		}
-
-		currentPrice := parseFloat(fields[3])
-		previousClose := parseFloat(fields[4])
-		change := parseFloat(fields[31])
-		changePct := parseFloat(fields[32])
-
-		results = append(results, IndexResponse{
-			ID:            idx.id,
-			Name:          idx.name,
-			ShortName:     idx.shortName,
-			Value:         currentPrice,
-			Change:        change,
-			ChangePercent: changePct,
-			SparklineData: []float64{},
-		})
-		sparklineCodes = append(sparklineCodes, idx.code)
-		_ = previousClose
-	}
-
-	// Fetch sparkline data for all US indices in parallel
-	var wg sync.WaitGroup
-	for i := range results {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			sparkline := h.fetchUSIndexSparkline(ctx, sparklineCodes[idx])
-			if len(sparkline) > 0 {
-				results[idx].SparklineData = sparkline
-			}
-		}(i)
-	}
-	wg.Wait()
-
-	return results, nil
+	// Listed ETFs represent the market board; their own symbols and prices are
+	// returned, never relabelled as the numerical value of an index.
+	return h.fetchBitgetMarketBoard(ctx, "us_stock", []string{"SPY", "QQQ", "DIA"})
 }
 
 // fetchUSIndexSparkline fetches 5-day close prices for US index sparkline chart
@@ -829,90 +736,60 @@ func (h *StockHandler) fetchUSIndexSparkline(ctx context.Context, code string) [
 // ── Crypto Indices (Binance API) ─────────────────────────────────────────────
 
 func (h *StockHandler) fetchCryptoIndices(ctx context.Context) ([]IndexResponse, error) {
-	// Fetch BTC and ETH 24hr tickers from Binance (lightweight, ~2 weight)
-	tickers, err := h.fetchBinance24hrTickers(ctx, []string{"BTCUSDT", "ETHUSDT"})
+	quotes, err := h.fetchBitgetCryptoStocks(ctx, []string{"BTCUSDT", "ETHUSDT"})
 	if err != nil {
 		return nil, err
 	}
-
-	// Read slow-changing data from in-memory cache (updated every 60 s)
 	h.cryptoSlowMu.RLock()
-	btcSparkline := h.cryptoBTCSparkline
-	ethSparkline := h.cryptoETHSparkline
-	fgPtr := h.cryptoFearGreed
+	btcSparkline, ethSparkline := h.cryptoBTCSparkline, h.cryptoETHSparkline
 	h.cryptoSlowMu.RUnlock()
-
-	var btcPrice, btcChangePct float64
-	if t, ok := tickers["BTCUSDT"]; ok {
-		btcPrice = parseFloat(t.LastPrice)
-		btcChangePct = parseFloat(t.PriceChangePercent)
-	}
-
-	indices := []IndexResponse{
-		{
-			ID:            "btc_price",
-			Name:          "比特币",
-			ShortName:     "BTC",
-			Value:         btcPrice,
-			Change:        parseFloat(tickers["BTCUSDT"].PriceChange),
-			ChangePercent: btcChangePct,
-			SparklineData: btcSparkline,
-		},
-	}
-
-	if t, ok := tickers["ETHUSDT"]; ok {
-		indices = append(indices, IndexResponse{
-			ID:            "eth_price",
-			Name:          "以太坊",
-			ShortName:     "ETH",
-			Value:         parseFloat(t.LastPrice),
-			Change:        parseFloat(t.PriceChange),
-			ChangePercent: parseFloat(t.PriceChangePercent),
-			SparklineData: ethSparkline,
-		})
-	}
-
-	// Fear & Greed index from in-memory cache
-	if fgPtr != nil {
-		indices = append(indices, *fgPtr)
-	}
-
-	return indices, nil
-}
-
-// fetchCryptoSparkline fetches recent hourly close prices from Binance for sparkline display.
-func (h *StockHandler) fetchCryptoSparkline(ctx context.Context, symbol string) []float64 {
-	apiURL := fmt.Sprintf(
-		"https://data-api.binance.vision/api/v3/klines?symbol=%s&interval=1h&limit=24",
-		symbol,
-	)
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
-	if err != nil {
-		return []float64{}
-	}
-	req.Header.Set("User-Agent", "Mozilla/5.0")
-
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		return []float64{}
-	}
-	defer resp.Body.Close()
-
-	var rawKlines [][]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&rawKlines); err != nil {
-		return []float64{}
-	}
-
-	var prices []float64
-	for _, k := range rawKlines {
-		if len(k) < 5 {
-			continue
-		}
-		if closeStr, ok := k[4].(string); ok {
-			if p := parseFloat(closeStr); p > 0 {
-				prices = append(prices, p)
+	rows := make([]IndexResponse, 0, len(quotes))
+	for _, q := range quotes {
+		var sparkline []float64
+		if q.Source == "bitget" {
+			sparkline = btcSparkline
+			if q.ID == "ETH" {
+				sparkline = ethSparkline
 			}
 		}
+		rows = append(rows, IndexResponse{ID: strings.ToLower(q.ID) + "_price", Name: q.Name, ShortName: q.ID, Value: q.CurrentPrice, Change: q.Change, ChangePercent: q.ChangePercent, SparklineData: sparkline, Source: q.Source, Currency: q.Currency, ProductType: q.ProductType, QuoteTime: q.QuoteTime})
+	}
+	var wg sync.WaitGroup
+	for i := range rows {
+		if len(rows[i].SparklineData) >= 2 {
+			continue
+		}
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			var bars []KLineResponse
+			if rows[i].Source == "binance" {
+				bars, _ = h.fetchBinanceCryptoKLine(ctx, rows[i].ShortName, "1h", 24)
+			} else {
+				candles, _ := h.bitget.CryptoCandles(ctx, rows[i].ShortName, "1h", 24)
+				for _, candle := range candles {
+					rows[i].SparklineData = append(rows[i].SparklineData, candle.Close)
+				}
+				return
+			}
+			for _, bar := range bars {
+				rows[i].SparklineData = append(rows[i].SparklineData, bar.Close)
+			}
+		}(i)
+	}
+	wg.Wait()
+	return rows, nil
+}
+
+// fetchCryptoSparkline fetches recent hourly close prices from Bitget for sparkline display.
+func (h *StockHandler) fetchCryptoSparkline(ctx context.Context, symbol string) []float64 {
+	candles, err := h.bitget.CryptoCandles(ctx, symbol, "1h", 24)
+	if err != nil {
+		return nil
+	}
+	prices := make([]float64, 0, len(candles))
+	for _, candle := range candles {
+		prices = append(prices, candle.Close)
 	}
 	return prices
 }
@@ -929,6 +806,7 @@ type BinanceTicker24hr struct {
 	HighPrice          string `json:"highPrice"`
 	LowPrice           string `json:"lowPrice"`
 	Volume             string `json:"volume"`
+	CloseTime          int64  `json:"closeTime"`
 	QuoteVolume        string `json:"quoteVolume"`
 }
 
@@ -1040,6 +918,7 @@ type StockResponse struct {
 	ProductType    string  `json:"product_type,omitempty"`
 	ChangeBasis    string  `json:"change_basis,omitempty"`
 	QuoteTime      string  `json:"quote_time,omitempty"`
+	QuoteSession   string  `json:"quote_session,omitempty"`
 	QuoteAvailable *bool   `json:"quote_available,omitempty"`
 }
 
@@ -1223,6 +1102,7 @@ func (h *StockHandler) fetchAShareStocksByCode(ctx context.Context, codes string
 			Low:           low,
 			Open:          openPrice,
 			PreviousClose: prevClose,
+			Source:        "tencent", Currency: "CNY", ProductType: "equity", ChangeBasis: "previous_close", QuoteTime: tencentQuoteTime(fields[30], "a_share"), QuoteSession: tencentQuoteSession(fields[30], "a_share"),
 		})
 	}
 	return stocks, nil
@@ -1389,6 +1269,7 @@ func (h *StockHandler) fetchTencentUSStocksBySymbol(ctx context.Context, symbols
 			Low:           low,
 			Open:          openPrice,
 			PreviousClose: previousClose,
+			Source:        "tencent", Currency: "USD", ProductType: "equity", ChangeBasis: "previous_close", QuoteTime: tencentQuoteTime(fields[30], "us_stock"), QuoteSession: tencentQuoteSession(fields[30], "us_stock"),
 		})
 	}
 	return stocks, nil
@@ -1446,56 +1327,43 @@ func (h *StockHandler) searchCryptoStocks(ctx context.Context, query string) ([]
 		}
 	}
 
-	return h.fetchBinanceCryptoStocks(ctx, binanceSymbols)
+	return h.fetchBitgetCryptoStocks(ctx, binanceSymbols)
 }
 
-// fetchBinanceCryptoStocks fetches crypto stock data from Binance 24hr ticker.
-func (h *StockHandler) fetchBinanceCryptoStocks(ctx context.Context, symbols []string) ([]StockResponse, error) {
-	tickers, err := h.fetchBinance24hrTickers(ctx, symbols)
-	if err != nil {
-		return nil, err
-	}
-
-	var stocks []StockResponse
-	for _, sym := range symbols {
-		t, ok := tickers[sym]
-		if !ok {
-			continue
+// fetchBitgetCryptoStocks reads public Bitget spot quotes.
+func (h *StockHandler) fetchBitgetCryptoStocks(ctx context.Context, symbols []string) ([]StockResponse, error) {
+	primaryCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	quotes, _ := h.bitget.CryptoQuotes(primaryCtx, symbols)
+	cancel()
+	rows := make([]StockResponse, 0, len(quotes))
+	for _, q := range quotes {
+		row := bitgetStock(q)
+		row.Symbol = q.Code + "/USDT"
+		if info, ok := cryptoSymbolMap[strings.ToLower(q.Code)]; ok {
+			row.Name = info.DisplayName
 		}
-
-		// Extract base symbol: BTCUSDT → BTC
-		base := strings.TrimSuffix(sym, "USDT")
-		displayName := base
-		// Look up display name from map
-		if info, ok := cryptoSymbolMap[strings.ToLower(base)]; ok {
-			displayName = info.DisplayName
-		}
-
-		price := parseFloat(t.LastPrice)
-		prevClose := parseFloat(t.PrevClosePrice)
-		change := parseFloat(t.PriceChange)
-		changePct := parseFloat(t.PriceChangePercent)
-		high := parseFloat(t.HighPrice)
-		low := parseFloat(t.LowPrice)
-		openPrice := parseFloat(t.OpenPrice)
-		vol := parseFloat(t.QuoteVolume) // USDT volume
-
-		stocks = append(stocks, StockResponse{
-			ID:            base,
-			Symbol:        base + "/USDT",
-			Name:          displayName,
-			Market:        "crypto",
-			CurrentPrice:  price,
-			Change:        change,
-			ChangePercent: changePct,
-			Volume:        vol / 1e8, // to 亿
-			High:          high,
-			Low:           low,
-			Open:          openPrice,
-			PreviousClose: prevClose,
-		})
+		rows = append(rows, row)
 	}
-	return stocks, nil
+	found := map[string]bool{}
+	for _, row := range rows {
+		found[row.ID] = true
+	}
+	var missing []string
+	for _, symbol := range symbols {
+		code := strings.TrimSuffix(strings.ReplaceAll(strings.ToUpper(symbol), "/", ""), "USDT")
+		if !found[code] {
+			missing = append(missing, code+"USDT")
+		}
+	}
+	if len(missing) == 0 {
+		return rows, nil
+	}
+	fallback, err := h.fetchBinanceCryptoStocks(ctx, missing)
+	rows = append(rows, fallback...)
+	if len(rows) > 0 {
+		return rows, nil
+	}
+	return rows, err
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1563,9 +1431,9 @@ func (h *StockHandler) GetWatchlist(c *gin.Context) {
 		for _, item := range items {
 			symbols = append(symbols, item.StockCode)
 		}
-		stocks, _ = h.fetchBitgetStocks(ctx, "hk_stock", symbols)
+		stocks, _ = h.fetchHKStocksByCode(ctx, symbols)
 	case "crypto":
-		// Collect base symbols and try cache first to avoid unnecessary Binance calls
+		// Collect base symbols and accept only Bitget cache entries.
 		type cryptoItem struct {
 			base string
 			name string
@@ -1593,7 +1461,7 @@ func (h *StockHandler) GetWatchlist(c *gin.Context) {
 		if h.cache != nil {
 			for _, ci := range allItems {
 				var cached StockResponse
-				if hit, _ := h.cache.GetJSON(ctx, cache.StockQuoteKey("crypto", ci.base), &cached); hit && cached.CurrentPrice > 0 {
+				if hit, _ := h.cache.GetJSON(ctx, cache.StockQuoteKey("crypto", ci.base), &cached); hit && cached.CurrentPrice > 0 && quoteCacheSourceAllowed(market, cached.Source) {
 					cachedStocks[ci.base] = cached
 				} else {
 					sym := ci.base
@@ -1613,13 +1481,13 @@ func (h *StockHandler) GetWatchlist(c *gin.Context) {
 			}
 		}
 
-		// Phase 2: Fetch only uncached symbols from Binance
+		// Phase 2: Fetch only uncached symbols from Bitget
 		var freshStocks []StockResponse
 		if len(uncachedSymbols) > 0 {
 			var fetchErr error
-			freshStocks, fetchErr = h.fetchBinanceCryptoStocks(ctx, uncachedSymbols)
+			freshStocks, fetchErr = h.fetchBitgetCryptoStocks(ctx, uncachedSymbols)
 			if fetchErr != nil {
-				h.logger.WithField("error", fetchErr).Warn("Binance API failed for crypto watchlist")
+				h.logger.WithField("error", fetchErr).Warn("Bitget API failed for crypto watchlist")
 			}
 			// Cache the fresh results
 			if h.cache != nil {
@@ -1799,7 +1667,7 @@ func (h *StockHandler) GetStockQuote(c *gin.Context) {
 	if h.cache != nil {
 		cacheKey := cache.StockQuoteKey(market, code)
 		var cached StockResponse
-		if hit, _ := h.cache.GetJSON(c.Request.Context(), cacheKey, &cached); hit && cached.ID != "" {
+		if hit, _ := h.cache.GetJSON(c.Request.Context(), cacheKey, &cached); hit && cached.ID != "" && (market == "a_share" || quoteCacheSourceAllowed(market, cached.Source)) {
 			c.JSON(http.StatusOK, cached)
 			return
 		}
@@ -1828,7 +1696,7 @@ func (h *StockHandler) GetStockQuote(c *gin.Context) {
 	case "us_stock":
 		stocks, err = h.fetchUSStocksBySymbol(ctx, code)
 	case "hk_stock":
-		stocks, err = h.fetchBitgetStocks(ctx, "hk_stock", []string{code})
+		stocks, err = h.fetchHKStocksByCode(ctx, []string{code})
 	case "crypto":
 		coinCode := strings.TrimSpace(code)
 		// Map index IDs to real symbols (e.g. "btc_price" → "BTC")
@@ -1839,10 +1707,14 @@ func (h *StockHandler) GetStockQuote(c *gin.Context) {
 		if !strings.HasSuffix(sym, "USDT") {
 			sym = sym + "USDT"
 		}
-		stocks, err = h.fetchBinanceCryptoStocks(ctx, []string{sym})
+		stocks, err = h.fetchBitgetCryptoStocks(ctx, []string{sym})
 	}
 
-	if err != nil || len(stocks) == 0 {
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "行情源暂不可用，请稍后重试"})
+		return
+	}
+	if len(stocks) == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "stock not found"})
 		return
 	}
@@ -2002,7 +1874,7 @@ func (h *StockHandler) GetKLineData(c *gin.Context) {
 		case "us_stock":
 			klines, err = h.fetchUSStockKLine(attemptCtx, code, period, limit)
 		case "hk_stock":
-			klines, err = h.fetchBitgetKLine(attemptCtx, "hk_stock", code, period, limit)
+			klines, err = h.fetchHKStockKLine(attemptCtx, code, period, limit)
 		case "crypto":
 			klines, err = h.fetchCryptoKLine(attemptCtx, code, period, limit)
 		}
@@ -2356,7 +2228,10 @@ func (h *StockHandler) fetchTencentKLine(ctx context.Context, tencentCode string
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
 		Data map[string]struct {
-			Day [][]interface{} `json:"day"`
+			Day     [][]interface{} `json:"day"`
+			QFQDay  [][]interface{} `json:"qfqday"`
+			Week    [][]interface{} `json:"week"`
+			QFQWeek [][]interface{} `json:"qfqweek"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &result); err != nil {
@@ -2364,12 +2239,22 @@ func (h *StockHandler) fetchTencentKLine(ctx context.Context, tencentCode string
 	}
 
 	stockData, ok := result.Data[tencentCode]
-	if !ok || len(stockData.Day) == 0 {
+	bars := stockData.Day
+	if len(bars) == 0 {
+		bars = stockData.QFQDay
+	}
+	if period == "1w" {
+		bars = stockData.Week
+		if len(bars) == 0 {
+			bars = stockData.QFQWeek
+		}
+	}
+	if !ok || len(bars) == 0 {
 		return nil, fmt.Errorf("no kline data for %s", tencentCode)
 	}
 
 	var klines []KLineResponse
-	for _, row := range stockData.Day {
+	for _, row := range bars {
 		if len(row) < 6 {
 			continue
 		}
@@ -2433,87 +2318,21 @@ func normalizeCryptoParams(code, name string) (string, string) {
 	return code, name
 }
 
-func (h *StockHandler) fetchCryptoKLine(ctx context.Context, coinID string, period string, limit int) ([]KLineResponse, error) {
-	rawID := strings.TrimSpace(coinID)
-
-	// Handle special IDs: fear_greed index has no K-line data
-	if strings.EqualFold(rawID, "fear_greed") {
-		return []KLineResponse{}, nil
+func (h *StockHandler) fetchCryptoKLine(ctx context.Context, coinID, period string, limit int) ([]KLineResponse, error) {
+	if mapped, ok := cryptoIndexToSymbol[strings.ToLower(coinID)]; ok {
+		coinID = mapped
 	}
-
-	// Map index IDs to real coin symbols (btc_price → BTC, eth_price → ETH)
-	if mapped, ok := cryptoIndexToSymbol[strings.ToLower(rawID)]; ok {
-		rawID = mapped
-	}
-
-	// Convert coinID to Binance symbol: "btc" or "BTC" → "BTCUSDT"
-	sym := strings.ToUpper(rawID)
-	if !strings.HasSuffix(sym, "USDT") {
-		sym = sym + "USDT"
-	}
-
-	if limit > 1000 {
-		limit = 1000 // Binance API max
-	}
-
-	// Map our unified period to Binance interval
-	interval := "1d"
-	if bi, ok := binanceIntervalMap[period]; ok {
-		interval = bi
-	}
-
-	apiURL := fmt.Sprintf(
-		"https://data-api.binance.vision/api/v3/klines?symbol=%s&interval=%s&limit=%d",
-		sym, interval, limit,
-	)
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	primaryCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	candles, err := h.bitget.CryptoCandles(primaryCtx, coinID, period, limit)
+	cancel()
 	if err != nil {
-		return nil, err
+		return h.fetchBinanceCryptoKLine(ctx, coinID, period, limit)
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0")
-
-	resp, err := h.httpClient.Do(req)
-	if err != nil {
-		return nil, err
+	rows := make([]KLineResponse, 0, len(candles))
+	for _, candle := range candles {
+		rows = append(rows, KLineResponse{Date: candleDate(candle.Time, period), Open: candle.Open, Close: candle.Close, High: candle.High, Low: candle.Low, Volume: candle.Volume, Source: "bitget"})
 	}
-	defer resp.Body.Close()
-
-	// Binance kline response: [[openTime, open, high, low, close, volume, closeTime, ...], ...]
-	var rawKlines [][]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&rawKlines); err != nil {
-		return nil, fmt.Errorf("failed to decode Binance kline: %w", err)
-	}
-
-	// Choose date format based on period — include time for intraday
-	dateFormat := "2006-01-02"
-	if period != "1d" && period != "1w" {
-		dateFormat = "2006-01-02 15:04"
-	}
-
-	var klines []KLineResponse
-	for _, k := range rawKlines {
-		if len(k) < 6 {
-			continue
-		}
-		openTime := int64(k[0].(float64))
-		t := time.Unix(openTime/1000, 0)
-
-		open, _ := k[1].(string)
-		high, _ := k[2].(string)
-		low, _ := k[3].(string)
-		closeP, _ := k[4].(string)
-		vol, _ := k[5].(string)
-
-		klines = append(klines, KLineResponse{
-			Date:   t.Format(dateFormat),
-			Open:   parseFloat(open),
-			Close:  parseFloat(closeP),
-			High:   parseFloat(high),
-			Low:    parseFloat(low),
-			Volume: parseFloat(vol),
-		})
-	}
-	return klines, nil
+	return rows, nil
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -4142,7 +3961,7 @@ func (h *StockHandler) fetchMultiTimeframeKLineSummary(code, market string, prod
 				case "us_stock":
 					klines, err = h.fetchUSStockKLine(ctx, code, period, limit)
 				case "hk_stock":
-					klines, err = h.fetchBitgetKLine(ctx, "hk_stock", code, period, limit)
+					klines, err = h.fetchHKStockKLine(ctx, code, period, limit)
 				case "crypto":
 					klines, err = h.fetchCryptoKLine(ctx, code, period, limit)
 				}

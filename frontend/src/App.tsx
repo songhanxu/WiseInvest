@@ -2,7 +2,11 @@ import { FormEvent, PointerEvent, useCallback, useEffect, useMemo, useRef, useSt
 import { WatchlistPanel } from "./WatchlistPanel";
 import { AccountsPanel } from "./AccountsPanel";
 import { ChatMarkdown } from "./ChatMarkdown";
+import { RoundtableIcon, RoundtableView } from "./RoundtableView";
+import { roundtableAgents, roundtableWelcome } from "./research";
+import { StockDeepResearch, StockNews } from "./StockDeepResearch";
 import { useDismissiblePopover } from "./useDismissiblePopover";
+import { mergeQuoteRows, quoteCurrency, quoteTimeLabel, quoteStatusLabel } from "./quote-presentation";
 import { createConversationDraft, hasUserMessage, readConversationHistory, serializeConversationHistory } from "./conversation-history";
 import type { Message, SavedConversation } from "./conversation-history";
 import type { LucideIcon } from "lucide-react";
@@ -70,6 +74,8 @@ type IndexQuote = {
   source?: string;
   currency?: string;
   product_type?: string;
+  quote_time?: string;
+  quote_session?: string;
 };
 
 export type StockQuote = {
@@ -91,9 +97,12 @@ export type StockQuote = {
   product_type?: string;
   change_basis?: string;
   quote_available?: boolean;
+  quote_stale?: boolean;
+  quote_time?: string;
+  quote_session?: string;
 };
 
-type KLinePoint = {
+export type KLinePoint = {
   date: string;
   open: number;
   close: number;
@@ -102,14 +111,14 @@ type KLinePoint = {
   volume: number;
 };
 
-type AnalysisResponse = {
+export type AnalysisResponse = {
   type: string;
   conclusion: "bullish" | "bearish" | "neutral" | string;
   summary: string;
   detail: string;
 };
 
-type NewsItem = {
+export type NewsItem = {
   id: string;
   title: string;
   source: string;
@@ -174,10 +183,10 @@ const markets: Market[] = [
     id: "hk_stock",
     displayName: "港 股",
     title: "港股 Agent",
-    subtitle: "Bitget Quanto · HKD 报价",
-    description: "跟踪港股的 Quanto 合约行情，结合公司财报与估值研究。",
-    scope: ["港股研究", "财报解读", "Quanto 合约", "估值比较"],
-    welcome: "你好！我是你的港股投资分析助手。可以帮你研究香港上市公司、公司财报与宏观风险。行情来自 Bitget Quanto 合约，按 HKD 报价，和港交所现货有差异。",
+    subtitle: "香港市场 · HKD 报价",
+    description: "跟踪港股行情，结合公司财报与估值研究。",
+    scope: ["港股研究", "财报解读", "行情跟踪", "估值比较"],
+    welcome: "你好！我是你的港股投资分析助手。可以帮你研究香港上市公司、公司财报与宏观风险。行情来自 Bitget，按接口返回的币种报价。",
     colors: ["#8B5CF6", "#C4B5FD"],
     icon: Building2,
     featured: ["00700", "01810", "00992"]
@@ -200,7 +209,7 @@ const markets: Market[] = [
 const promptDeck: Record<MarketId, string[]> = {
   a_share: ["帮我分析一下今天 A 股的主线和风险", "宁德时代现在更适合趋势还是波段？", "给我一个白酒板块的多空框架"],
   us_stock: ["复盘一下纳指走势和利率预期", "NVDA 当前估值是否透支？", "帮我比较 Apple 和 Microsoft 的防御性"],
-  hk_stock: ["腾讯控股的估值和增长前景如何？", "小米集团最新财报有哪些关键变化？", "港股 Quanto 合约与现货有什么差别？"],
+  hk_stock: ["腾讯控股的估值和增长前景如何？", "小米集团最新财报有哪些关键变化？", "港股当前有哪些值得关注的行业？"],
   crypto: ["BTC 现在的关键支撑和压力在哪里？", "ETH 和 SOL 谁的短线弹性更高？", "帮我做一份合约风险提示"]
 };
 
@@ -292,9 +301,18 @@ async function fetchKline(apiBase: string, marketId: MarketId, code: string, per
   );
 }
 
-async function fetchAnalysis(apiBase: string, stock: StockQuote, marketId: MarketId) {
+async function fetchAnalysis(apiBase: string, stock: StockQuote, marketId: MarketId, signal?: AbortSignal) {
+  // The cache-only endpoint has no product identity; avoid reusing a stock's
+  // analysis for a different Bitget trading product.
+  if (!stock.provider_symbol || stock.source !== "bitget") {
+    try {
+      const cached = await requestJson<{ cached: boolean; analysis?: AnalysisResponse }>(apiBase, `/api/v1/stocks/analysis/cached?${new URLSearchParams({ code: stock.id, market: marketId })}`, "", { signal });
+      if (cached.cached && cached.analysis?.detail) return cached.analysis;
+    } catch (err) { if (signal?.aborted) throw err; }
+  }
   return requestJson<AnalysisResponse>(apiBase, "/api/v1/stocks/analysis/enhance", "", {
     method: "POST",
+    signal,
     body: JSON.stringify({
       code: stock.id,
       provider_symbol: stock.source === "bitget" ? stock.provider_symbol : undefined,
@@ -307,12 +325,12 @@ async function fetchAnalysis(apiBase: string, stock: StockQuote, marketId: Marke
   });
 }
 
-async function fetchNews(apiBase: string, stock: StockQuote, marketId: MarketId) {
+async function fetchNews(apiBase: string, stock: StockQuote, marketId: MarketId, signal?: AbortSignal) {
   return requestJson<NewsItem[]>(
     apiBase,
     `/api/v1/stocks/news?market=${marketId}&code=${encodeURIComponent(stock.id)}&name=${encodeURIComponent(stock.name)}`,
     "",
-    { method: "GET" }
+    { method: "GET", signal }
   );
 }
 
@@ -381,80 +399,106 @@ async function streamMessage(
   }
 }
 
-function useMarketPulse(apiBase: string) {
-  const [indices, setIndices] = useState<Record<MarketId, IndexQuote[]>>({
-    a_share: [],
-    us_stock: [],
-    hk_stock: [],
-    crypto: []
-  });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+function useMarketPulse(apiBase: string, isActive: boolean) {
+  const emptyIndices = () => ({ a_share: [], us_stock: [], hk_stock: [], crypto: [] }) as Record<MarketId, IndexQuote[]>;
+  const [indices, setIndices] = useState(emptyIndices);
+  const [loadingByMarket, setLoadingByMarket] = useState<Record<MarketId, boolean>>({ a_share: true, us_stock: true, hk_stock: true, crypto: true });
+  const [errors, setErrors] = useState<Partial<Record<MarketId, string>>>({});
+  const activeRef = useRef(isActive); activeRef.current = isActive;
+  const requests = useRef(new Map<MarketId, AbortController>());
+  const scopeVersion = useRef(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    Promise.allSettled(markets.map((market) => fetchIndices(apiBase, market.id))).then((results) => {
-      if (cancelled) return;
-      const next = { a_share: [], us_stock: [], hk_stock: [], crypto: [] } as Record<MarketId, IndexQuote[]>;
-      results.forEach((result, index) => {
-        if (result.status === "fulfilled") next[markets[index].id] = result.value;
-      });
-      setIndices(next);
-      setLoading(false);
-      if (results.every((result) => result.status === "rejected")) {
-        setError("市场数据暂时不可用");
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
+  const refresh = useCallback(() => {
+    const version = scopeVersion.current;
+    for (const market of markets) {
+      if (requests.current.has(market.id)) continue;
+      const controller = new AbortController();
+      requests.current.set(market.id, controller);
+      const timeout = window.setTimeout(() => controller.abort(), 12000);
+      setLoadingByMarket(previous => ({ ...previous, [market.id]: true }));
+      void requestJson<IndexQuote[]>(apiBase, `/api/v1/stocks/indices?market=${market.id}`, "", { signal: controller.signal })
+        .then(rows => {
+          if (version !== scopeVersion.current) return;
+          if (!Array.isArray(rows) || !rows.length) throw new Error("该市场行情源暂不可用");
+          setIndices(previous => ({ ...previous, [market.id]: rows }));
+          setErrors(previous => ({ ...previous, [market.id]: "" }));
+        })
+        .catch(() => { if (version === scopeVersion.current) setErrors(previous => ({ ...previous, [market.id]: "行情暂不可用" })); })
+        .finally(() => {
+          window.clearTimeout(timeout);
+          if (version !== scopeVersion.current) return;
+          requests.current.delete(market.id);
+          setLoadingByMarket(previous => ({ ...previous, [market.id]: false }));
+        });
+    }
   }, [apiBase]);
 
-  return { indices, loading, error };
+  useEffect(() => {
+    setIndices(emptyIndices()); setErrors({});
+    setLoadingByMarket({ a_share: true, us_stock: true, hk_stock: true, crypto: true });
+    void refresh();
+    const timer = window.setInterval(() => { if (activeRef.current && !document.hidden) refresh(); }, 30000);
+    return () => {
+      scopeVersion.current++;
+      for (const controller of requests.current.values()) controller.abort();
+      requests.current.clear();
+      window.clearInterval(timer);
+    };
+  }, [refresh]);
+  useEffect(() => { if (isActive) refresh(); }, [isActive, refresh]);
+  const loading = Object.values(loadingByMarket).some(Boolean);
+  const error = Object.values(errors).some(Boolean) ? "部分市场行情暂不可用" : null;
+  return { indices, loading, loadingByMarket, errors, error };
 }
 
-function useMarketBoard(apiBase: string, token: string, market: Market) {
+function useMarketBoard(apiBase: string, token: string, market: Market, isActive = true) {
   const [watchlist, setWatchlist] = useState<StockQuote[]>([]);
   const [popular, setPopular] = useState<StockQuote[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const activeRef = useRef(isActive); activeRef.current = isActive;
+  const requestVersion = useRef(0);
+  const inFlight = useRef(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  const refresh = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    const version = ++requestVersion.current;
     setLoading(true);
     setError(null);
-
-    const watchlistPromise = token
-      ? fetchWatchlist(apiBase, token, market.id).catch((err) => {
-          setError(err instanceof Error ? err.message : "自选股加载失败");
-          return [] as StockQuote[];
-        })
-      : Promise.resolve([] as StockQuote[]);
-
-    Promise.all([watchlistPromise, searchStocks(apiBase, market.id, "")])
-      .then(([watchlistData, popularData]) => {
-        if (cancelled) return;
-        setWatchlist(watchlistData);
-        setPopular(popularData);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "市场数据加载失败");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    const [watchlistResult, popularResult] = await Promise.allSettled([
+      token ? fetchWatchlist(apiBase, token, market.id) : Promise.resolve([] as StockQuote[]),
+      searchStocks(apiBase, market.id, "")
+    ]);
+    if (version !== requestVersion.current) return;
+    // Refresh each source independently. A failed request must not erase cached rows.
+    if (watchlistResult.status === "fulfilled") setWatchlist(previous => mergeQuoteRows(previous, watchlistResult.value));
+    else setWatchlist(previous => previous.map(row => ({ ...row, quote_stale: true })));
+    if (popularResult.status === "fulfilled") setPopular(previous => mergeQuoteRows(previous, popularResult.value));
+    else setPopular(previous => previous.map(row => ({ ...row, quote_stale: true })));
+    if (watchlistResult.status === "fulfilled" || popularResult.status === "fulfilled") setHasLoaded(true);
+    const failures = [watchlistResult, popularResult].flatMap(result => result.status === "rejected" ? [result.reason instanceof Error ? result.reason.message : "市场数据加载失败"] : result.value.some(row => row.quote_available === false || !(row.current_price > 0)) ? ["部分标的行情暂不可用"] : []);
+    setError(failures.length ? [...new Set(failures)].join("；") : null);
+    inFlight.current = false;
+    setLoading(false);
   }, [apiBase, token, market.id]);
 
-  return { watchlist, popular, loading, error };
+  useEffect(() => {
+    setWatchlist([]); setPopular([]); setHasLoaded(false); setError(null);
+    if (activeRef.current) void refresh();
+    return () => {
+      requestVersion.current++; inFlight.current = false;
+    };
+  }, [refresh]);
+
+  useEffect(() => { if (isActive) void refresh(); }, [isActive, refresh]);
+  useEffect(() => {
+    const timer = window.setInterval(() => { if (activeRef.current && !document.hidden) void refresh(); }, 30000);
+    return () => window.clearInterval(timer);
+  }, [refresh]);
+
+  return { watchlist, popular, loading, hasLoaded, error };
 }
 
 function useStockDetail(apiBase: string, market: Market, stock: StockQuote | null, period: KLinePeriod) {
@@ -465,7 +509,11 @@ function useStockDetail(apiBase: string, market: Market, stock: StockQuote | nul
   const [loading, setLoading] = useState(false);
   const [loadingMoreKline, setLoadingMoreKline] = useState(false);
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState("");
+  const [analysisRevision, setAnalysisRevision] = useState(0);
   const [newsLoading, setNewsLoading] = useState(false);
+  const [newsError, setNewsError] = useState("");
+  const [newsRevision, setNewsRevision] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -495,35 +543,38 @@ function useStockDetail(apiBase: string, market: Market, stock: StockQuote | nul
   useEffect(() => {
     if (!stock) return;
     let cancelled = false;
+    const controller = new AbortController();
     setAnalysis(null);
-    setNews([]);
+    setAnalysisError("");
     setAnalysisLoading(true);
-    setNewsLoading(true);
 
-    fetchAnalysis(apiBase, stock, market.id)
+    fetchAnalysis(apiBase, stock, market.id, controller.signal)
       .then((result) => {
         if (!cancelled) setAnalysis(result);
       })
-      .catch(() => {
+      .catch((err) => {
         if (!cancelled) {
-          setAnalysis({
-            type: "comprehensive",
-            conclusion: "neutral",
-            summary: "AI 分析暂不可用",
-            detail: ""
-          });
+          setAnalysisError(err instanceof Error ? err.message : "AI 分析暂不可用");
         }
       })
       .finally(() => {
         if (!cancelled) setAnalysisLoading(false);
       });
 
-    fetchNews(apiBase, stock, market.id)
+    return () => { cancelled = true; controller.abort(); };
+  }, [apiBase, market.id, stock?.id, stock?.provider_symbol, stock?.product_type, analysisRevision]);
+
+  useEffect(() => {
+    if (!stock) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    setNews([]); setNewsLoading(true); setNewsError("");
+    fetchNews(apiBase, stock, market.id, controller.signal)
       .then((result) => {
         if (!cancelled) setNews(result);
       })
-      .catch(() => {
-        if (!cancelled) setNews([]);
+      .catch((err) => {
+        if (!cancelled) { setNews([]); setNewsError(err instanceof Error ? err.message : "资讯加载失败"); }
       })
       .finally(() => {
         if (!cancelled) setNewsLoading(false);
@@ -531,8 +582,9 @@ function useStockDetail(apiBase: string, market: Market, stock: StockQuote | nul
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [apiBase, market.id, stock?.id, stock?.provider_symbol, stock?.product_type]);
+  }, [apiBase, market.id, stock?.id, stock?.provider_symbol, stock?.product_type, newsRevision]);
 
   const loadMoreKline = useCallback(() => {
     if (!stock || loadingMoreKline) return;
@@ -545,7 +597,7 @@ function useStockDetail(apiBase: string, market: Market, stock: StockQuote | nul
       .finally(() => setLoadingMoreKline(false));
   }, [apiBase, kline.length, loadingMoreKline, market.id, period, stock]);
 
-  return { quote, kline, analysis, news, loading, loadingMoreKline, analysisLoading, newsLoading, error, loadMoreKline };
+  return { quote, kline, analysis, analysisError, reloadAnalysis: () => setAnalysisRevision(value => value + 1), news, newsError, reloadNews: () => setNewsRevision(value => value + 1), loading, loadingMoreKline, analysisLoading, newsLoading, error, loadMoreKline };
 }
 
 function usePreventPageZoom() {
@@ -584,9 +636,11 @@ function usePreventPageZoom() {
 
 export function App() {
   const [view, setView] = useState<View>("home");
+  const [watchlistVisited, setWatchlistVisited] = useState(false);
   const [apiBase, setApiBase] = useState(() => localStorage.getItem(storage.apiBase) || DEFAULT_API_BASE);
   const [token, setToken] = useState(() => localStorage.getItem(storage.token) || "");
   const [conversations, setConversations] = useState<SavedConversation[]>(getSavedConversations);
+  const lastSavedHistory = useRef(serializeConversationHistory(conversations));
   const [conversationDraft, setConversationDraft] = useState<SavedConversation | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeMarketId, setActiveMarketId] = useState<MarketId>("a_share");
@@ -594,7 +648,7 @@ export function App() {
   const [stockReturnView, setStockReturnView] = useState<"market" | "watchlist" | "accounts">("market");
   const [draftPrompt, setDraftPrompt] = useState("");
   const [isOnline, setIsOnline] = useState<boolean | null>(null);
-  const marketPulse = useMarketPulse(apiBase);
+  const marketPulse = useMarketPulse(apiBase, view === "home" || view === "market");
 
   const activeConversation = conversations.find((item) => item.id === activeId)
     ?? (conversationDraft?.id === activeId ? conversationDraft : undefined);
@@ -606,6 +660,7 @@ export function App() {
   usePreventPageZoom();
 
   useEffect(() => { window.scrollTo(0, 0); }, [view, activeStock?.id, activeStock?.provider_symbol]);
+  useEffect(() => { if (view === "watchlist") setWatchlistVisited(true); }, [view]);
 
   useEffect(() => {
     localStorage.setItem(storage.apiBase, apiBase);
@@ -616,8 +671,23 @@ export function App() {
   }, [token]);
 
   useEffect(() => {
-    saveConversations(conversations);
+    const serialized = serializeConversationHistory(conversations);
+    if (serialized !== lastSavedHistory.current) {
+      lastSavedHistory.current = serialized;
+      saveConversations(conversations);
+    }
   }, [conversations]);
+
+  useEffect(() => {
+    const syncHistory = (event: StorageEvent) => {
+      if (event.key !== storage.conversations || event.storageArea !== localStorage) return;
+      const next = readConversationHistory(event.newValue);
+      lastSavedHistory.current = serializeConversationHistory(next);
+      setConversations(next);
+    };
+    window.addEventListener("storage", syncHistory);
+    return () => window.removeEventListener("storage", syncHistory);
+  }, []);
 
   useEffect(() => {
     healthCheck(apiBase).then(setIsOnline);
@@ -637,14 +707,25 @@ export function App() {
   };
 
   const openAgentChat = (market: Market, seed?: string) => {
-    const existing = conversations.find((item) => item.marketId === market.id);
+    const existing = conversations.find((item) => !item.kind && item.marketId === market.id);
     const conversation = existing
-      ?? (conversationDraft?.marketId === market.id ? conversationDraft : createConversationDraft(market, uid));
+      ?? (!conversationDraft?.kind && conversationDraft?.marketId === market.id ? conversationDraft : createConversationDraft(market, uid));
     if (!existing) setConversationDraft(conversation);
     if (seed !== undefined || activeId !== conversation.id) setDraftPrompt(seed ?? "");
     setActiveId(conversation.id);
     setActiveMarketId(market.id);
     setView("chat");
+  };
+
+  const openRoundtable = (seed?: string) => {
+    const existing = conversations.find(item => item.kind === "roundtable");
+    const conversation: SavedConversation = existing ?? (conversationDraft?.kind === "roundtable" ? conversationDraft : {
+      id: uid(), marketId: "a_share", kind: "roundtable", title: "", updatedAt: new Date().toISOString(),
+      messages: [{ id: uid(), role: "assistant", content: roundtableWelcome }]
+    });
+    if (!existing) setConversationDraft(conversation);
+    if (seed !== undefined || activeId !== conversation.id) setDraftPrompt(seed ?? "");
+    setActiveId(conversation.id); setView("chat");
   };
 
   const updateConversation = (next: SavedConversation) => {
@@ -714,8 +795,10 @@ export function App() {
           onOpenStock={openStock}
         />
 
-        {view === "home" && (
+        <div hidden={view !== "home"}>
           <HomePanel
+            key={`${apiBase}:${token}`}
+            isActive={view === "home"}
             apiBase={apiBase}
             token={token}
             conversations={conversations}
@@ -729,15 +812,15 @@ export function App() {
             }}
             onNeedToken={() => setView("profile")}
           />
-        )}
+        </div>
 
         {view === "accounts" && (
           <AccountsPanel apiBase={apiBase} token={token} markets={markets} onOpenStock={(market, stock) => openStock(market, stock, "accounts")} onNeedToken={() => setView("profile")} />
         )}
 
-        {view === "watchlist" && (
-          <WatchlistPanel apiBase={apiBase} token={token} markets={markets} onOpenStock={(market, stock) => openStock(market, stock, "watchlist")} onNeedToken={() => setView("profile")} />
-        )}
+        {(watchlistVisited || view === "watchlist") && <div hidden={view !== "watchlist"}>
+          <WatchlistPanel key={`${apiBase}:${token}`} isActive={view === "watchlist"} apiBase={apiBase} token={token} markets={markets} onOpenStock={(market, stock) => openStock(market, stock, "watchlist")} onNeedToken={() => setView("profile")} />
+        </div>}
 
         {view === "market" && (
           <MarketPanel
@@ -745,7 +828,7 @@ export function App() {
             token={token}
             market={activeMarket}
             quotes={marketPulse.indices[activeMarket.id]}
-            indicesLoading={marketPulse.loading}
+            indicesLoading={marketPulse.loadingByMarket[activeMarket.id]}
             onBack={() => setView("home")}
             onOpenStock={(stock) => openStock(activeMarket, stock)}
             onOpenAgent={() => openAgentChat(activeMarket)}
@@ -761,6 +844,7 @@ export function App() {
             stock={activeStock}
             onBack={() => setView(stockReturnView)}
             onAskAI={(seed) => openAgentChat(activeMarket, seed)}
+            onAskRoundtable={openRoundtable}
           />
         )}
 
@@ -779,6 +863,7 @@ export function App() {
             }}
             onDraftPromptChange={setDraftPrompt}
             onOpenMarket={openAgentChat}
+            onOpenRoundtable={openRoundtable}
             onDelete={deleteConversation}
             onUpdate={updateConversation}
             onNeedToken={() => setView("profile")}
@@ -937,6 +1022,7 @@ function TopBar({
 function HomePanel({
   apiBase,
   token,
+  isActive,
   conversations,
   marketPulse,
   onOpenMarket,
@@ -946,6 +1032,7 @@ function HomePanel({
 }: {
   apiBase: string;
   token: string;
+  isActive: boolean;
   conversations: SavedConversation[];
   marketPulse: ReturnType<typeof useMarketPulse>;
   onOpenMarket: (market: Market) => void;
@@ -981,14 +1068,15 @@ function HomePanel({
 
       <div className="dashboard-grid">
         <div className="main-column">
-          <SectionHeader title="全球市场" subtitle="主要指数与市场动态" />
+          <SectionHeader title="全球市场" subtitle="各市场代表标的与最新行情" />
           <div className="market-matrix">
             {markets.map((market) => (
               <MarketDeskCard
                 key={market.id}
                 market={market}
                 quotes={marketPulse.indices[market.id]}
-                loading={marketPulse.loading}
+                loading={marketPulse.loadingByMarket[market.id]}
+                error={marketPulse.errors[market.id]}
                 onClick={() => onOpenMarket(market)}
               />
             ))}
@@ -1006,6 +1094,7 @@ function HomePanel({
             {markets.map((market) => (
               <WatchlistPreview
                 key={market.id}
+                isActive={isActive}
                 apiBase={apiBase}
                 token={token}
                 market={market}
@@ -1102,7 +1191,7 @@ function MarketPanel({
 
       <div className="market-board-grid">
         <div className="main-column">
-          <SectionHeader title={market.id === "hk_stock" ? "港股合约行情" : "大盘走势"} subtitle={market.id === "hk_stock" ? "Bitget Quanto · HKD 报价 · 24h 涨跌" : "点击指数查看走势与 AI 分析"} />
+          <SectionHeader title={market.id === "a_share" ? "大盘走势" : "市场行情"} subtitle={market.id === "a_share" ? "点击指数查看走势与 AI 分析" : "Bitget · 点击标的查看走势与 AI 分析"} />
           <div className="index-grid">
             {indicesLoading ? (
               [0, 1, 2].map((item) => (
@@ -1137,7 +1226,7 @@ function MarketPanel({
           <StockTable
             title={token ? "我的自选" : "自选股待登录"}
             stocks={board.watchlist}
-            loading={board.loading && Boolean(token)}
+            loading={board.loading && !board.hasLoaded && Boolean(token)}
             emptyText={token ? "当前市场暂无自选股，可以先从热门观察进入分析。" : "登录后这里会显示你的自选股。"}
             onOpenStock={onOpenStock}
           />
@@ -1146,7 +1235,7 @@ function MarketPanel({
           <StockTable
             title="热门标的"
             stocks={board.popular}
-            loading={board.loading}
+            loading={board.loading && !board.hasLoaded}
             emptyText="热门标的暂不可用"
             onOpenStock={onOpenStock}
           />
@@ -1225,7 +1314,8 @@ function StockDetailPanel({
   market,
   stock,
   onBack,
-  onAskAI
+  onAskAI,
+  onAskRoundtable
 }: {
   apiBase: string;
   token: string;
@@ -1233,6 +1323,7 @@ function StockDetailPanel({
   stock: StockQuote;
   onBack: () => void;
   onAskAI: (seed: string) => void;
+  onAskRoundtable: (seed?: string) => void;
 }) {
   const availablePeriods = useMemo(() => availableKLinePeriods(market.id), [market.id]);
   const [selectedPeriod, setSelectedPeriod] = useState<KLinePeriod>("1d");
@@ -1242,7 +1333,6 @@ function StockDetailPanel({
 
   const detail = useStockDetail(apiBase, market, stock, selectedPeriod);
   const display = detail.quote ?? stock;
-  const analysisTone = detail.analysis?.conclusion === "bullish" ? "green" : detail.analysis?.conclusion === "bearish" ? "red" : "blue";
 
   return (
     <section className="workspace stock-workspace">
@@ -1251,7 +1341,7 @@ function StockDetailPanel({
         <div>
           <p className="eyebrow">Stock Analysis</p>
           <h2>{display.name}</h2>
-          <p>{display.symbol} · {market.displayName} · {display.currency || (market.id === "a_share" ? "CNY" : "USD")} · {display.source === "bitget" ? (display.product_type === "quanto_perpetual" ? "Bitget Quanto 合约" : display.product_type === "stock_perpetual" ? "Bitget 股票永续" : "Bitget 股票代币") : "股票行情"}{display.change_basis === "24h" ? " · 24h 涨跌" : ""}</p>
+          <p>{display.symbol} · {market.displayName} · {display.currency || (market.id === "a_share" ? "CNY" : "USD")} · {quoteStatusLabel(display)}{display.change_basis === "24h" ? " · 24h 涨跌" : ""}</p>
         </div>
         <button
           className="primary-action"
@@ -1309,45 +1399,8 @@ function StockDetailPanel({
             )}
           </section>
 
-          <section className="surface-card">
-            <SectionHeader title="AI智能分析" subtitle="技术面、风险边界和操作摘要" compact />
-            {detail.analysisLoading ? (
-              <div className="skeleton-lines"><span /><span /><span /></div>
-            ) : detail.analysis ? (
-              <div className="analysis-block">
-                <Badge tone={analysisTone}>{analysisLabel(detail.analysis.conclusion)}</Badge>
-                <h3>{detail.analysis.summary}</h3>
-                <p>{detail.analysis.detail || "暂无详细分析，稍后可重新生成。"}</p>
-              </div>
-            ) : (
-              <div className="empty-state">AI 分析暂不可用</div>
-            )}
-          </section>
-
-          <section className="surface-card">
-            <SectionHeader title="相关资讯" subtitle="围绕当前标的的新闻与事件线索" compact />
-            {detail.newsLoading ? (
-              <div className="skeleton-lines"><span /><span /><span /></div>
-            ) : detail.news.length > 0 ? (
-              <div className="news-list">
-                {detail.news.slice(0, 6).map((news) => (
-                  <a key={news.id} href={news.url || "#"} target="_blank" rel="noreferrer" className="news-card">
-                    <div>
-                      <Badge tone={news.sentiment === "positive" ? "green" : news.sentiment === "negative" ? "red" : "muted"}>
-                        {news.sentiment === "positive" ? "利好" : news.sentiment === "negative" ? "利空" : "中性"}
-                      </Badge>
-                      <span>{news.source || "资讯"}</span>
-                    </div>
-                    <h3>{news.title}</h3>
-                    <p>{news.summary || news.analysis || "暂无摘要"}</p>
-                    <small>{news.time}</small>
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <div className="empty-state">暂无相关资讯</div>
-            )}
-          </section>
+          <StockDeepResearch key={`${apiBase}:${market.id}:${stock.id}:${stock.provider_symbol || ""}`} stock={display} period={kLinePeriodLabels[selectedPeriod]} candles={detail.kline} loading={detail.loading} analysis={detail.analysis} analysisLoading={detail.analysisLoading} error={detail.analysisError} onReload={detail.reloadAnalysis} onAskAI={onAskAI} onAskRoundtable={onAskRoundtable} />
+          <StockNews key={`${apiBase}:${market.id}:${stock.id}`} apiBase={apiBase} stock={display} market={market.id} news={detail.news} loading={detail.newsLoading} error={detail.newsError} onReload={detail.reloadNews} onAskAI={onAskAI} />
         </div>
 
         <aside className="insight-column">
@@ -1433,6 +1486,7 @@ function ChatPanel({
   onSelect,
   onDraftPromptChange,
   onOpenMarket,
+  onOpenRoundtable,
   onDelete,
   onUpdate,
   onNeedToken
@@ -1447,6 +1501,7 @@ function ChatPanel({
   onSelect: (id: string) => void;
   onDraftPromptChange: (value: string) => void;
   onOpenMarket: (market: Market, seed?: string) => void;
+  onOpenRoundtable: (seed?: string) => void;
   onDelete: (id: string) => void;
   onUpdate: (conversation: SavedConversation) => void;
   onNeedToken: () => void;
@@ -1456,7 +1511,7 @@ function ChatPanel({
       <aside className="conversation-rail">
         <div className="rail-section">
           <div className="rail-heading">Agent</div>
-          <button className="roundtable">
+          <button className={`roundtable ${activeConversation?.kind === "roundtable" ? "selected" : ""}`} onClick={() => onOpenRoundtable()}>
             <div className="roundtable-grid">
               <Bot size={14} />
               <BarChart3 size={14} />
@@ -1470,7 +1525,7 @@ function ChatPanel({
           </button>
           {markets.map((item) => (
             <button
-              className={`agent-row ${market.id === item.id ? "selected" : ""}`}
+              className={`agent-row ${!activeConversation?.kind && market.id === item.id ? "selected" : ""}`}
               key={item.id}
               onClick={() => onOpenMarket(item)}
             >
@@ -1497,7 +1552,7 @@ function ChatPanel({
                   key={conversation.id}
                   onClick={() => onSelect(conversation.id)}
                 >
-                  <MarketIcon market={itemMarket} mini />
+                  {conversation.kind === "roundtable" ? <RoundtableIcon mini /> : <MarketIcon market={itemMarket} mini />}
                   <div>
                     <strong>{conversation.title}</strong>
                     <span>{formatTime(conversation.updatedAt)}</span>
@@ -1518,7 +1573,7 @@ function ChatPanel({
 
       <div className="chat-main">
         {activeConversation ? (
-          <ConversationView
+          activeConversation.kind === "roundtable" ? <RoundtableView key={activeConversation.id} apiBase={apiBase} token={token} conversation={activeConversation} draftPrompt={draftPrompt} onDraftPromptChange={onDraftPromptChange} onUpdate={onUpdate} onNeedToken={onNeedToken} /> : <ConversationView
             key={activeConversation.id}
             apiBase={apiBase}
             token={token}
@@ -1539,7 +1594,10 @@ function ChatPanel({
       </div>
 
       <aside className="context-panel">
-        <MarketContext market={market} quotes={marketPulse.indices[market.id]} loading={marketPulse.loading} />
+        {activeConversation?.kind === "roundtable" ? <>
+          <section className="surface-card roundtable-role-list"><SectionHeader title="圆桌成员" subtitle="不同视角，交叉验证" compact />{roundtableAgents.map(agent => <div key={agent.id}><span>{agent.mark}</span><div><strong>{agent.name}</strong><p>{agent.role}</p></div></div>)}</section>
+          <section className="surface-card"><SectionHeader title="开始讨论" subtitle="点击填入问题" compact /><div className="prompt-stack">{["从价值、趋势与风险三个角度，讨论我关注的公司", "@价值派 如何判断公司的估值是否合理？", "@主持人 投资观点出现分歧时，应该重点核验什么？"].map(prompt => <button key={prompt} onClick={() => onOpenRoundtable(prompt)}><Zap size={15} /><span>{prompt}</span></button>)}</div></section>
+        </> : <><MarketContext market={market} quotes={marketPulse.indices[market.id]} loading={marketPulse.loadingByMarket[market.id]} />
         <section className="surface-card">
           <SectionHeader title="推荐问题" subtitle="直接填入输入框" compact />
           <div className="prompt-stack">
@@ -1559,6 +1617,7 @@ function ChatPanel({
             ))}
           </div>
         </section>
+        </>}
       </aside>
     </section>
   );
@@ -1796,11 +1855,13 @@ function MarketDeskCard({
   market,
   quotes,
   loading,
+  error,
   onClick
 }: {
   market: Market;
   quotes: IndexQuote[];
   loading: boolean;
+  error?: string;
   onClick: () => void;
 }) {
   const main = quotes[0];
@@ -1816,11 +1877,10 @@ function MarketDeskCard({
         <ChevronRight size={19} />
       </div>
 
-      {loading ? (
-        <div className="skeleton-lines">
-          <span />
-          <span />
-          <span />
+      {loading && !main ? (
+        <div className="market-quote-skeleton" role="status" aria-label="正在加载市场行情">
+          <div className="quote-strip" aria-hidden="true"><div><span className="skeleton-block market-name-skeleton" /><strong><span className="skeleton-block market-value-skeleton" /></strong></div><span className="skeleton-block market-change-skeleton" /></div>
+          <div className="skeleton-block market-chart-skeleton" aria-hidden="true" />
         </div>
       ) : main ? (
         <>
@@ -1832,6 +1892,7 @@ function MarketDeskCard({
             <ChangePill value={main.change_percent} />
           </div>
           <Sparkline values={main.sparkline_data ?? []} positive={main.change_percent >= 0} />
+          {(main.source || error) && <small className="market-quote-note">{quoteStatusLabel({ ...main, market: market.id })}{error ? " · 更新暂不可用，保留上次行情" : ""}</small>}
         </>
       ) : (
         <div className="quote-empty">行情暂不可用，可继续查看市场。</div>
@@ -1849,41 +1910,50 @@ function MarketDeskCard({
 function WatchlistPreview({
   apiBase,
   token,
+  isActive,
   market,
   onOpenMarket,
   onOpenStock
 }: {
   apiBase: string;
   token: string;
+  isActive: boolean;
   market: Market;
   onOpenMarket: (market: Market) => void;
   onOpenStock: (stock: StockQuote) => void;
 }) {
-  const board = useMarketBoard(apiBase, token, market);
+  const board = useMarketBoard(apiBase, token, market, isActive);
+  const initialLoading = board.loading && !board.hasLoaded;
   const rows = board.watchlist.length > 0 ? board.watchlist : board.popular.slice(0, 4);
   const isRealWatchlist = board.watchlist.length > 0;
 
   return (
-    <section className="watch-panel">
+    <section className="watch-panel" aria-label={`${market.displayName}自选预览`} aria-busy={board.loading}>
       <div className="watch-title">
         <MarketIcon market={market} mini />
         <div>
           <strong>{market.displayName}</strong>
-          <span>{isRealWatchlist ? "我的自选" : "热门观察"}</span>
+          <span>{initialLoading ? <span className="skeleton-block watch-subtitle-skeleton" aria-hidden="true" /> : isRealWatchlist ? "我的自选" : "热门观察"}</span>
         </div>
+        {board.loading && !initialLoading && <Loader2 className="spin watch-refresh-indicator" size={12} aria-label="正在更新行情" />}
       </div>
-      {board.loading ? (
-        <div className="skeleton-lines"><span /><span /><span /></div>
+      {initialLoading ? (
+        <div role="status" aria-label="正在加载自选行情">
+          {Array.from({ length: 4 }, (_, index) => <div className="watch-preview-row watch-preview-skeleton" aria-hidden="true" key={index}><span className="skeleton-block watch-symbol-skeleton" /><span className="watch-price"><span className="skeleton-block watch-price-skeleton" /></span><span className="skeleton-block watch-change-skeleton" /><span className="watch-quote-meta"><span className="skeleton-block watch-meta-skeleton" /></span></div>)}
+        </div>
       ) : rows.length > 0 ? (
         rows.map((stock) => (
-          <button key={`${market.id}-${stock.id}`} onClick={() => onOpenStock(stock)}>
+          <button className="watch-preview-row" key={`${market.id}-${stock.id}`} onClick={() => onOpenStock(stock)}>
             <span className="watch-symbol">{watchDisplayName(market, stock)}</span>
-            <ChangePill value={stock.change_percent} small />
+            <span className="watch-price"><strong>{stock.quote_available === false || stock.current_price <= 0 ? "—" : formatNumber(stock.current_price)}</strong><small>{quoteCurrency(stock)}</small></span>
+            {stock.quote_available === false || stock.current_price <= 0 ? <span className="watch-change-empty">—</span> : <ChangePill value={stock.change_percent} small />}
+            <span className="watch-quote-meta" title={quoteTimeLabel(stock)}>{quoteStatusLabel(stock)}</span>
           </button>
         ))
       ) : (
         <div className="empty-state compact">暂无自选</div>
       )}
+      {board.error && <p className="watch-preview-error" role="status" title={board.error}>{rows.length ? "更新暂不可用，保留上次行情" : "行情暂不可用，请稍后重试"}</p>}
       <button className="watch-more" onClick={() => onOpenMarket(market)}>
         <span>查看全部</span>
         <small>进入板块</small>
@@ -1958,7 +2028,7 @@ function RecentList({
         const market = markets.find((item) => item.id === conversation.marketId) ?? markets[0];
         return (
           <button key={conversation.id} onClick={() => onOpenConversation(conversation.id)}>
-            <MarketIcon market={market} mini />
+            {conversation.kind === "roundtable" ? <RoundtableIcon mini /> : <MarketIcon market={market} mini />}
             <div>
               <strong>{conversation.title}</strong>
               <span>{formatTime(conversation.updatedAt)}</span>
@@ -2075,7 +2145,8 @@ function StatusLine({ label, ok, pending = false }: { label: string; ok: boolean
 
 function Sparkline({ values, positive }: { values: number[]; positive: boolean }) {
   const points = useMemo(() => {
-    const data = values.length > 1 ? values : [30, 34, 31, 38, 36, 42, 44];
+    const data = values.filter(Number.isFinite);
+    if (data.length < 2) return "";
     const min = Math.min(...data);
     const max = Math.max(...data);
     const spread = max - min || 1;
@@ -2088,6 +2159,7 @@ function Sparkline({ values, positive }: { values: number[]; positive: boolean }
       .join(" ");
   }, [values]);
 
+  if (!points) return <div className="sparkline-empty">暂无走势数据</div>;
   return (
     <svg className={`sparkline ${positive ? "positive" : "negative"}`} viewBox="0 0 100 42" preserveAspectRatio="none">
       <polyline points={points} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />

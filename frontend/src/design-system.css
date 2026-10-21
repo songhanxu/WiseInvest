@@ -56,7 +56,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .metric strong { color: var(--text); font-size: 24px; font-weight: 500; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
 .metric small { max-width: 120px; font-size: 9px; line-height: 1.5; }
 .dashboard-grid { margin-top: 0; gap: 28px; grid-template-columns: minmax(0, 1fr) 272px; }
-.main-column, .insight-column { gap: 20px; }
+.main-column, .insight-column { gap: 20px; min-width:0; }
+.main-column > *, .insight-column > * { min-width:0; }
 .section-header { margin: 0; align-items: center; }
 .section-header h3 { font-size: 16px; font-weight: 600; letter-spacing: -.02em; }
 .section-header p { font-size: 11px; margin-top: 6px; }
@@ -75,6 +76,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .quote-strip strong { font-size: 29px; font-weight: 500; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
 .quote-strip span { font-size: 11px; }
 .sparkline { height: 48px; }
+.sparkline-empty { height:48px; display:flex; align-items:center; justify-content:center; color:var(--faint); font-size:10px; }
+.market-quote-skeleton { display:grid; gap:14px; }
+.market-name-skeleton { width:46px; height:11px; }
+.market-value-skeleton { width:132px; height:35px; }
+.market-change-skeleton { width:58px; height:22px; }
+.market-chart-skeleton { width:100%; height:48px; opacity:.55; }
+.market-quote-note { color:var(--faint); font-size:9px; font-weight:400; }
 .capability-list { display: none; }
 .quote-empty, .rail-empty, .empty-state { border: 0; background: #fafbf9; color: var(--faint); font-size: 12px; padding: 32px 18px; line-height: 1.8; }
 .decision-card { padding: 22px; gap: 20px; }
@@ -86,7 +94,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .decision-steps { gap: 12px; }
 .prompt-stack button { padding: 12px; border-radius: 8px; border: 1px solid transparent; font-size: 12px; }
 .watch-panel { padding: 18px; }
-.watch-panel .watch-more { background: transparent; border: 0; color: var(--muted); font-size: 11px; }
+.watch-panel .watch-more { padding-inline:0; background: transparent; border: 0; color: var(--muted); font-size: 11px; }
+.watch-panel .watch-preview-row { display:grid; grid-template-columns:minmax(0,1fr) 96px 68px; align-items:center; gap:6px 8px; min-height:64px; padding:12px 0; border:0; border-bottom:1px solid #eef1eb; border-radius:0; text-align:left; }
+.watch-panel .watch-preview-row .watch-symbol { min-width:0; text-align:left; font-size:12px; font-weight:550; }
+.watch-preview-row > .change-pill, .watch-preview-row > .watch-change-empty, .watch-preview-row > .watch-change-skeleton { justify-self:end; }
+.watch-preview-row > .change-pill { justify-content:center; min-width:62px; }
+.watch-quote-meta { grid-column:1 / -1; min-width:0; text-align:left; color:var(--faint); font-size:10px; line-height:15px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.watch-meta-skeleton { width:132px; height:10px; margin-block:2.5px; }
+.watch-panel .watch-preview-row small { display:block; font-size:9px; line-height:14px; font-weight:400; color:var(--faint); }
+.watch-price { display:flex; justify-content:flex-end; align-items:baseline; gap:4px; text-align:right; font-variant-numeric:tabular-nums; }
+.watch-price strong { font-size:12px; font-weight:500; line-height:18px; white-space:nowrap; }
+.watch-change-empty { width:56px; text-align:right; color:var(--faint); }
+.watch-price-skeleton { width:54px; height:13px; }
+.watch-currency-skeleton { width:28px; height:10px; margin:2px 0 2px auto; }
+.watch-refresh-indicator { margin-left:auto; color:var(--faint); }
+.watch-preview-error { margin:8px 10px; color:var(--muted); font-size:10px; line-height:1.6; }
+.skeleton-block { display:block; flex:none; height:12px; max-width:100%; border-radius:4px; background:linear-gradient(90deg,#eff2ed,#e4e9e1,#eff2ed); background-size:200% 100%; animation:shimmer 1.2s ease-in-out infinite; }
+.watch-subtitle-skeleton { width:48px; height:12px; margin-block:3px; }
+.watch-symbol-skeleton { width:60px; }
+.watch-change-skeleton { width:56px; height:20px; }
 .badge, .change-pill { border-radius: 4px; font-size: 10px; font-weight: 500; }
 .badge.blue { color: var(--blue); background: var(--accent-soft); }
 .badge.green, .change-pill.positive { color: var(--green); background: #eff6ef; }
@@ -168,9 +194,27 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .unified-watchlist-table tbody tr > td:last-child { border-radius: 0 6px 6px 0; }
 .unified-watchlist-table th:not(:first-child), .unified-watchlist-table td:not(:first-child) { text-align:center; }
 .unified-watchlist-table td { font-variant-numeric: tabular-nums; }
+.unified-watchlist-table tbody tr:not(.research-expanded-row) > td { height:68px; }
+.research-count-skeleton { width:50px; }
+.watch-count-skeleton { width:8px; height:10px; }
+.research-skeleton-row .skeleton-block { margin-inline:auto; }
+.research-skeleton-line { display:flex; align-items:center; justify-content:center; height:20px; }
+.research-skeleton-row small { display:flex; align-items:center; justify-content:center; height:15px; }
+.skeleton-symbol { width:66px; height:13px; }
+.skeleton-value { width:56px; height:13px; }
+.skeleton-currency { width:30px; height:10px; }
+.skeleton-target { width:112px; height:30px; border-radius:6px; }
+.skeleton-metric { width:32px; }
+.skeleton-date { width:72px; }
+.skeleton-action { width:13px; height:15px; }
 .unified-watchlist-table tbody tr:not(.research-expanded-row):hover > td { background: #eff4e9; }
 .unified-watchlist-table td:first-child { min-width:0; max-width:none; }
 .unified-watchlist-table small { margin:6px auto 0; color:var(--faint); font-size:10px; line-height:1.5; }
+.unified-watchlist-table .quote-source-label, .unified-watchlist-table .quote-time-label { font-size:9px; }
+.quote-amount { white-space:nowrap; }
+.quote-currency { margin-left:4px; font-size:9px; font-weight:400; color:var(--faint); }
+.unified-watchlist-table .quote-source-label { max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.unified-watchlist-table .quote-time-label { margin-top:3px; }
 .research-name-line { position:relative; display:flex; align-items:center; justify-content:center; width:fit-content; max-width:calc(100% - 22px); margin-inline:auto; }
 .watchlist-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:center; font-size:13px; font-weight:550; line-height:1.5; }
 .source-toggle { position:absolute; top:-5px; left:100%; display:flex; align-items:center; justify-content:center; width:18px; height:18px; padding:0; border:0; color:#a1ac99; background:transparent; cursor:pointer; }
@@ -244,7 +288,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-card p { font-size: 12px; line-height: 1.8; }
 @media (min-width: 1101px) {
   .home-workspace .dashboard-grid { grid-template-columns: minmax(0,1fr) 260px; }
-  .insight-column { grid-template-columns: 1fr; }
+  .insight-column { grid-template-columns: minmax(0,1fr); }
 }
 @media (max-width: 1200px) and (min-width: 921px) {
   .app-shell { grid-template-columns: 184px minmax(0,1fr); }
@@ -312,6 +356,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .unified-watchlist-table tr { gap: 18px 16px; padding: 20px 14px; border: 0; border-radius: 6px; }
   .unified-watchlist-table tbody tr > td:first-child, .unified-watchlist-table tbody tr > td:last-child { border-radius: 0; }
   .unified-watchlist-table td, .unified-watchlist-table td:not(:first-child) { padding:0; text-align:center; }
+  .unified-watchlist-table tbody tr:not(.research-expanded-row) > td { height:auto; }
   .unified-watchlist-table td:first-child { min-width: 0; max-width: none; }
   .unified-watchlist-table td::before { font-family: inherit; font-size: 9px; margin-bottom: 7px; }
   .unified-watchlist-table td.research-identity { grid-column: 1 / -1; padding-bottom: 2px; border-bottom: 0; }
@@ -325,7 +370,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 @media (prefers-reduced-motion: reduce) {
   button { transition: none; }
-  .skeleton-lines span { animation: none; }
+  .skeleton-lines span, .skeleton-block { animation: none; }
 }
 
 .kline-canvas .grid-line, .kline-canvas .volume-separator { stroke: #e8ece5; }

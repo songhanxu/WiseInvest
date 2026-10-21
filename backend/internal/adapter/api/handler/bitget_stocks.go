@@ -32,9 +32,8 @@ func (h *StockHandler) fetchBitgetStocks(ctx context.Context, market string, cod
 	return rows, nil
 }
 
-// Keep the old equity quote implementation as a per-symbol fallback, including
-// partial Bitget responses. A failed upstream gets its own short timeout so the
-// fallback can still use the parent's remaining request budget.
+// Bitget is primary; per-symbol fallbacks retain their own source, currency
+// and exchange quote timestamp so the UI can distinguish sessions.
 func (h *StockHandler) fetchUSStocksBySymbol(ctx context.Context, symbols string) ([]StockResponse, error) {
 	codes := strings.Split(symbols, ",")
 	primaryCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -90,9 +89,11 @@ func (h *StockHandler) searchUSStocks(ctx context.Context, query string) ([]Stoc
 }
 
 func (h *StockHandler) searchHKStocks(ctx context.Context, query string) ([]StockResponse, error) {
-	quotes, err := h.bitget.Search(ctx, "hk_stock", query)
-	if err != nil {
-		return nil, err
+	primaryCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	quotes, err := h.bitget.Search(primaryCtx, "hk_stock", query)
+	cancel()
+	if err != nil || len(quotes) == 0 {
+		return h.searchTencentHKStocks(ctx, query)
 	}
 	rows := make([]StockResponse, 0, len(quotes))
 	for _, q := range quotes {
@@ -101,16 +102,34 @@ func (h *StockHandler) searchHKStocks(ctx context.Context, query string) ([]Stoc
 	return rows, nil
 }
 
+// HK quotes use Bitget first, then preserve Tencent exchange timestamps.
+func (h *StockHandler) fetchHKStocksByCode(ctx context.Context, codes []string) ([]StockResponse, error) {
+	primaryCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	rows, _ := h.fetchBitgetStocks(primaryCtx, "hk_stock", codes)
+	cancel()
+	found := map[string]bool{}
+	for _, row := range rows {
+		found[row.ID] = true
+	}
+	var missing []string
+	for _, code := range codes {
+		code = bitget.NormalizeCode("hk_stock", code)
+		if !found[code] {
+			missing = append(missing, code)
+		}
+	}
+	if len(missing) == 0 {
+		return rows, nil
+	}
+	fallback, err := h.fetchTencentHKStocks(ctx, missing)
+	rows = append(rows, fallback...)
+	if len(rows) > 0 {
+		return rows, nil
+	}
+	return rows, err
+}
 func (h *StockHandler) fetchHKStockBoard(ctx context.Context) ([]IndexResponse, error) {
-	quotes, err := h.fetchBitgetStocks(ctx, "hk_stock", []string{"00700", "01810", "00992"})
-	if err != nil {
-		return nil, err
-	}
-	rows := make([]IndexResponse, 0, len(quotes))
-	for _, q := range quotes {
-		rows = append(rows, IndexResponse{ID: q.ID, Name: q.Name + " · Quanto", ShortName: q.Name, Value: q.CurrentPrice, Change: q.Change, ChangePercent: q.ChangePercent, Source: q.Source, Currency: q.Currency, ProductType: q.ProductType})
-	}
-	return rows, nil
+	return h.fetchBitgetMarketBoard(ctx, "hk_stock", []string{"00700", "01810", "00992"})
 }
 
 func (h *StockHandler) fetchBitgetKLine(ctx context.Context, market, code, period string, limit int) ([]KLineResponse, error) {
@@ -167,6 +186,23 @@ func (h *StockHandler) fetchUSStockKLine(ctx context.Context, code, period strin
 	}
 	for i := range rows {
 		rows[i].Source = "sina"
+	}
+	return rows, err
+}
+
+func (h *StockHandler) fetchHKStockKLine(ctx context.Context, code, period string, limit int) ([]KLineResponse, error) {
+	primaryCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	rows, err := h.fetchBitgetKLine(primaryCtx, "hk_stock", code, period, limit)
+	cancel()
+	if err == nil && len(rows) > 0 {
+		return rows, nil
+	}
+	if period != "1d" && period != "1w" {
+		return nil, err
+	}
+	rows, err = h.fetchTencentKLine(ctx, "hk"+bitget.NormalizeCode("hk_stock", code), period, limit)
+	for i := range rows {
+		rows[i].Source = "tencent"
 	}
 	return rows, err
 }
@@ -280,7 +316,7 @@ func (h *StockHandler) readWatchlist(parent context.Context, user uint) ([]Stock
 			case "us_stock":
 				rows, _ = h.fetchUSStocksBySymbol(ctx, strings.Join(codes, ","))
 			case "hk_stock":
-				rows, _ = h.fetchBitgetStocks(ctx, market, codes)
+				rows, _ = h.fetchHKStocksByCode(ctx, codes)
 			case "crypto":
 				var symbols []string
 				for _, code := range codes {
@@ -292,7 +328,7 @@ func (h *StockHandler) readWatchlist(parent context.Context, user uint) ([]Stock
 					}
 					symbols = append(symbols, strings.ToUpper(code))
 				}
-				rows, _ = h.fetchBinanceCryptoStocks(ctx, symbols)
+				rows, _ = h.fetchBitgetCryptoStocks(ctx, symbols)
 			}
 			mu.Lock()
 			quotes = append(quotes, rows...)

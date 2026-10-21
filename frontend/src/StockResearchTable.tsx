@@ -5,6 +5,7 @@ import type { Market, StockQuote } from "./App";
 import { ArrowDownUp, Check, ChevronDown, Columns3, Info } from "lucide-react";
 import { useDismissiblePopover } from "./useDismissiblePopover";
 import { assetIntroduction } from "./assetIntroductions";
+import { quoteCurrency, quoteStatusLabel, quoteTimeLabel } from "./quote-presentation";
 
 export type Fundamentals = {
   description?: string;
@@ -61,7 +62,7 @@ export function useStockFundamentals(apiBase: string, stocks: StockQuote[], scop
   return { fundamentals, financialLoading };
 }
 
-export function StockResearchTable<T extends StockQuote>({ stocks, markets, fundamentals, onOpenStock, getRowKey, getHoldingValue, renderHolding, renderTarget, renderAction, emptyMessage }: {
+export function StockResearchTable<T extends StockQuote>({ stocks, markets, fundamentals, onOpenStock, getRowKey, getHoldingValue, renderHolding, renderTarget, renderAction, emptyMessage, loading = false }: {
   stocks: T[];
   markets: Market[];
   fundamentals: Record<string, Fundamentals>;
@@ -72,7 +73,9 @@ export function StockResearchTable<T extends StockQuote>({ stocks, markets, fund
   renderTarget?: (stock: T) => ReactNode;
   renderAction?: (stock: T) => ReactNode;
   emptyMessage: string;
+  loading?: boolean;
 }) {
+  const initialLoading = loading && stocks.length === 0;
   const [sort, setSort] = useState(getHoldingValue ? "market_value" : "original");
   const [hidden, setHidden] = useState<string[]>(["guidance"]);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -128,7 +131,7 @@ export function StockResearchTable<T extends StockQuote>({ stocks, markets, fund
   return <div className={`surface-card watchlist-table-container ${renderHolding ? "has-holdings" : ""} ${hidden.map(key => `hide-${key}`).join(" ")}`}>
     {subscriptionLimited && <p className="form-note danger" role="status">部分标的的财报接口未包含在当前 FMP 订阅中，相应指标暂不可用。点击标的旁的 ⓘ 可查看具体原因；持仓和行情仍可正常显示。</p>}
     <div className="research-table-controls">
-      <span className="research-count">{stocks.length} 项标的</span>
+      <span className="research-count">{initialLoading ? <span className="skeleton-block research-count-skeleton" aria-hidden="true" /> : `${stocks.length} 项标的`}</span>
       <div className="research-table-actions" ref={controlsRef} onKeyDown={event => { if (event.key === "Escape") (menu === "sort" ? sortButton : columnsButton).current?.focus(); }}>
         <div className="research-control">
           <button ref={sortButton} type="button" className="research-control-button" aria-label={`排序方式：${sortOptions.find(item => item.value === sort)?.label}`} aria-expanded={isOpen && menu === "sort"} aria-controls={`${controlId}-sort`} onClick={() => toggleMenu("sort")}><ArrowDownUp size={13} /><span>{sortOptions.find(item => item.value === sort)?.label}</span><ChevronDown size={12} /></button>
@@ -141,22 +144,29 @@ export function StockResearchTable<T extends StockQuote>({ stocks, markets, fund
       </div>
       {sort === "market_value" && holdingCurrencies.size > 1 && <span className="watchlist-note research-currency-note">按报价币种分组，组内市值降序；未换算汇率。</span>}
     </div>
-    <div className="research-table-scroll">
+    {initialLoading && <span className="sr-only" role="status">正在加载自选列表</span>}
+    <div className="research-table-scroll" aria-busy={initialLoading}>
     <table className="unified-watchlist-table">
       <colgroup><col className="research-identity-col" /><col />{renderHolding && <col className="research-holding-col" />}{renderTarget && <col className="research-target-col" />}{Object.keys(columnLabels).filter(key => !hidden.includes(key)).map(key => <col key={key} />)}{renderAction && <col className="research-action-col" />}</colgroup>
       <thead><tr><th>标的</th><th>最新价格</th>{renderHolding && <th>持仓详情</th>}{renderTarget && <th className="target-price-column">期望价格</th>}<th className="col-eps">EPS <small>TTM</small></th><th className="col-pe">PE <small>TTM</small></th><th className="col-forward">远期 PE</th><th className="col-guidance">公司指引 EPS</th><th className="col-earnings">下份财报时间</th>{renderAction && <th><span className="sr-only">操作</span></th>}</tr></thead>
-      <tbody>{sorted.map(stock => {
+      <tbody>{initialLoading && Array.from({ length: 6 }, (_, index) => <tr className="research-skeleton-row" key={`loading-${index}`} aria-hidden="true">
+        <td data-label="标的" className="research-identity"><div className="research-skeleton-line"><span className="skeleton-block skeleton-symbol" /></div><small><span className="skeleton-block skeleton-currency" /></small></td>
+        <td data-label="价格"><div className="research-skeleton-line"><span className="skeleton-block skeleton-value" /></div><small><span className="skeleton-block skeleton-currency" /></small></td>
+        {renderHolding && <td data-label="持仓详情" className="holding-detail-cell"><span className="skeleton-block skeleton-value" /></td>}
+        {renderTarget && <td data-label="期望价格" className="target-price-column"><span className="skeleton-block skeleton-target" /></td>}
+        {Object.entries(columnLabels).map(([key, label]) => <td className={`col-${key}`} data-label={label} key={key}><span className={`skeleton-block ${key === "earnings" ? "skeleton-date" : "skeleton-metric"}`} /></td>)}
+        {renderAction && <td data-label="操作"><span className="skeleton-block skeleton-action" /></td>}
+      </tr>)}{sorted.map(stock => {
         const market = markets.find(item => item.id === stock.market); const key = stockKey(stock); const f = fundamentals[key];
         const na = (stock.market === "crypto" || !markets.some(m=>m.id===stock.market)) || f?.status === "not_applicable" || /\bETF\b|基金/i.test(stock.name);
         const empty = na ? "不适用" : "—";
         const guidance = f?.guidance_eps != null ? numeric(f.guidance_eps) : f?.guidance_eps_low != null && f.guidance_eps_high != null ? `${numeric(f.guidance_eps_low)}–${numeric(f.guidance_eps_high)}` : empty;
         const financialHint = [f?.message, metricHint(f, "eps")].filter(Boolean).join(" · ");
-        const product = stock.product_type === "quanto_perpetual" ? "Quanto 合约" : stock.product_type === "stock_perpetual" ? "股票永续" : stock.product_type === "equity" ? "股票" : stock.product_type === "crypto_spot" ? "现货资产" : stock.product_type === "crypto_perpetual" ? "加密永续" : stock.product_type === "other_perpetual" ? "永续合约" : "股票代币";
         const rowKey = getRowKey ? getRowKey(stock) : key;
         const code = stock.symbol || stock.id;
         return <Fragment key={rowKey}><tr>
-          <td data-label="标的" className="research-identity"><div className="research-name-line"><button className="watchlist-name" title={code} disabled={!market} onClick={() => market && onOpenStock(market, stock)}>{code}</button><button className="source-toggle" aria-label={`${code}详情`} aria-expanded={expanded === rowKey} onClick={() => setExpanded(previous => previous === rowKey ? null : rowKey)}><Info size={10} /></button></div><small title={stock.provider_symbol}>{market?.displayName ?? "其他 / 待识别"}{["bitget","binance","gate"].includes(stock.source || "") ? ` · ${product}` : stock.source === "tencent" ? " · 股票" : ""}</small></td>
-          <td data-label="价格" className="mono">{stock.quote_available === false || stock.current_price <= 0 ? "—" : numeric(stock.current_price)}<small>{stock.currency || (stock.market === "a_share" ? "CNY" : stock.market === "hk_stock" ? "HKD" : stock.market === "crypto" ? "USDT" : "USD")}{stock.change_basis === "24h" ? " · 24h" : ""}</small></td>
+          <td data-label="标的" className="research-identity"><div className="research-name-line"><button className="watchlist-name" title={code} disabled={!market} onClick={() => market && onOpenStock(market, stock)}>{code}</button><button className="source-toggle" aria-label={`${code}详情`} aria-expanded={expanded === rowKey} onClick={() => setExpanded(previous => previous === rowKey ? null : rowKey)}><Info size={10} /></button></div><small title={stock.provider_symbol}>{market?.displayName ?? "其他 / 待识别"}</small></td>
+          <td data-label="价格" className="mono"><span className="quote-amount">{stock.quote_available === false || stock.current_price <= 0 ? "—" : numeric(stock.current_price)}<span className="quote-currency">{quoteCurrency(stock)}</span></span><small className="quote-source-label" title={quoteTimeLabel(stock)}>{quoteStatusLabel(stock)}</small></td>
           {renderHolding && <td data-label="持仓详情" className="holding-detail-cell">{renderHolding(stock)}</td>}{renderTarget && <td data-label="期望价格" className="target-price-column">{renderTarget(stock)}</td>}
           <td data-label="EPS" className="mono col-eps" title={financialHint}>{f?.eps != null ? numeric(f.eps) : empty}{f?.eps != null && <small>{f.metrics?.eps?.currency || f.currency}</small>}</td>
           <td data-label="PE" className="mono col-pe" title={metricHint(f, "pe")}>{f?.pe != null && f.pe > 0 ? numeric(f.pe) : f?.eps != null && f.eps < 0 ? "亏损" : empty}</td>
@@ -168,6 +178,6 @@ export function StockResearchTable<T extends StockQuote>({ stocks, markets, fund
       })}</tbody>
     </table>
     </div>
-    {!stocks.length && <div className="empty-state">{emptyMessage}</div>}
+    {!stocks.length && !initialLoading && <div className="empty-state">{emptyMessage}</div>}
   </div>;
 }

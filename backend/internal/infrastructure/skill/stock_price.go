@@ -310,6 +310,7 @@ func (s *USStockPriceSkill) executeTencent(ctx context.Context, input map[string
 		}
 
 		sb.WriteString(fmt.Sprintf("**%s（%s）**\n", displayName, sym))
+		sb.WriteString(fmt.Sprintf("  腾讯报价时间（美东）：%s\n", fields[30]))
 		if nonTrading {
 			sb.WriteString(fmt.Sprintf("  最新收盘价（非交易时段）：%s USD\n", currentPrice))
 		} else {
@@ -342,7 +343,8 @@ func (s *USStockPriceSkill) Execute(ctx context.Context, input map[string]interf
 	found := make(map[string]bool)
 	for _, q := range quotes {
 		found[q.Code] = true
-		fmt.Fprintf(&out, "**%s (%s)**\n来源：Bitget 股票代币 %s，币种 %s，最新价 %.4f，24h 涨跌 %.2f%%。此为代币行情，与股票现货可能有差异。\n\n", q.Name, q.Code, q.ProviderSymbol, q.Currency, q.Price, q.ChangePercent)
+		fmt.Fprintf(&out, "**%s (%s)**\n来源：Bitget %s，币种 %s，最新价 %.4f，24h 涨跌 %.2f%%。\n\n", q.Name, q.Code, q.ProviderSymbol, q.Currency, q.Price, q.ChangePercent)
+		fmt.Fprintf(&out, "报价时间（Unix 毫秒）：%s\n", q.Timestamp)
 	}
 	var missing []string
 	for _, code := range strings.Split(symbols, ",") {
@@ -370,10 +372,10 @@ func NewHKStockPriceSkill() *HKStockPriceSkill {
 }
 func (s *HKStockPriceSkill) Name() string { return "get_hk_stock_price" }
 func (s *HKStockPriceSkill) Description() string {
-	return "查询 Bitget 港股 Quanto 合约行情（HKD 报价，USDT 结算，24h 涨跌），不是港交所现货行情。代码如00700、01810、00992，多只逗号分隔。"
+	return "查询 Bitget 港股行情（HKD 报价、24h 涨跌）。代码如00700、01810、00992，多只逗号分隔。"
 }
 func (s *HKStockPriceSkill) Parameters() []SkillParam {
-	return []SkillParam{{Name: "symbols", Type: "string", Description: "港股代码或 Bitget 合约代码，逗号分隔", Required: true}}
+	return []SkillParam{{Name: "symbols", Type: "string", Description: "港股代码，逗号分隔", Required: true}}
 }
 func (s *HKStockPriceSkill) Execute(ctx context.Context, input map[string]interface{}) (interface{}, error) {
 	symbols, _ := input["symbols"].(string)
@@ -386,10 +388,10 @@ func (s *HKStockPriceSkill) Execute(ctx context.Context, input map[string]interf
 	}
 	var out strings.Builder
 	for _, q := range quotes {
-		fmt.Fprintf(&out, "**%s (%s)**：Bitget Quanto 合约 %s，%.4f HKD，24h 涨跌 %.2f%%（不是现货交易日涨跌）。\n", q.Name, q.Code, q.ProviderSymbol, q.Price, q.ChangePercent)
+		fmt.Fprintf(&out, "**%s (%s)**：Bitget %s，%.4f HKD，24h 涨跌 %.2f%%。\n", q.Name, q.Code, q.ProviderSymbol, q.Price, q.ChangePercent)
 	}
 	if out.Len() == 0 {
-		return "该标的暂无已上架的 Bitget 港股 Quanto 合约数据。", nil
+		return "Bitget 暂无该港股的可用行情。", nil
 	}
 	return out.String(), nil
 }

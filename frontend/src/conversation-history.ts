@@ -5,6 +5,8 @@ export type Message = {
   role: "assistant" | "user";
   content: string;
   thinking?: string[];
+  agentId?: string;
+  interrupted?: boolean;
 };
 
 export type SavedConversation = {
@@ -14,6 +16,7 @@ export type SavedConversation = {
   updatedAt: string;
   messages: Message[];
   backendId?: number;
+  kind?: "roundtable";
 };
 
 export function hasUserMessage(conversation: SavedConversation): boolean {

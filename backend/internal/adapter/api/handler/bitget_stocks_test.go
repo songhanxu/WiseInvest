@@ -41,6 +41,7 @@ func TestUSQuotePartialFallbackOnlyRequestsMissingSymbols(t *testing.T) {
 		fields[4] = "190"
 		fields[31] = "10"
 		fields[32] = "5.26"
+		fields[30] = "2026-10-20 16:00:01"
 		body := `v_usMSFT="` + strings.Join(fields, "~") + `";`
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})}}
@@ -48,7 +49,7 @@ func TestUSQuotePartialFallbackOnlyRequestsMissingSymbols(t *testing.T) {
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("quotes %+v: %v", rows, err)
 	}
-	if rows[0].ID != "AAPL" || rows[0].Source != "bitget" || rows[1].ID != "MSFT" || rows[1].Source != "tencent" || rows[1].Currency != "USD" {
+	if rows[0].ID != "AAPL" || rows[0].Source != "bitget" || rows[1].ID != "MSFT" || rows[1].Source != "tencent" || rows[1].Currency != "USD" || rows[1].QuoteTime != "2026-10-20T16:00:01-04:00" || rows[1].QuoteSession != "close" {
 		t.Fatalf("mixed-source quotes wrong: %+v", rows)
 	}
 }
@@ -140,5 +141,60 @@ func TestFMPSubscriptionErrorsAreExplicitAndSanitized(t *testing.T) {
 		if symbol == "AVGO" && row.Status != "unavailable" {
 			t.Fatal("restricted data marked available")
 		}
+	}
+}
+
+func TestMarketCacheAllowsOnlyKnownPrimaryAndFallbackSources(t *testing.T) {
+	for _, c := range []struct {
+		market, source string
+		allowed        bool
+	}{{"us_stock", "bitget", true}, {"us_stock", "tencent", true}, {"hk_stock", "tencent", true}, {"crypto", "binance", true}, {"crypto", "tencent", false}, {"us_stock", "binance", false}, {"us_stock", "", false}, {"a_share", "", true}} {
+		if got := bitgetBoardCacheAllowed(c.market, []IndexResponse{{Source: c.source}}); got != c.allowed {
+			t.Fatalf("%s %s cache allowed=%v", c.market, c.source, got)
+		}
+	}
+}
+
+func TestHongKongFallbackPreservesExchangeTimeAndHKD(t *testing.T) {
+	failed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(502) }))
+	defer failed.Close()
+	h := &StockHandler{bitget: bitget.NewClient(failed.URL), httpClient: &http.Client{Transport: quoteTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/q=hk00700" {
+			t.Fatalf("incorrect HK fallback query: %s", r.URL.Path)
+		}
+		fields := make([]string, 50)
+		fields[1] = "Tencent"
+		fields[3] = "400.4"
+		fields[30] = "2026/10/21 14:31:24"
+		body := `v_hk00700="` + strings.Join(fields, "~") + `";`
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}}
+	rows, err := h.fetchHKStocksByCode(context.Background(), []string{"700"})
+	if err != nil || len(rows) != 1 || rows[0].Currency != "HKD" || rows[0].Source != "tencent" || rows[0].QuoteTime != "2026-10-21T14:31:24+08:00" || rows[0].QuoteSession == "close" {
+		t.Fatalf("HK fallback: %+v %v", rows, err)
+	}
+}
+
+func TestTencentTimestampUsesExchangeTimezoneAndPreservesMissingTime(t *testing.T) {
+	if got := tencentQuoteTime("2026-12-01 16:00:01", "us_stock"); got != "2026-12-01T16:00:01-05:00" {
+		t.Fatal(got)
+	}
+	if got := tencentQuoteTime("missing", "us_stock"); got != "" {
+		t.Fatalf("invented quote time %s", got)
+	}
+}
+
+func TestCryptoFallbackRetainsBinanceQuoteTimestamp(t *testing.T) {
+	failed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(502) }))
+	defer failed.Close()
+	h := &StockHandler{bitget: bitget.NewClient(failed.URL), httpClient: &http.Client{Transport: quoteTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "data-api.binance.vision" {
+			t.Fatalf("unexpected fallback host: %s", r.URL.Host)
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`[{"symbol":"BTCUSDT","lastPrice":"82000","closeTime":1792565189000}]`))}, nil
+	})}}
+	rows, err := h.fetchBitgetCryptoStocks(context.Background(), []string{"BTCUSDT"})
+	if err != nil || len(rows) != 1 || rows[0].Source != "binance" || rows[0].Currency != "USDT" || rows[0].CurrentPrice != 82000 || rows[0].QuoteTime != "2026-10-21T06:46:29Z" {
+		t.Fatalf("crypto fallback timestamp or currency changed: %+v %v", rows, err)
 	}
 }

@@ -12,15 +12,18 @@ export type PriceAlert = {
 type AlertData = { alerts: PriceAlert[]; email: string; mailer_configured: boolean; check_interval_seconds: number };
 type AlertHolding = { holding_id: string; account_id: string; name: string; currency?: string; quote_available?: boolean; current_price: number; stale?: boolean };
 
-export function usePriceAlerts(apiBase: string, token: string) {
+export function usePriceAlerts(apiBase: string, token: string, isActive = true) {
   const [data, setData] = useState<AlertData | null>(null);
   const [error, setError] = useState("");
   const version = useRef(0);
+  const activeRef = useRef(isActive); activeRef.current = isActive;
+  const lastAttemptAt = useRef(0);
   const scope = `${apiBase}:${token}`;
   const scopeRef = useRef(scope); scopeRef.current = scope;
   const refresh = useCallback(async () => {
     const request = ++version.current;
     if (!token) { setData(null); setError(""); return; }
+    lastAttemptAt.current = Date.now();
     try {
       const next = await requestJson<AlertData>(apiBase, "/api/v1/price-alerts", token);
       if (!Array.isArray(next.alerts)) throw new Error("提醒数据格式无效");
@@ -28,10 +31,12 @@ export function usePriceAlerts(apiBase: string, token: string) {
     } catch (err) { if (request === version.current) setError(err instanceof Error ? err.message : "提醒读取失败"); }
   }, [apiBase, token]);
   useEffect(() => {
-    setData(null); setError(""); void refresh();
-    const timer = window.setInterval(() => { if (!document.hidden) void refresh(); }, 60000);
+    setData(null); setError(""); lastAttemptAt.current = 0;
+    if (activeRef.current) void refresh();
+    const timer = window.setInterval(() => { if (activeRef.current && !document.hidden) void refresh(); }, 60000);
     return () => { version.current++; window.clearInterval(timer); };
   }, [refresh]);
+  useEffect(() => { if (isActive && token && Date.now() - lastAttemptAt.current >= 60000) void refresh(); }, [isActive, token, refresh]);
   async function saveEmail(email: string) {
     await requestJson(apiBase, "/api/v1/price-alerts/settings", token, { method: "PUT", body: JSON.stringify({ email }) });
     if (scopeRef.current === scope) await refresh();
