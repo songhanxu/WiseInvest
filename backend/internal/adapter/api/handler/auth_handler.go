@@ -14,11 +14,13 @@ import (
 
 // AuthHandler handles authentication-related requests
 type AuthHandler struct {
-	db         *gorm.DB
-	jwtSvc     *auth.JWTService
-	wechatSvc  *auth.WeChatService
-	smsSvc     *auth.SMSService
-	log        *logger.Logger
+	db                *gorm.DB
+	jwtSvc            *auth.JWTService
+	wechatSvc         *auth.WeChatService
+	smsSvc            *auth.SMSService
+	log               *logger.Logger
+	passwordLimits    authLimit
+	dummyPasswordHash string
 }
 
 // NewAuthHandler creates a new AuthHandler
@@ -29,12 +31,14 @@ func NewAuthHandler(
 	smsSvc *auth.SMSService,
 	log *logger.Logger,
 ) *AuthHandler {
+	dummyHash, _ := auth.HashPassword("invalid-account-placeholder")
 	return &AuthHandler{
-		db:        db,
-		jwtSvc:    jwtSvc,
-		wechatSvc: wechatSvc,
-		smsSvc:    smsSvc,
-		log:       log,
+		db:                db,
+		jwtSvc:            jwtSvc,
+		wechatSvc:         wechatSvc,
+		smsSvc:            smsSvc,
+		log:               log,
+		dummyPasswordHash: dummyHash,
 	}
 }
 
@@ -47,8 +51,7 @@ type wechatLoginRequest struct {
 // WeChatLogin exchanges a WeChat authorization code for a JWT token.
 // POST /api/v1/auth/wechat/login
 //
-// Dev mode: when WECHAT_APP_ID is not configured, any code prefixed with
-// "MOCK_" is accepted and a dev user is returned directly (no WeChat API call).
+// Unconfigured WeChat login is disabled; it must never bypass password login.
 func (h *AuthHandler) WeChatLogin(c *gin.Context) {
 	var req wechatLoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -56,6 +59,10 @@ func (h *AuthHandler) WeChatLogin(c *gin.Context) {
 		return
 	}
 
+	if h.wechatSvc == nil || !h.wechatSvc.IsConfigured() {
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "请使用账号密码登录"})
+		return
+	}
 	var user *model.User
 	var err error
 
@@ -76,16 +83,6 @@ func (h *AuthHandler) WeChatLogin(c *gin.Context) {
 		}
 
 		user, err = h.findOrCreateWeChatUser(tokenResp.OpenID, tokenResp.UnionID, userInfo)
-	} else {
-		// ── Dev mode: mock flow (no real WeChat credentials) ─────────────
-		h.log.Warn("WECHAT_APP_ID not configured — using dev mock user")
-		mockOpenID := "dev_mock_openid"
-		mockInfo := &auth.WeChatUserInfo{
-			OpenID:     mockOpenID,
-			Nickname:   "开发测试用户",
-			HeadImgURL: "",
-		}
-		user, err = h.findOrCreateWeChatUser(mockOpenID, "", mockInfo)
 	}
 
 	if err != nil {
@@ -265,6 +262,8 @@ func (h *AuthHandler) GetMe(c *gin.Context) {
 
 type userResponse struct {
 	ID             uint   `json:"id"`
+	Username       string `json:"username"`
+	HasPassword    bool   `json:"has_password"`
 	DisplayName    string `json:"display_name"`
 	Avatar         string `json:"avatar"`
 	WeChatNickname string `json:"wechat_nickname,omitempty"`
@@ -283,6 +282,8 @@ func (h *AuthHandler) userResponse(u *model.User) userResponse {
 	}
 	return userResponse{
 		ID:             u.ID,
+		Username:       u.Username,
+		HasPassword:    auth.HasPassword(u.PasswordHash),
 		DisplayName:    u.DisplayName,
 		Avatar:         avatar,
 		WeChatNickname: u.WeChatNickname,

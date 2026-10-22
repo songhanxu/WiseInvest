@@ -1,8 +1,5 @@
-<view class="row" bindtap="handleTap" bindlongpress="handleLongPress">
-  <view class="icon-box" style="background: {{marketColor}}26; color: {{marketColor}};">{{marketIcon}}</view>
-  <view class="meta">
-    <view class="title">{{displayTitle}}</view>
-    <view class="time">{{timeText}}</view>
-  </view>
+<button class="row" bindtap="handleTap" bindlongpress="handleLongPress" hover-class="row-pressed" aria-label="继续研究：{{displayTitle}}">
+  <view class="icon-box">{{marketMark}}</view>
+  <view class="meta"><view class="title">{{displayTitle}}</view><view class="description">{{marketName}}<text class="meta-dot">·</text>{{timeText}}</view></view>
   <view class="arrow">›</view>
-</view>
+</button>

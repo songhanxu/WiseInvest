@@ -11,16 +11,18 @@ import (
 
 // Factory creates agents
 type Factory struct {
-	llmClient      *llm.OpenAIClient
-	searcher       search.Searcher
-	logger         *logger.Logger
-	aShareRegistry *skill.Registry // skills for the A-share agent
-	usStockRegistry *skill.Registry // skills for the US-stock agent
-	cryptoRegistry  *skill.Registry // skills for the crypto agent
+	llmClient       *llm.OpenAIClient
+	searcher        search.Searcher
+	logger          *logger.Logger
+	aShareRegistry  *skill.Registry
+	usStockRegistry *skill.Registry
+	cryptoRegistry  *skill.Registry
+	groupRegistry   *skill.Registry // combined registry for group chat agents
 }
 
 // NewAgentFactory creates a new agent factory.
-// Each market gets its own skill registry so tools can be tailored per agent type.
+// groupRegistry should contain skills from all three markets so that group
+// chat persona agents can query any market.
 func NewAgentFactory(
 	llmClient *llm.OpenAIClient,
 	searcher search.Searcher,
@@ -28,6 +30,7 @@ func NewAgentFactory(
 	aShareRegistry *skill.Registry,
 	usStockRegistry *skill.Registry,
 	cryptoRegistry *skill.Registry,
+	groupRegistry *skill.Registry,
 ) *Factory {
 	return &Factory{
 		llmClient:       llmClient,
@@ -36,6 +39,7 @@ func NewAgentFactory(
 		aShareRegistry:  aShareRegistry,
 		usStockRegistry: usStockRegistry,
 		cryptoRegistry:  cryptoRegistry,
+		groupRegistry:   groupRegistry,
 	}
 }
 
@@ -45,10 +49,16 @@ func (f *Factory) CreateAgent(agentType string) (Agent, error) {
 	// Market agents (primary)
 	case TypeAShare:
 		return NewAShareAgent(f.llmClient, f.searcher, f.aShareRegistry, f.logger), nil
+	case TypeHKStock:
+		return NewHKStockAgent(f.llmClient, f.searcher, f.usStockRegistry, f.logger), nil
 	case TypeUSStock:
 		return NewUSStockAgent(f.llmClient, f.searcher, f.usStockRegistry, f.logger), nil
 	case TypeCrypto:
 		return NewCryptoAgent(f.llmClient, f.searcher, f.cryptoRegistry, f.logger), nil
+
+	// Group chat agent (any persona ID works; defaults to orchestrator for single-agent use)
+	case TypeGroupChat:
+		return NewGroupPersonaAgent(GroupAgentIDOrchestrator, f.llmClient, f.groupRegistry, f.logger), nil
 
 	// Legacy agents (kept for backward compatibility)
 	case TypeOrchestrator:
@@ -65,7 +75,18 @@ func (f *Factory) CreateAgent(agentType string) (Agent, error) {
 	}
 }
 
-// GetAvailableAgents returns the three market modules available to users
+// CreateGroupChatAgents returns the ordered set of persona agents for a roundtable session.
+// participants filters and orders the agents; pass nil/empty for all four in default order.
+func (f *Factory) CreateGroupChatAgents(participants []string) []*GroupPersonaAgent {
+	ids := OrderedParticipants(participants)
+	agents := make([]*GroupPersonaAgent, 0, len(ids))
+	for _, id := range ids {
+		agents = append(agents, NewGroupPersonaAgent(id, f.llmClient, f.groupRegistry, f.logger))
+	}
+	return agents
+}
+
+// GetAvailableAgents returns the market modules available to users
 func (f *Factory) GetAvailableAgents() []AgentInfo {
 	return []AgentInfo{
 		{
@@ -82,6 +103,7 @@ func (f *Factory) GetAvailableAgents() []AgentInfo {
 			Icon:        "dollarsign.circle",
 			Color:       "#1565C0",
 		},
+		{Type: TypeHKStock, Name: "港 股", Description: "港股研究 · Bitget Quanto 合约行情", Icon: "building.2", Color: "#8B5CF6"},
 		{
 			Type:        TypeCrypto,
 			Name:        "币 圈",

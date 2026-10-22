@@ -1,9 +1,9 @@
 {
-  "navigationStyle": "custom",
-  "backgroundColor": "#081227",
-  "backgroundTextStyle": "light",
+  "backgroundColor": "#f7f8f6",
+  "backgroundTextStyle": "dark",
   "disableScroll": true,
   "usingComponents": {
     "message-bubble": "/components/message-bubble/message-bubble"
-  }
+  },
+  "navigationBarTitleText": "AI 研究"
 }

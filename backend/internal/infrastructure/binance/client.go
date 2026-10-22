@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	BaseURL = "https://api.binance.com"
+	BaseURL = "https://data-api.binance.vision"
 	
 	// API endpoints
 	EndpointAccount      = "/api/v3/account"

@@ -23,11 +23,13 @@ struct MarketDetailView: View {
 
                 VStack(spacing: 0) {
                     headerSection
+                    indicesSection
                     
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
-                            indicesSection
-                            watchlistSection
+                        LazyVStack(alignment: .leading, spacing: 20, pinnedViews: [.sectionHeaders]) {
+                            Section(header: watchlistHeader) {
+                                watchlistContent
+                            }
                         }
                         .padding(.bottom, 32)
                     }
@@ -49,7 +51,10 @@ struct MarketDetailView: View {
                 watchlistIDs: viewModel.watchlistIDs
             )
         }
-        .sheet(item: $selectedIndex, onDismiss: nil) { index in
+        .sheet(item: $selectedIndex, onDismiss: {
+            // Refresh watchlist when index detail dismisses (user may have toggled star)
+            viewModel.loadWatchlist()
+        }) { index in
             // Convert MarketIndex to Stock for the detail view
             let indexStock = Stock(
                 id: index.id,
@@ -63,7 +68,8 @@ struct MarketDetailView: View {
                 high: index.value,
                 low: index.value,
                 open: index.value,
-                previousClose: index.value - index.change
+                previousClose: index.value - index.change,
+                isIndex: true
             )
             StockDetailView(
                 stock: indexStock,
@@ -78,9 +84,28 @@ struct MarketDetailView: View {
                 viewModel.loadWatchlist()
             }
         }
+        .onAppear {
+            viewModel.onViewAppear()
+        }
+        .onDisappear {
+            viewModel.stopAutoRefresh()
+        }
     }
 
     // MARK: - Header
+
+    private var tradingStatusColor: Color {
+        switch viewModel.tradingStatus {
+        case .open:
+            return .accentGreen
+        case .preMarket, .afterHours:
+            return Color(hex: "FF9800")
+        case .lunchBreak:
+            return Color(hex: "FFD700")
+        case .closed:
+            return .textTertiary
+        }
+    }
 
     private var headerSection: some View {
         HStack(spacing: 12) {
@@ -108,9 +133,14 @@ struct MarketDetailView: View {
                 Text(market.displayName)
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(.textPrimary)
-                Text(market.subtitle)
-                    .font(.system(size: 12))
-                    .foregroundColor(.textSecondary)
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(tradingStatusColor)
+                        .frame(width: 6, height: 6)
+                    Text(viewModel.tradingStatus.label)
+                        .font(.system(size: 11))
+                        .foregroundColor(.textSecondary)
+                }
             }
 
             Spacer()
@@ -136,56 +166,69 @@ struct MarketDetailView: View {
                 .padding(.horizontal, 20)
 
             if viewModel.isLoadingIndices && viewModel.indices.isEmpty {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
+                // Skeleton placeholders (3 cards) with shimmer animation
+                HStack(spacing: 8) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        IndexCardSkeleton()
+                    }
+                }
+                .padding(.horizontal, 16)
             } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(viewModel.indices) { index in
-                            IndexCard(index: index, market: market) {
-                                selectedIndex = index
-                            }
+                HStack(spacing: 8) {
+                    ForEach(viewModel.indices) { index in
+                        IndexCard(index: index, market: market) {
+                            selectedIndex = index
                         }
                     }
-                    .padding(.horizontal, 20)
                 }
+                .padding(.horizontal, 16)
             }
         }
         .padding(.top, 16)
+        .padding(.bottom, 8)
+        .background(Color.primaryBackground)
     }
 
-    // MARK: - Watchlist Section
+    // MARK: - Watchlist Header (sticky)
 
-    private var watchlistSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("自选股")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.textPrimary)
+    private var watchlistHeader: some View {
+        HStack {
+            Text("自选股")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.textPrimary)
 
-                Text("\(viewModel.watchlist.count)")
-                    .font(.system(size: 13))
-                    .foregroundColor(.textTertiary)
+            Text("\(viewModel.watchlist.count)")
+                .font(.system(size: 13))
+                .foregroundColor(.textTertiary)
 
-                Spacer()
+            Spacer()
 
-                Button(action: { showSearch = true }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text("添加")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .foregroundColor(.accentBlue)
+            Button(action: { showSearch = true }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("添加")
+                        .font(.system(size: 13, weight: .medium))
                 }
+                .foregroundColor(.accentBlue)
             }
-            .padding(.horizontal, 20)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .background(Color.primaryBackground)
+    }
 
+    // MARK: - Watchlist Content
+
+    private var watchlistContent: some View {
+        Group {
             if viewModel.isLoadingWatchlist && viewModel.watchlist.isEmpty {
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 30)
+                VStack(spacing: 2) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        StockRowSkeleton()
+                            .padding(.horizontal, 20)
+                    }
+                }
             } else if viewModel.watchlist.isEmpty {
                 emptyWatchlistView
             } else {
@@ -233,34 +276,42 @@ private struct IndexCard: View {
 
     var body: some View {
         Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 2) {
                     Text(index.shortName)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.textSecondary)
-                    Spacer()
-                    Text(index.changePercentText)
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        .foregroundColor(index.isUp ? .accentGreen : Color(hex: "E53935"))
+                        .lineLimit(1)
+                    Spacer(minLength: 2)
+                    RollingNumberText(
+                        text: index.changePercentText,
+                        font: .system(size: 11, weight: .semibold, design: .monospaced),
+                        color: index.isUp ? .accentGreen : Color(hex: "E53935")
+                    )
+                    .lineLimit(1)
                 }
 
-                Text(index.valueText)
-                    .font(.system(size: 20, weight: .bold, design: .monospaced))
-                    .foregroundColor(.textPrimary)
+                RollingNumberText(
+                    text: index.valueText,
+                    font: .system(size: 16, weight: .bold, design: .monospaced),
+                    color: .textPrimary,
+                    minimumScaleFactor: 0.7
+                )
+                .lineLimit(1)
 
                 if !index.sparklineData.isEmpty {
                     SparklineView(data: index.sparklineData, isUp: index.isUp)
-                        .frame(height: 32)
+                        .frame(height: 28)
                 } else {
                     Rectangle()
                         .fill(Color.clear)
-                        .frame(height: 32)
+                        .frame(height: 28)
                 }
             }
-            .padding(14)
-            .frame(width: 160)
+            .padding(10)
+            .frame(maxWidth: .infinity)
             .background(Color.secondaryBackground)
-            .cornerRadius(14)
+            .cornerRadius(12)
         }
         .buttonStyle(ScaleButtonStyle())
     }
@@ -286,20 +337,24 @@ struct StockRow: View {
 
                 Spacer()
 
-                Text(stock.priceText)
-                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.textPrimary)
+                RollingNumberText(
+                    text: stock.priceText,
+                    font: .system(size: 16, weight: .semibold, design: .monospaced),
+                    color: .textPrimary
+                )
 
-                Text(stock.changePercentText)
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(stock.isUp ? Color.accentGreen : Color(hex: "E53935"))
-                    )
-                    .frame(width: 80)
+                RollingNumberText(
+                    text: stock.changePercentText,
+                    font: .system(size: 13, weight: .semibold, design: .monospaced),
+                    color: .white
+                )
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(stock.isUp ? Color.accentGreen : Color(hex: "E53935"))
+                )
+                .frame(width: 80)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)

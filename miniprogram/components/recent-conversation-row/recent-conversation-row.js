@@ -14,6 +14,7 @@ function timeAgo(ts) {
 }
 
 Component({
+  options: { styleIsolation: 'apply-shared' },
   properties: {
     conversation: {
       type: Object,
@@ -28,8 +29,8 @@ Component({
       this.setData({
         displayTitle: v.title || `${market.displayName} · 新对话`,
         timeText: timeAgo(v.updatedAt),
-        marketColor: market.gradientStart,
-        marketIcon: market.icon,
+        marketMark: market.mark,
+        marketName: market.displayName,
       });
     },
   },
@@ -37,8 +38,8 @@ Component({
   data: {
     displayTitle: '',
     timeText: '',
-    marketColor: '#4A90E2',
-    marketIcon: '📈',
+    marketMark: 'A',
+    marketName: 'A 股',
   },
 
   methods: {

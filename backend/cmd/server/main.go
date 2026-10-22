@@ -16,11 +16,12 @@ import (
 	"github.com/songhanxu/wiseinvest/internal/adapter/repository"
 	"github.com/songhanxu/wiseinvest/internal/application/service"
 	"github.com/songhanxu/wiseinvest/internal/domain/agent"
+	infraapns "github.com/songhanxu/wiseinvest/internal/infrastructure/apns"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/auth"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/cache"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/config"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/database"
-	infraapns "github.com/songhanxu/wiseinvest/internal/infrastructure/apns"
+	infraemail "github.com/songhanxu/wiseinvest/internal/infrastructure/email"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/llm"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/logger"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/scheduler"
@@ -63,6 +64,9 @@ func main() {
 		log.Fatalf("Failed to seed default data: %v", err)
 	}
 	log.Info("Default data seeded successfully")
+	if err := database.BootstrapPasswordAccount(db, cfg.AccountBootstrap); err != nil {
+		log.Fatalf("Account credential setup failed: %v", err)
+	}
 
 	// Initialize Redis cache
 	redisClient, err := cache.NewRedisClient(cfg.Redis)
@@ -105,6 +109,7 @@ func main() {
 	usStockRegistry := skill.NewRegistry()
 	usStockRegistry.Register(skill.NewWebSearchSkill(searcher, ""))
 	usStockRegistry.Register(skill.NewUSStockPriceSkill())
+	usStockRegistry.Register(skill.NewHKStockPriceSkill())
 	log.Infof("US-stock skill registry: %d skills registered", usStockRegistry.Count())
 
 	// Crypto: web search (crypto prefix) + real-time crypto price
@@ -113,8 +118,21 @@ func main() {
 	cryptoRegistry.Register(skill.NewCryptoPriceSkill())
 	log.Infof("Crypto skill registry: %d skills registered", cryptoRegistry.Count())
 
+	// Group chat (慧投圆桌): combined registry with all market skills so that
+	// persona agents can query any market during a roundtable discussion.
+	groupRegistry := skill.NewRegistry()
+	groupRegistry.Register(skill.NewWebSearchSkill(searcher, ""))
+	groupRegistry.Register(skill.NewASharePriceSkill())
+	groupRegistry.Register(skill.NewUSStockPriceSkill())
+	groupRegistry.Register(skill.NewHKStockPriceSkill())
+	groupRegistry.Register(skill.NewCryptoPriceSkill())
+	groupRegistry.Register(skill.NewAShareSectorSkill())
+	groupRegistry.Register(skill.NewAShareStockDetailSkill())
+	groupRegistry.Register(skill.NewLookupAShareCodeSkill())
+	log.Infof("Group chat skill registry: %d skills registered", groupRegistry.Count())
+
 	// ── Agent Factory ──────────────────────────────────────────────────────────
-	agentFactory := agent.NewAgentFactory(llmClient, searcher, log, aShareRegistry, usStockRegistry, cryptoRegistry)
+	agentFactory := agent.NewAgentFactory(llmClient, searcher, log, aShareRegistry, usStockRegistry, cryptoRegistry, groupRegistry)
 
 	// Initialize services
 	conversationService := service.NewConversationService(
@@ -156,7 +174,24 @@ func main() {
 	}
 
 	deviceHandler := handler.NewDeviceHandler(deviceTokenRepo, log)
-	stockHandler := handler.NewStockHandler(watchlistRepo, log)
+
+	// Initialize quote cache for high-frequency market data
+	quoteCache := cache.NewQuoteCache(redisClient, log)
+	stockHandler := handler.NewStockHandler(watchlistRepo, log, quoteCache, searcher, llmClient)
+	accountHandler := handler.NewAccountHandler(cfg.Bitget)
+	accountHandler.AddExchange(cfg.BinanceAccount)
+	accountHandler.AddExchange(cfg.GateAccount)
+	mailClient := infraemail.New(infraemail.Config{Host: cfg.Notification.SMTPHost, Port: cfg.Notification.SMTPPort, Username: cfg.Notification.SMTPUsername, Password: cfg.Notification.SMTPPassword, From: cfg.Notification.SMTPFrom, TLSMode: cfg.Notification.SMTPTLSMode})
+	alertService := &service.PriceAlertService{Store: repository.NewPriceAlertRepository(db), Quotes: func(ctx context.Context, user uint, source string) ([]service.AlertQuote, error) {
+		if source == "watchlist" {
+			return stockHandler.WatchlistPriceAlertQuotes(ctx, user)
+		}
+		return accountHandler.PriceAlertQuotes(ctx, user, source)
+	}, Mailer: mailClient}
+	alertHandler := &handler.PriceAlertHandler{Service: alertService}
+	stopAlerts := alertService.Start()
+	defer stopAlerts()
+	defer stockHandler.Stop() // gracefully stop background tickers
 
 	// ── Scheduler ────────────────────────────────────────────────────────────
 	dailyTask := scheduler.NewDailyReportTask(agentFactory, wxClient, apnsClient, deviceTokenRepo, log)
@@ -165,8 +200,8 @@ func main() {
 	defer sched.Stop()
 
 	// Initialize HTTP server
-	router := api.NewRouter(conversationService, authHandler, deviceHandler, stockHandler, jwtSvc, log)
-	
+	router := api.NewRouter(conversationService, authHandler, deviceHandler, stockHandler, accountHandler, alertHandler, jwtSvc, log)
+
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.Server.Port),
 		Handler:      router,

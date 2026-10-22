@@ -3,31 +3,53 @@ import Combine
 
 struct HomeView: View {
     @ObservedObject var coordinator: AppCoordinator
-    @EnvironmentObject var authState: AuthState
     @StateObject private var viewModel = HomeViewModel()
     @State private var sheetItem: ConversationSheetItem?
     @State private var marketSheetItem: Market?
-    @State private var showAccountMenu = false
+    /// Holds a market that the user tapped while a sheet was still dismissing.
+    @State private var pendingMarket: Market?
 
     var body: some View {
         NavigationView {
             ZStack {
                 Color.primaryBackground.ignoresSafeArea()
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        headerSection
-                        marketSection
-                        if !viewModel.recentConversations.isEmpty {
-                            recentSection
+                VStack(spacing: 0) {
+                    headerSection
+
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                            Section(header: marketSectionHeader) {
+                                marketSectionContent
+                            }
+                            if !viewModel.recentConversations.isEmpty {
+                                Section(header: recentSectionHeader) {
+                                    recentSectionContent
+                                }
+                            }
                         }
                     }
                 }
             }
             .navigationBarHidden(true)
         }
-        .sheet(item: $marketSheetItem) { market in
+        .sheet(item: $marketSheetItem, onDismiss: {
+            // If the user tapped another market while this sheet was dismissing,
+            // present it now that the dismiss animation has fully finished.
+            if let next = pendingMarket {
+                pendingMarket = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    marketSheetItem = next
+                }
+            }
+        }) { market in
             MarketDetailView(market: market, coordinator: coordinator)
+                .id(market)  // Force SwiftUI to recreate View + @StateObject when market changes
+        }
+        .onAppear {
+            PreloadManager.shared.preloadAllMarkets()
+            // Connect WebSocket for real-time market data push
+            WebSocketClient.shared.connect()
         }
         .sheet(item: $sheetItem, onDismiss: {
             viewModel.loadRecentConversations()
@@ -44,127 +66,94 @@ struct HomeView: View {
     // MARK: - Header
 
     private var headerSection: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("慧投")
-                    .font(.system(size: 32, weight: .bold))
-                    .foregroundColor(.white)
-                Text("WiseInvest")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.textSecondary)
-            }
-            Spacer()
-            avatarButton
+        VStack(alignment: .leading, spacing: 4) {
+            Text("慧投")
+                .font(.system(size: 32, weight: .bold))
+                .foregroundColor(.white)
+            Text("WiseInvest")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.textSecondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
         .padding(.top, 20)
-        .padding(.bottom, 28)
+        .padding(.bottom, 16)
+        .background(Color.primaryBackground)
     }
 
-    // MARK: - Avatar Button
+    // MARK: - Market Section Header (sticky)
 
-    @ViewBuilder
-    private var avatarButton: some View {
-        Button(action: { showAccountMenu.toggle() }) {
-            Group {
-                if let user = authState.currentUser, !user.effectiveAvatar.isEmpty,
-                   let url = URL(string: user.effectiveAvatar) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        default:
-                            defaultAvatarView
-                        }
-                    }
-                } else {
-                    defaultAvatarView
+    private var marketSectionHeader: some View {
+        SectionHeader(title: "选择市场", subtitle: "进入对话，开始分析")
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primaryBackground)
+    }
+
+    // MARK: - Market Section Content
+
+    private var marketSectionContent: some View {
+        VStack(spacing: 12) {
+            ForEach(Market.allCases) { market in
+                MarketCard(market: market) {
+                    openMarketSheet(market)
                 }
-            }
-            .frame(width: 44, height: 44)
-            .clipShape(Circle())
-            .overlay(Circle().stroke(Color.accentBlue.opacity(0.5), lineWidth: 1.5))
-        }
-        .confirmationDialog(
-            accountMenuTitle,
-            isPresented: $showAccountMenu,
-            titleVisibility: .visible
-        ) {
-            Button("切换账号") {
-                authState.signOut()
-            }
-            Button("退出登录", role: .destructive) {
-                authState.signOut()
-            }
-            Button("取消", role: .cancel) {}
-        }
-    }
-
-    private var defaultAvatarView: some View {
-        Circle()
-            .fill(Color.accentBlue.opacity(0.2))
-            .overlay(
-                Image(systemName: "person.fill")
-                    .font(.system(size: 20))
-                    .foregroundColor(.accentBlue)
-            )
-    }
-
-    private var accountMenuTitle: String {
-        if let user = authState.currentUser {
-            let name = user.effectiveName
-            let phone = user.phone.map { "手机：\($0)" } ?? "未绑定手机"
-            return "\(name)\n\(phone)"
-        }
-        return "账号管理"
-    }
-
-    // MARK: - Market Cards
-
-    private var marketSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "选择市场", subtitle: "进入对话，开始分析")
                 .padding(.horizontal, 20)
-
-            VStack(spacing: 12) {
-                ForEach(Market.allCases) { market in
-                    MarketCard(market: market) {
-                        marketSheetItem = market
-                    }
-                    .padding(.horizontal, 20)
-                }
             }
-            .padding(.bottom, 8)
+        }
+        .padding(.bottom, 8)
+    }
+
+    // MARK: - Open Market Sheet (handles dismiss-animation race)
+
+    /// Safely opens a market sheet even if one is currently being dismissed.
+    private func openMarketSheet(_ market: Market) {
+        if marketSheetItem != nil {
+            // Sheet is still presented — dismiss it first, open the new one in onDismiss.
+            pendingMarket = market
+            marketSheetItem = nil
+        } else if pendingMarket != nil {
+            // A previous sheet is still in dismiss animation (pendingMarket waiting).
+            // Replace the pending target with the new one.
+            pendingMarket = market
+        } else {
+            // No sheet active — present immediately.
+            marketSheetItem = market
         }
     }
 
-    // MARK: - Recent Conversations
+    // MARK: - Recent Section Header (sticky)
 
-    private var recentSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "最近对话", subtitle: nil)
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
+    private var recentSectionHeader: some View {
+        SectionHeader(title: "最近对话", subtitle: nil)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primaryBackground)
+    }
 
-            VStack(spacing: 8) {
-                ForEach(viewModel.recentConversations) { conversation in
-                    RecentConversationRow(conversation: conversation) {
-                        if let market = Market(rawValue: conversation.agentType.rawValue) {
-                            sheetItem = ConversationSheetItem(market: market, existingConversation: conversation)
-                        }
+    // MARK: - Recent Section Content
+
+    private var recentSectionContent: some View {
+        VStack(spacing: 8) {
+            ForEach(viewModel.recentConversations) { conversation in
+                RecentConversationRow(conversation: conversation) {
+                    if let market = Market(rawValue: conversation.agentType.rawValue) {
+                        sheetItem = ConversationSheetItem(market: market, existingConversation: conversation)
                     }
-                    .padding(.horizontal, 20)
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            viewModel.deleteConversation(id: conversation.id)
-                        } label: {
-                            Label("删除", systemImage: "trash")
-                        }
+                }
+                .padding(.horizontal, 20)
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        viewModel.deleteConversation(id: conversation.id)
+                    } label: {
+                        Label("删除", systemImage: "trash")
                     }
                 }
             }
-            .padding(.bottom, 32)
         }
+        .padding(.bottom, 32)
     }
 }
 

@@ -12,6 +12,22 @@ enum StreamChunkType: String {
     case thought
 }
 
+// MARK: - Group Chat SSE types
+
+/// A streaming event from the multi-agent roundtable endpoint.
+struct GroupStreamChunk {
+    let agentId: String
+    let type: GroupStreamChunkType
+    let content: String
+}
+
+enum GroupStreamChunkType: String {
+    case agentStart = "agent_start"
+    case agentEnd   = "agent_end"
+    case content
+    case thought
+}
+
 /// Protocol defining conversation repository operations
 protocol ConversationRepository {
     /// Get or create conversation ID for an agent

@@ -9,20 +9,30 @@ import (
 
 // Config holds all configuration for the application
 type Config struct {
-	Server       ServerConfig
-	Database     DatabaseConfig
-	Redis        RedisConfig
-	OpenAI       OpenAIConfig
-	Binance      BinanceConfig
-	Search       SearchConfig
-	JWT          JWTConfig
-	CORS         CORSConfig
-	WeChat       WeChatConfig
-	Notification NotificationConfig
+	Server           ServerConfig
+	Database         DatabaseConfig
+	Redis            RedisConfig
+	OpenAI           OpenAIConfig
+	Binance          BinanceConfig
+	Bitget           BitgetConfig
+	BinanceAccount   ExchangeAccountConfig
+	GateAccount      ExchangeAccountConfig
+	Search           SearchConfig
+	JWT              JWTConfig
+	AccountBootstrap AccountBootstrapConfig
+	CORS             CORSConfig
+	WeChat           WeChatConfig
+	Notification     NotificationConfig
 }
 
 // NotificationConfig holds push notification configuration
 type NotificationConfig struct {
+	SMTPHost     string
+	SMTPPort     string
+	SMTPUsername string
+	SMTPPassword string `json:"-"`
+	SMTPFrom     string
+	SMTPTLSMode  string
 	// 企业微信机器人 Webhook URL
 	WxWorkWebhookURL string
 	// APNs (.p8 token-based auth)
@@ -83,6 +93,13 @@ type JWTConfig struct {
 	Expiration time.Duration
 }
 
+// Optional one-time migration of an explicitly selected existing account.
+type AccountBootstrapConfig struct {
+	UserID   uint
+	Username string
+	Password string `json:"-"`
+}
+
 // CORSConfig holds CORS configuration
 type CORSConfig struct {
 	AllowedOrigins []string
@@ -90,6 +107,26 @@ type CORSConfig struct {
 
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
+	bootstrap := AccountBootstrapConfig{Username: os.Getenv("AUTH_BOOTSTRAP_USERNAME"), Password: os.Getenv("AUTH_BOOTSTRAP_PASSWORD")}
+	if rawID := os.Getenv("AUTH_BOOTSTRAP_USER_ID"); rawID != "" || bootstrap.Username != "" || bootstrap.Password != "" {
+		id, err := strconv.ParseUint(rawID, 10, 32)
+		if err != nil || id == 0 || bootstrap.Username == "" || bootstrap.Password == "" {
+			return nil, fmt.Errorf("AUTH_BOOTSTRAP_USER_ID, AUTH_BOOTSTRAP_USERNAME and AUTH_BOOTSTRAP_PASSWORD must be configured together")
+		}
+		bootstrap.UserID = uint(id)
+	}
+	bitgetConfig, err := loadBitgetConfig()
+	if err != nil {
+		return nil, err
+	}
+	binanceAccount, err := loadExchangeAccount("BINANCE", "binance", "币安")
+	if err != nil {
+		return nil, err
+	}
+	gateAccount, err := loadExchangeAccount("GATE", "gate", "Gate")
+	if err != nil {
+		return nil, err
+	}
 	redisDB, err := strconv.Atoi(getEnv("REDIS_DB", "0"))
 	if err != nil {
 		return nil, fmt.Errorf("invalid REDIS_DB: %w", err)
@@ -101,6 +138,9 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
+		AccountBootstrap: bootstrap,
+		Bitget:           bitgetConfig,
+		BinanceAccount:   binanceAccount, GateAccount: gateAccount,
 		Server: ServerConfig{
 			Port: getEnv("SERVER_PORT", "8080"),
 			Mode: getEnv("SERVER_MODE", "debug"),
@@ -131,7 +171,7 @@ func Load() (*Config, error) {
 		Binance: BinanceConfig{
 			APIKey:    getEnv("BINANCE_API_KEY", ""),
 			APISecret: getEnv("BINANCE_API_SECRET", ""),
-			BaseURL:   getEnv("BINANCE_BASE_URL", "https://api.binance.com"),
+			BaseURL:   getEnv("BINANCE_BASE_URL", "https://data-api.binance.vision"),
 			Testnet:   getEnv("BINANCE_TESTNET", "false") == "true",
 		},
 		JWT: JWTConfig{
@@ -148,6 +188,7 @@ func Load() (*Config, error) {
 			AppSecret: getEnv("WECHAT_APP_SECRET", ""),
 		},
 		Notification: NotificationConfig{
+			SMTPHost: getEnv("SMTP_HOST", ""), SMTPPort: getEnv("SMTP_PORT", "587"), SMTPUsername: getEnv("SMTP_USERNAME", ""), SMTPPassword: getEnv("SMTP_PASSWORD", ""), SMTPFrom: getEnv("SMTP_FROM", ""), SMTPTLSMode: getEnv("SMTP_TLS_MODE", "starttls"),
 			WxWorkWebhookURL: getEnv("WXWORK_WEBHOOK_URL", ""),
 			APNSKeyID:        getEnv("APNS_KEY_ID", ""),
 			APNSTeamID:       getEnv("APNS_TEAM_ID", ""),

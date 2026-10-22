@@ -6,7 +6,11 @@ enum AgentType: String, Codable, CaseIterable, Identifiable {
     // Market-based types (primary)
     case aShare  = "a_share"
     case usStock = "us_stock"
+    case hkStock = "hk_stock"
     case crypto  = "crypto"
+
+    // Group chat roundtable
+    case groupChat = "group_chat"
 
     // Legacy types (kept for backward compatibility)
     case orchestrator      = "orchestrator"
@@ -21,6 +25,7 @@ enum AgentType: String, Codable, CaseIterable, Identifiable {
         switch market {
         case .aShare:  self = .aShare
         case .usStock: self = .usStock
+        case .hkStock: self = .hkStock
         case .crypto:  self = .crypto
         }
     }
@@ -29,7 +34,9 @@ enum AgentType: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .aShare:          return "A 股"
         case .usStock:         return "美 股"
+        case .hkStock:         return "港 股"
         case .crypto:          return "币 圈"
+        case .groupChat:       return "慧投圆桌"
         case .orchestrator:    return "智能助手"
         case .conversation,
              .investmentAdvisor: return "投资顾问"
@@ -41,7 +48,9 @@ enum AgentType: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .aShare:          return "沪深北交所 · A股投资分析"
         case .usStock:         return "NYSE/NASDAQ · 美股研究"
+        case .hkStock:         return "港股研究 · Bitget Quanto 合约"
         case .crypto:          return "加密货币 · 合约现货分析"
+        case .groupChat:       return "多 Agent 投资圆桌讨论"
         case .orchestrator:    return "主控 AI 助手"
         case .conversation,
              .investmentAdvisor: return "专业投资分析"
@@ -53,7 +62,9 @@ enum AgentType: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .aShare:          return "chart.bar.xaxis"
         case .usStock:         return "dollarsign.circle"
+        case .hkStock:         return "building.2"
         case .crypto:          return "bitcoinsign.circle"
+        case .groupChat:       return "person.3"
         case .orchestrator:    return "brain.head.profile"
         case .conversation,
              .investmentAdvisor: return "chart.line.uptrend.xyaxis"
@@ -65,7 +76,9 @@ enum AgentType: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .aShare:          return ["B71C1C", "E53935"]
         case .usStock:         return ["0D47A1", "1976D2"]
+        case .hkStock:         return ["7C3AED", "A78BFA"]
         case .crypto:          return ["E65100", "FF9800"]
+        case .groupChat:       return ["1A237E", "4A90E2"]
         case .orchestrator:    return ["9C27B0", "AB47BC"]
         case .conversation,
              .investmentAdvisor: return ["4CAF50", "66BB6A"]

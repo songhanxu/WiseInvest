@@ -13,8 +13,8 @@ enum APIConfig {
     /// 公网模式：Cloudflare Tunnel 地址（手机随处可用）
     /// 格式：https://<tunnel-id>.cfargotunnel.com
     /// 创建方式见 WiseInvest/start-tunnel.sh
-    static let tunnelURL: String? = "https://nonimbricative-ungoitered-joyce.ngrok-free.dev"
-  // 示例: "https://abc123-xxxx.cfargotunnel.com"
+    static let tunnelURL: String? = "http://119.91.58.30"
+  // 腾讯云服务器公网地址
 
     // MARK: - 自动选择 URL（无需手动修改）
 
@@ -30,5 +30,16 @@ enum APIConfig {
         // 真机：同一 Wi-Fi 下用局域网 IP
         return "http://\(localDeviceHost):\(localPort)"
         #endif
+    }
+
+    /// WebSocket URL — auto-derived from baseURL (http→ws, https→wss)
+    static var wsURL: String {
+        let base = baseURL
+        if base.hasPrefix("https://") {
+            return "wss://" + base.dropFirst("https://".count) + "/api/v1/ws"
+        } else if base.hasPrefix("http://") {
+            return "ws://" + base.dropFirst("http://".count) + "/api/v1/ws"
+        }
+        return "ws://" + base + "/api/v1/ws"
     }
 }

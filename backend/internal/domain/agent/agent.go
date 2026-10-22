@@ -8,23 +8,23 @@ import (
 type Agent interface {
 	// GetType returns the agent type
 	GetType() string
-	
+
 	// GetSystemPrompt returns the system prompt for the agent
 	GetSystemPrompt() string
-	
+
 	// Process processes a user message and returns a response
 	Process(ctx context.Context, req ProcessRequest) (*ProcessResponse, error)
-	
+
 	// ProcessStream processes a user message and streams the response
 	ProcessStream(ctx context.Context, req ProcessRequest, callback func(string) error) error
 }
 
 // ProcessRequest represents a request to process a message
 type ProcessRequest struct {
-	UserMessage      string
-	ConversationID   uint
+	UserMessage         string
+	ConversationID      uint
 	ConversationHistory []HistoryMessage
-	Context          map[string]interface{}
+	Context             map[string]interface{}
 }
 
 // ProcessResponse represents a response from processing a message
@@ -54,6 +54,10 @@ const (
 
 	// Market-based agent types
 	TypeAShare  = "a_share"  // A股：沪深北交所
+	TypeHKStock = "hk_stock" // 港股与 Quanto 合约
 	TypeUSStock = "us_stock" // 美股：纽交所/纳斯达克
 	TypeCrypto  = "crypto"   // 币圈：加密货币
+
+	// Group chat agent types
+	TypeGroupChat = "group_chat" // 慧投圆桌：多 Agent 圆桌讨论
 )

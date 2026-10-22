@@ -5,6 +5,8 @@ Page({
   data: {
     markets: MARKETS,
     recentConversations: [],
+    conversationCount: 0,
+    todayLabel: '',
   },
 
   onShow() {
@@ -14,9 +16,14 @@ Page({
       return;
     }
 
-    this.setData({
-      recentConversations: loadConversations().slice(0, 5),
-    });
+    this.refreshConversations();
+    const today = new Date();
+    this.setData({ todayLabel: `${today.getMonth() + 1}月${today.getDate()}日 · ${['周日', '周一', '周二', '周三', '周四', '周五', '周六'][today.getDay()]}` });
+  },
+
+  refreshConversations() {
+    const conversations = loadConversations();
+    this.setData({ recentConversations: conversations.slice(0, 5), conversationCount: conversations.length });
   },
 
   openAccountMenu() {
@@ -59,7 +66,7 @@ Page({
       success: ({ confirm }) => {
         if (!confirm) return;
         removeConversationById(conversation.id);
-        this.setData({ recentConversations: loadConversations().slice(0, 5) });
+        this.refreshConversations();
       },
     });
   },

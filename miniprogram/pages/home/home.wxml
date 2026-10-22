@@ -1,48 +1,30 @@
 <view class="home-page safe-area-bottom">
-  <view class="home-glow home-glow-1"></view>
-  <view class="home-glow home-glow-2"></view>
-
   <view class="content">
     <view class="header">
-      <view>
-        <view class="title-cn">慧投</view>
-        <view class="title-en">WiseInvest</view>
-      </view>
-      <view class="avatar-btn" bindtap="openAccountMenu">
-        <view class="avatar-glyph">
-          <view class="avatar-head"></view>
-          <view class="avatar-body"></view>
-        </view>
-      </view>
+      <view class="brand"><view class="brand-mark"><view class="bar bar-one"></view><view class="bar bar-two"></view><view class="bar bar-three"></view></view><view><view class="brand-name">慧投</view><view class="brand-caption">投资研究工作台</view></view></view>
+      <button class="account-button" bindtap="openAccountMenu" hover-class="is-pressed" aria-label="账户选项">账户<text class="account-arrow">⌄</text></button>
     </view>
-
-    <view class="section">
-      <view class="section-title">选择市场</view>
-      <view class="section-subtitle">选择你的分析场景，进入专属对话</view>
+    <view class="intro">
+      <view class="eyebrow">{{todayLabel}}</view>
+      <view class="intro-title">看清市场，从容决策。</view>
+      <view class="intro-copy">从一个市场、一家公司，开始你的研究。</view>
     </view>
-
+    <view class="overview">
+      <view class="overview-item"><view class="overview-label">研究市场</view><view class="overview-value">{{markets.length}}<text>个</text></view></view>
+      <view class="overview-item"><view class="overview-label">我的对话</view><view class="overview-value">{{conversationCount}}<text>次</text></view></view>
+      <view class="overview-item"><view class="overview-label">研究方式</view><view class="overview-status">AI 辅助分析</view></view>
+    </view>
+    <view class="section-heading"><view class="section-title">市场研究</view><view class="section-note">选择市场开始</view></view>
     <view class="markets">
-      <market-card wx:for="{{markets}}" wx:key="id" market="{{item}}" bindtapcard="onTapMarket"></market-card>
+      <view wx:for="{{markets}}" wx:key="id" class="market-slot {{index === markets.length - 1 && markets.length % 2 ? 'market-slot-wide' : ''}}">
+        <market-card market="{{item}}" wide="{{index === markets.length - 1 && markets.length % 2}}" bindtapcard="onTapMarket"></market-card>
+      </view>
     </view>
-
-    <view class="section recent-title-wrap">
-      <view class="section-title">最近对话</view>
-      <view class="section-subtitle">可长按记录进行删除</view>
-    </view>
-
+    <view class="section-heading recent-heading"><view class="section-title">继续研究</view><view wx:if="{{recentConversations.length}}" class="section-note">最近 {{recentConversations.length}} 条</view></view>
     <view wx:if="{{recentConversations.length}}" class="recent-list">
-      <recent-row
-        wx:for="{{recentConversations}}"
-        wx:key="id"
-        conversation="{{item}}"
-        bindtaprow="onTapRecentConversation"
-        binddelete="onDeleteRecentConversation"
-      ></recent-row>
+      <recent-row wx:for="{{recentConversations}}" wx:key="id" conversation="{{item}}" bindtaprow="onTapRecentConversation" binddelete="onDeleteRecentConversation"></recent-row>
     </view>
-
-    <view wx:else class="recent-empty">
-      <view class="empty-title">还没有最近对话</view>
-      <view class="empty-desc">从上方任一市场入口开始你的第一段分析</view>
-    </view>
+    <view wx:else class="recent-empty"><view class="empty-mark">↗</view><view class="empty-title">第一份研究，从这里开始</view><view class="empty-desc">选择上方市场，与慧投聊聊你关注的标的。</view></view>
+    <view class="page-note">专注研究，审慎决策。</view>
   </view>
 </view>

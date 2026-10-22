@@ -1,36 +1,26 @@
-:root {
-  --color-bg-primary: #0A0E27;
-  --color-bg-secondary: #1A1F3A;
-  --color-text-primary: #FFFFFF;
-  --color-text-secondary: #A0A0A0;
-  --color-text-tertiary: #666666;
-  --color-accent-blue: #4A90E2;
-  --color-user-msg: #4A90E2;
-  --color-assistant-msg: #2C3E50;
-}
-
 page {
-  background-color: #081227;
-  background: var(--color-bg-primary);
-  color: var(--color-text-primary);
+  --color-bg-primary: #f7f8f6;
+  --color-bg-secondary: #ffffff;
+  --color-text-primary: #232b24;
+  --color-text-secondary: #6c7868;
+  --color-text-tertiary: #87917f;
+  --color-accent-blue: #36573d;
+  --color-user-msg: #edf3e8;
+  --color-assistant-msg: #ffffff;
+  --color-line: #e5e9e0;
+  background: #f7f8f6;
+  color: #232b24;
   min-height: 100%;
-  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
   font-size: 28rpx;
+  line-height: 1.5;
 }
-
-.safe-area-bottom {
-  padding-bottom: env(safe-area-inset-bottom);
-}
-
-.card {
-  background: var(--color-bg-secondary);
-  border-radius: 24rpx;
-}
-
-.text-secondary {
-  color: var(--color-text-secondary);
-}
-
-.text-tertiary {
-  color: var(--color-text-tertiary);
-}
+view, button, input, textarea, scroll-view { box-sizing: border-box; }
+button { margin: 0; font: inherit; padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; line-height: inherit; }
+button::after { border: 0; }
+button[disabled] { opacity: .5; }
+.safe-area-bottom { padding-bottom: 24rpx; padding-bottom: calc(24rpx + env(safe-area-inset-bottom)); }
+.card { background: #fff; border: 1rpx solid #e5e9e0; border-radius: 20rpx; }
+.text-secondary { color: #6c7868; }
+.text-tertiary { color: #87917f; }
+.is-pressed { opacity: .7; }

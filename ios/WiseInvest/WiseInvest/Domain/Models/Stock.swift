@@ -15,6 +15,76 @@ struct Stock: Identifiable, Codable, Hashable {
     var low: Double
     var open: Double
     var previousClose: Double
+    var source: String?
+    var currency: String?
+    var productType: String?
+    var changeBasis: String?
+    var isIndex: Bool        // 是否为大盘指数（指数不可加入自选）
+    // Extended hours trading (US stocks only)
+    var extendedPrice: Double?   // 盘前或盘后价格
+    var extendedChange: Double?  // 相对昨收的变化
+    var priceStatus: String?     // "live", "pre_market", "after_hours", "closed"
+
+    enum CodingKeys: String, CodingKey {
+        case id, symbol, name, market, currentPrice, change, changePercent
+        case volume, high, low, open, previousClose, isIndex
+        case extendedPrice, extendedChange, priceStatus
+        case source, currency, productType, changeBasis
+    }
+
+    /// Default initializer with isIndex defaulting to false
+    init(id: String, symbol: String, name: String, market: String,
+         currentPrice: Double, change: Double, changePercent: Double,
+         volume: Double, high: Double, low: Double, open: Double,
+         previousClose: Double, isIndex: Bool = false,
+         extendedPrice: Double? = nil, extendedChange: Double? = nil,
+         priceStatus: String? = nil, source: String? = nil, currency: String? = nil,
+         productType: String? = nil, changeBasis: String? = nil) {
+        self.id = id
+        self.symbol = symbol
+        self.name = name
+        self.market = market
+        self.currentPrice = currentPrice
+        self.change = change
+        self.changePercent = changePercent
+        self.volume = volume
+        self.high = high
+        self.low = low
+        self.open = open
+        self.previousClose = previousClose
+        self.source = source
+        self.currency = currency
+        self.productType = productType
+        self.changeBasis = changeBasis
+        self.isIndex = isIndex
+        self.extendedPrice = extendedPrice
+        self.extendedChange = extendedChange
+        self.priceStatus = priceStatus
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        symbol = try c.decode(String.self, forKey: .symbol)
+        name = try c.decode(String.self, forKey: .name)
+        market = try c.decode(String.self, forKey: .market)
+        currentPrice = try c.decode(Double.self, forKey: .currentPrice)
+        change = try c.decode(Double.self, forKey: .change)
+        changePercent = try c.decode(Double.self, forKey: .changePercent)
+        volume = try c.decode(Double.self, forKey: .volume)
+        high = try c.decode(Double.self, forKey: .high)
+        low = try c.decode(Double.self, forKey: .low)
+        open = try c.decode(Double.self, forKey: .open)
+        previousClose = try c.decode(Double.self, forKey: .previousClose)
+        source = try c.decodeIfPresent(String.self, forKey: .source)
+        currency = try c.decodeIfPresent(String.self, forKey: .currency)
+        productType = try c.decodeIfPresent(String.self, forKey: .productType)
+        changeBasis = try c.decodeIfPresent(String.self, forKey: .changeBasis)
+        isIndex = try c.decodeIfPresent(Bool.self, forKey: .isIndex) ?? false
+        extendedPrice = try c.decodeIfPresent(Double.self, forKey: .extendedPrice)
+        extendedChange = try c.decodeIfPresent(Double.self, forKey: .extendedChange)
+        priceStatus = try c.decodeIfPresent(String.self, forKey: .priceStatus)
+    }
 
     var isUp: Bool { change >= 0 }
 
@@ -84,7 +154,9 @@ struct NewsItem: Identifiable {
     let source: String
     let time: String
     let summary: String
+    let analysis: String  // Detailed AI analysis for detail page
     let sentiment: NewsSentiment
+    let url: String
 }
 
 enum NewsSentiment: String {

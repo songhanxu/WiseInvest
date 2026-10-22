@@ -1,8 +1,5 @@
-<view class="market-card" style="background: linear-gradient(135deg, {{market.gradientStart}}, {{market.gradientEnd}});" bindtap="handleTap">
-  <view class="market-icon">{{market.icon}}</view>
-  <view class="market-content">
-    <view class="market-name">{{market.displayName}}</view>
-    <view class="market-subtitle">{{market.subtitle}}</view>
-    <view class="market-desc">{{market.description}}</view>
-  </view>
-</view>
+<button class="market-card {{wide ? 'market-card-wide' : ''}}" bindtap="handleTap" hover-class="market-card-pressed" aria-label="{{market.displayName}}研究">
+  <view class="market-symbol">{{market.mark}}</view>
+  <view class="market-content"><view class="market-name">{{market.displayName}}</view><view class="market-subtitle">{{market.subtitle}}</view><view class="market-desc">{{market.focus}}</view></view>
+  <view class="market-arrow">↗</view>
+</button>

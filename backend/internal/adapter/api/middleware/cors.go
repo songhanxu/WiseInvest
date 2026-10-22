@@ -7,6 +7,13 @@ import (
 // CORS returns a gin middleware for CORS
 func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Skip CORS headers for WebSocket upgrade requests — the Upgrader
+		// handles its own handshake and extra headers will break it.
+		if c.GetHeader("Upgrade") == "websocket" {
+			c.Next()
+			return
+		}
+
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")

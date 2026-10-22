@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/songhanxu/wiseinvest/internal/adapter/repository"
@@ -176,6 +177,14 @@ func (s *ConversationService) SendMessage(ctx context.Context, req SendMessageRe
 }
 
 // GetConversation gets a conversation with messages
+func (s *ConversationService) CheckConversationOwner(ctx context.Context, id, userID uint) error {
+	conversation, err := s.conversationRepo.GetByID(ctx, id)
+	if err != nil || userID == 0 || conversation.UserID != userID || conversation.Status == model.ConversationStatusDeleted {
+		return fmt.Errorf("conversation not found")
+	}
+	return nil
+}
+
 func (s *ConversationService) GetConversation(ctx context.Context, id uint) (*model.Conversation, error) {
 	return s.conversationRepo.GetWithMessages(ctx, id, 100)
 }
@@ -292,4 +301,150 @@ func (s *ConversationService) SendMessageStream(ctx context.Context, req SendMes
 	}
 
 	return userMessage, nil
+}
+
+// ── Group Chat ────────────────────────────────────────────────────────────────
+
+// GroupChatEventCallback receives individual SSE events from persona agents.
+// agentID is the short persona ID ("orchestrator", "value", "trend", "quant").
+// eventType is one of: "agent_start", "content", "thought", "agent_error", "agent_end".
+type GroupChatEventCallback func(agentID, eventType, content string) error
+
+// SendGroupChatStream streams a multi-agent roundtable response.
+// Each participant agent responds in canonical order; later agents receive the
+// full text of earlier agents as additional context so they can build on each
+// other's perspectives.
+func (s *ConversationService) SendGroupChatStream(
+	ctx context.Context,
+	conversationID uint,
+	content string,
+	participants []string,
+	callback GroupChatEventCallback,
+) error {
+	// Fetch conversation to validate it exists
+	conv, err := s.conversationRepo.GetByID(ctx, conversationID)
+	if err != nil {
+		return fmt.Errorf("conversation not found: %w", err)
+	}
+
+	// Persist user message
+	userMsg := &model.Message{
+		ConversationID: conversationID,
+		Role:           model.MessageRoleUser,
+		Content:        content,
+	}
+	if err := s.messageRepo.Create(ctx, userMsg); err != nil {
+		return fmt.Errorf("failed to save user message: %w", err)
+	}
+
+	// Build conversation history (skip the message we just inserted)
+	history, err := s.messageRepo.GetRecentMessages(ctx, conversationID, 20)
+	if err != nil {
+		return fmt.Errorf("failed to get history: %w", err)
+	}
+	agentHistory := make([]agent.HistoryMessage, 0, len(history))
+	for _, msg := range history {
+		if msg.ID == userMsg.ID {
+			continue
+		}
+		agentHistory = append(agentHistory, agent.HistoryMessage{
+			Role:    msg.Role,
+			Content: msg.Content,
+		})
+	}
+
+	// Create ordered persona agents
+	groupAgents := s.agentFactory.CreateGroupChatAgents(participants)
+	if len(groupAgents) == 0 {
+		return fmt.Errorf("no valid roundtable participants")
+	}
+
+	// Stream each agent sequentially; accumulate responses for cross-agent context
+	priorResponses := make([]string, 0, len(groupAgents))
+	var fullExchangeBuilder strings.Builder
+
+	for _, ga := range groupAgents {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		agentID := ga.AgentID()
+		if err := callback(agentID, "agent_start", ""); err != nil {
+			return err
+		}
+
+		agentReq := agent.ProcessRequest{
+			UserMessage:         content,
+			ConversationID:      conversationID,
+			ConversationHistory: agentHistory,
+			Context: map[string]interface{}{
+				"prior_responses": priorResponses,
+			},
+		}
+
+		var agentResponseBuilder strings.Builder
+
+		streamCB := func(chunk string) error {
+			if thought, ok := llm.ParseThoughtChunk(chunk); ok {
+				return callback(agentID, "thought", thought)
+			}
+			agentResponseBuilder.WriteString(chunk)
+			return callback(agentID, "content", chunk)
+		}
+
+		agentCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		streamErr := ga.ProcessStream(agentCtx, agentReq, streamCB)
+		cancel()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if streamErr != nil || strings.TrimSpace(agentResponseBuilder.String()) == "" {
+			if streamErr == nil {
+				streamErr = fmt.Errorf("model returned an empty answer")
+			}
+			s.logger.WithField("error", streamErr).Errorf("Group agent %s stream error", agentID)
+			if err := callback(agentID, "agent_error", roundtableErrorMessage(streamErr)); err != nil {
+				return err
+			}
+			// Continue with remaining agents even if one fails
+		}
+
+		if err := callback(agentID, "agent_end", ""); err != nil {
+			return err
+		}
+
+		if resp := agentResponseBuilder.String(); resp != "" {
+			name := agent.GroupPersonaDisplayName(agentID)
+			priorResponses = append(priorResponses, fmt.Sprintf("[%s]: %s", name, resp))
+			fmt.Fprintf(&fullExchangeBuilder, "\n\n[%s]: %s", name, resp)
+		}
+	}
+
+	// Persist the combined assistant message
+	fullExchange := strings.TrimSpace(fullExchangeBuilder.String())
+	if fullExchange != "" {
+		assistantMsg := &model.Message{
+			ConversationID: conversationID,
+			Role:           model.MessageRoleAssistant,
+			Content:        fullExchange,
+			Metadata: model.JSONB{
+				"type":         "group_chat",
+				"participants": participants,
+			},
+		}
+		if err := s.messageRepo.Create(ctx, assistantMsg); err != nil {
+			s.logger.WithField("error", err).Warn("Failed to save group chat response")
+		}
+	}
+
+	// Update conversation metadata
+	conv.UpdatedAt = time.Now()
+	if conv.Title == "" || conv.Title == "New Conversation" {
+		if len(content) > 50 {
+			conv.Title = content[:50] + "..."
+		} else {
+			conv.Title = content
+		}
+	}
+	_ = s.conversationRepo.Update(ctx, conv)
+	return nil
 }

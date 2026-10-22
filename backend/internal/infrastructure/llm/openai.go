@@ -76,6 +76,7 @@ type ChatCompletionRequest struct {
 	Temperature float32
 	MaxTokens   int
 	Stream      bool
+	Model       string // Optional: override the default model for this request
 }
 
 // ChatCompletionResponse represents a chat completion response
@@ -204,8 +205,13 @@ func (c *OpenAIClient) CreateChatCompletion(ctx context.Context, req ChatComplet
 		messages[i] = toOpenAIMessage(msg)
 	}
 
+	model := c.model
+	if req.Model != "" {
+		model = req.Model
+	}
+
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
-		Model:       c.model,
+		Model:       model,
 		Messages:    messages,
 		Temperature: req.Temperature,
 		MaxTokens:   req.MaxTokens,
@@ -363,13 +369,11 @@ func (c *OpenAIClient) CreateChatCompletionWithToolLoop(
 	return nil, fmt.Errorf("max tool calling steps (%d) exceeded", maxSteps)
 }
 
-// StreamChatCompletionWithToolLoop runs the tool-calling loop synchronously, then streams the
-// final LLM response via callback. During tool execution, status messages are also sent to
-// callback so the user can see what tools are being invoked.
+// StreamChatCompletionWithToolLoop forwards tool status and the completed answer
+// via callback. A completed answer is delivered without another model request.
 //
 // If the model does not support tool calling (e.g. deepseek-reasoner), the first API call
-// will either return an error or return a regular response with no tool calls; in both cases
-// the method falls back to a plain streaming call so the user always gets a response.
+// can reject the first tool request; in that case a plain streaming call is used.
 func (c *OpenAIClient) StreamChatCompletionWithToolLoop(
 	ctx context.Context,
 	req ChatCompletionRequest,
@@ -421,21 +425,12 @@ func (c *OpenAIClient) StreamChatCompletionWithToolLoop(
 
 		// No tool calls → final answer
 		if len(choice.Message.ToolCalls) == 0 {
-			if toolsInvoked {
-				_ = callback(ThoughtChunk("工具数据已准备完成，正在生成最终回答"))
-				// Tool loop is done and we already have the final answer from the
-				// non-streaming call above. Deliver it directly — no need to make
-				// an extra streaming request (which could fail and leave the user
-				// with a blank response).
-				return callback(choice.Message.Content)
+			// The completed answer already exists, even if no tool was needed.
+			// A second request adds latency and can lose a valid answer on failure.
+			if strings.TrimSpace(choice.Message.Content) == "" {
+				return fmt.Errorf("model returned an empty answer (step %d)", step+1)
 			}
-			// No tools were invoked at all → stream the response normally
-			_ = callback(ThoughtChunk("模型已接收请求，正在生成回答"))
-			stream, sErr := c.CreateChatCompletionStream(ctx, req)
-			if sErr != nil {
-				return sErr
-			}
-			return c.StreamResponse(stream, callback)
+			return callback(choice.Message.Content)
 		}
 
 		toolsInvoked = true
