@@ -3,8 +3,10 @@ package handler
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +49,7 @@ type AccountHolding struct {
 }
 
 type HoldingsSnapshot struct {
+	Equities    []AccountEquity    `json:"account_equities,omitempty"`
 	Accounts    []AccountSyncState `json:"accounts,omitempty"`
 	AccountID   string             `json:"account_id"`
 	Holdings    []AccountHolding   `json:"holdings"`
@@ -55,6 +58,12 @@ type HoldingsSnapshot struct {
 	LastSuccess string             `json:"last_success,omitempty"`
 	Complete    bool               `json:"complete"`
 	Warnings    []string           `json:"warnings"`
+}
+
+type AccountEquity struct {
+	AccountID string `json:"account_id"`
+	Amount    string `json:"amount"`
+	Currency  string `json:"currency"`
 }
 
 type AccountHandler struct {
@@ -217,7 +226,21 @@ func (h *AccountHandler) readHoldings(ctx context.Context) (HoldingsSnapshot, er
 	var assetErr, positionErr error
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go func() { defer wg.Done(); assets, assetErr = h.private.Assets(ctx, h.cfg.AccountType) }()
+	go func() {
+		defer wg.Done()
+		if reader, ok := h.private.(interface {
+			AssetsSnapshot(context.Context, string) (bitget.AccountAssets, error)
+		}); ok {
+			var data bitget.AccountAssets
+			data, assetErr = reader.AssetsSnapshot(ctx, h.cfg.AccountType)
+			assets = data.Assets
+			if amount, err := strconv.ParseFloat(data.USDTEquity, 64); err == nil && !math.IsNaN(amount) && !math.IsInf(amount, 0) && assetErr == nil {
+				result.Equities = []AccountEquity{{AccountID: "bitget", Amount: data.USDTEquity, Currency: "USDT"}}
+			}
+		} else {
+			assets, assetErr = h.private.Assets(ctx, h.cfg.AccountType)
+		}
+	}()
 	if h.cfg.IncludeFutures {
 		wg.Add(1)
 		go func() { defer wg.Done(); positions, positionErr = h.private.Positions(ctx, h.cfg.AccountType) }()

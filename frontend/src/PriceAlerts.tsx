@@ -1,53 +1,36 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { requestJson } from "./App";
 import { Bell, Check, Loader2, RotateCcw, X } from "lucide-react";
 import { useDismissiblePopover } from "./useDismissiblePopover";
 
-export type PriceAlert = {
-  id: number; holding_id: string; account_id: string; target_price: number;
-  currency: string; direction: "above" | "below"; trigger_mode: "auto" | "above" | "below"; revision: number;
-  status: "armed" | "sending" | "sent" | "error"; last_error?: string;
-  sent_at?: string; last_checked_at?: string | null;
-};
-type AlertData = { alerts: PriceAlert[]; email: string; mailer_configured: boolean; check_interval_seconds: number };
-type AlertHolding = { holding_id: string; account_id: string; name: string; currency?: string; quote_available?: boolean; current_price: number; stale?: boolean };
+import { findPriceAlert, priceAlertState } from "./price-alert-state";
+import type { AlertData, PriceAlert } from "./price-alert-state";
+import { watchlistCode } from "./watchlist-state";
+export type { PriceAlert } from "./price-alert-state";
+type AlertHolding = { holding_id: string; account_id: string; name: string; id: string; symbol: string; market: string; currency?: string; quote_available?: boolean; current_price: number; stale?: boolean };
 
 export function usePriceAlerts(apiBase: string, token: string, isActive = true) {
-  const [data, setData] = useState<AlertData | null>(null);
-  const [error, setError] = useState("");
-  const version = useRef(0);
+  const state = useMemo(() => priceAlertState(apiBase, token), [apiBase, token]);
+  const { data, error } = useSyncExternalStore(state.subscribe, state.read);
   const activeRef = useRef(isActive); activeRef.current = isActive;
-  const lastAttemptAt = useRef(0);
-  const scope = `${apiBase}:${token}`;
-  const scopeRef = useRef(scope); scopeRef.current = scope;
-  const refresh = useCallback(async () => {
-    const request = ++version.current;
-    if (!token) { setData(null); setError(""); return; }
-    lastAttemptAt.current = Date.now();
-    try {
-      const next = await requestJson<AlertData>(apiBase, "/api/v1/price-alerts", token);
-      if (!Array.isArray(next.alerts)) throw new Error("提醒数据格式无效");
-      if (request === version.current) { setData(next); setError(""); }
-    } catch (err) { if (request === version.current) setError(err instanceof Error ? err.message : "提醒读取失败"); }
-  }, [apiBase, token]);
+  const refresh = useCallback(() => token ? state.refresh(() => requestJson<AlertData>(apiBase, "/api/v1/price-alerts", token)) : Promise.resolve(), [apiBase, token, state]);
   useEffect(() => {
-    setData(null); setError(""); lastAttemptAt.current = 0;
-    if (activeRef.current) void refresh();
     const timer = window.setInterval(() => { if (activeRef.current && !document.hidden) void refresh(); }, 60000);
-    return () => { version.current++; window.clearInterval(timer); };
+    return () => window.clearInterval(timer);
   }, [refresh]);
-  useEffect(() => { if (isActive && token && Date.now() - lastAttemptAt.current >= 60000) void refresh(); }, [isActive, token, refresh]);
+  useEffect(() => { if (isActive && token && (!state.read().data || Date.now() - state.lastAttemptAt >= 60000)) void refresh(); }, [isActive, token, refresh, state]);
   async function saveEmail(email: string) {
     await requestJson(apiBase, "/api/v1/price-alerts/settings", token, { method: "PUT", body: JSON.stringify({ email }) });
-    if (scopeRef.current === scope) await refresh();
+    state.emailSaved(email);
+    await refresh();
   }
   async function save(stock: AlertHolding, target: number) {
     const row = await requestJson<PriceAlert>(apiBase, "/api/v1/price-alerts", token, { method: "PUT", body: JSON.stringify({ account_id: stock.account_id, holding_id: stock.holding_id, target_price: target, direction: "auto" }) });
-    if (scopeRef.current === scope) { version.current++; setData(previous => previous ? { ...previous, alerts: [...previous.alerts.filter(item => item.holding_id !== row.holding_id), row] } : previous); }
+    state.saved(row);
   }
   async function remove(holding: string) {
     await requestJson(apiBase, `/api/v1/price-alerts?holding_id=${encodeURIComponent(holding)}`, token, { method: "DELETE" });
-    if (scopeRef.current === scope) { version.current++; setData(previous => previous ? { ...previous, alerts: previous.alerts.filter(item => item.holding_id !== holding) } : previous); }
+    state.removed(holding);
   }
   return { data, error, refresh, saveEmail, save, remove };
 }
@@ -85,7 +68,8 @@ export function PriceAlertSettings({ alerts }: { alerts: PriceAlertsController }
 }
 
 export function TargetPriceCell({ stock, alerts }: { stock: AlertHolding; alerts: PriceAlertsController }) {
-  const row = alerts.data?.alerts.find(item => item.holding_id === stock.holding_id);
+  const assetKey = ["a_share", "us_stock", "hk_stock", "crypto"].includes(stock.market) ? `${stock.market}:${watchlistCode(stock)}` : undefined;
+  const row = findPriceAlert(alerts.data?.alerts || [], stock.holding_id, assetKey);
   const [draft, setDraft] = useState(row ? String(row.target_price) : "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -94,19 +78,22 @@ export function TargetPriceCell({ stock, alerts }: { stock: AlertHolding; alerts
   const value = Number(draft);
   const hasDraft = Boolean(draft.trim());
   const valid = hasDraft && Number.isFinite(value) && value > 0 && value <= 1e15;
-  const changed = Boolean(row) && (!hasDraft || value !== row?.target_price);
+  const amountChanged = Boolean(row) && (!hasDraft || value !== row?.target_price);
+  const currencyChanged = Boolean(row?.currency && stock.currency && row.currency !== stock.currency);
+  const changed = amountChanged || currencyChanged;
+  const inputCurrency = row && !amountChanged ? row.currency : stock.currency;
   const rearm = row?.status === "sent" || row?.status === "error";
   const sending = row?.status === "sending";
   const showSave = !row || changed || rearm;
-  const pending = Boolean(row) && (!alerts.data?.email || !alerts.data?.mailer_configured || Boolean(row?.last_error) || !canSave);
-  const status = !row ? "" : row.status === "sent" ? "已提醒" : sending ? "发送中" : row.status === "error" ? "发送失败 / 结果待确认" : !alerts.data?.email ? "等待设置收件邮箱" : !alerts.data?.mailer_configured ? "等待启用邮件服务" : row.last_error || !canSave ? "等待有效行情" : "监控中";
+  const pending = Boolean(row) && (!alerts.data?.email || !alerts.data?.mailer_configured || Boolean(row?.last_error) || !canSave || currencyChanged);
+  const status = !row ? "" : row.status === "sent" ? "已提醒" : sending ? "发送中" : row.status === "error" ? "发送失败 / 结果待确认" : !alerts.data?.email ? "等待设置收件邮箱" : !alerts.data?.mailer_configured ? "等待启用邮件服务" : currencyChanged ? "报价币种已变更" : row.last_error || !canSave ? "等待有效行情" : "监控中";
   const detail = row ? [`${status}：${row.direction === "above" ? "涨至" : "跌至"} ${row.target_price} ${row.currency}`, row.last_error, row.sent_at ? `提醒时间 ${new Date(row.sent_at).toLocaleString("zh-CN", {hour12:false})}` : row.last_checked_at ? `上次检查 ${new Date(row.last_checked_at).toLocaleString("zh-CN", {hour12:false})}` : ""].filter(Boolean).join("；") : "";
-  const saveLabel = `${rearm ? "重新启用" : row ? "保存" : "开启"}${stock.name}提醒`;
-  const saveTitle = !canSave ? "等待有效行情后可保存" : !valid ? "请输入大于 0 的价格" : rearm ? `${detail}；点击重新启用` : row ? "保存新的期望价格" : "开启到价提醒";
+  const saveLabel = `${currencyChanged ? `按${stock.currency}更新` : rearm ? "重新启用" : row ? "保存" : "开启"}${stock.name}提醒`;
+  const saveTitle = !canSave ? "等待有效行情后可保存" : !valid ? "请输入大于 0 的价格" : currencyChanged ? `原提醒 ${row?.target_price} ${row?.currency}；点击后按当前 ${stock.currency} 行情重新设置` : rearm ? `${detail}；点击重新启用` : row ? "保存新的期望价格" : "开启到价提醒";
   async function remove() {
     if (busy || sending) return;
     setBusy(true); setError("");
-    try { await alerts.remove(stock.holding_id); }
+    try { await alerts.remove(row?.holding_id || stock.holding_id); }
     catch (err) { setError(err instanceof Error ? err.message : "关闭失败"); }
     finally { setBusy(false); }
   }
@@ -121,7 +108,7 @@ export function TargetPriceCell({ stock, alerts }: { stock: AlertHolding; alerts
       catch (err) { setError(err instanceof Error ? err.message : "保存失败"); }
       finally { setBusy(false); }
     }}>
-      <label className="target-price-input"><input type="number" step="any" min="0" max="1000000000000000" required aria-label={`${stock.name}期望价格`} value={draft} onChange={event => { setDraft(event.target.value); setError(""); }} onKeyDown={event => { if (event.key === "Escape") { setDraft(row ? String(row.target_price) : ""); setError(""); } }} disabled={busy || !alerts.data || sending} /><span>{stock.currency}</span></label>
+      <label className="target-price-input"><input type="number" step="any" min="0" max="1000000000000000" required aria-label={`${stock.name}期望价格`} value={draft} onChange={event => { setDraft(event.target.value); setError(""); }} onKeyDown={event => { if (event.key === "Escape") { setDraft(row ? String(row.target_price) : ""); setError(""); } }} disabled={busy || !alerts.data || sending} /><span>{inputCurrency}</span></label>
       <span className="target-price-action-slot">
         {busy || sending ? <span className="target-price-progress" role="status" aria-label={sending ? "提醒发送中" : "保存中"}><Loader2 size={13} className="spin" /></span>
           : row && !hasDraft ? <button className="target-price-action clear" type="button" aria-label={`清除${stock.name}提醒`} title="清除提醒" onClick={() => void remove()}><X size={13} /></button>
@@ -131,6 +118,7 @@ export function TargetPriceCell({ stock, alerts }: { stock: AlertHolding; alerts
           : null}
       </span>
     </form>
+    {currencyChanged && <small className="target-currency-note">当前报价 {stock.currency}，提醒待确认</small>}
     {error && <small className="danger" role="alert">{error}</small>}
   </div>;
 }

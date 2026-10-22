@@ -26,7 +26,8 @@ export function StockDeepResearch({ stock, period, candles, loading, analysis, a
     </div>
     <p className="research-data-caption">基于当前{period} K 线计算，最新一根可能尚未收盘。{!loading && overview.ma20 == null ? "至少需要 20 根有效 K 线计算趋势。" : ""}</p>
     <div className="deep-analysis-content">
-      {analysisLoading ? <div className="research-loading" role="status"><Loader2 size={16} className="spin" /><span>正在获取多周期综合分析…</span></div> : error ? <p className="form-note danger" role="alert">{error}</p> : analysis?.detail ? <>
+      {error && <p className="form-note danger" role="alert">{error}{analysis?.detail ? "，保留上次分析。" : ""}</p>}
+      {analysisLoading && !analysis?.detail ? <div className="research-loading" role="status"><Loader2 size={16} className="spin" /><span>正在获取多周期综合分析…</span></div> : analysis?.detail ? <>
         <div className="analysis-summary"><span className={`badge ${tone(analysis.conclusion)}`}>{stance(analysis.conclusion)}</span><h4>{analysis.summary || "综合分析已就绪"}</h4></div>
         <button type="button" className="research-text-button analysis-expand" aria-expanded={expanded} aria-controls="stock-deep-report" onClick={() => setExpanded(value => !value)}>{expanded ? "收起深入分析" : "展开深入分析"}{expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
         {expanded && <article id="stock-deep-report" className="deep-analysis-report"><ChatMarkdown content={analysis.detail} /></article>}
@@ -46,7 +47,8 @@ export function StockNews({ apiBase, stock, market, news, loading, error, onRelo
   const [selected, setSelected] = useState<NewsItem | null>(null);
   return <section className="surface-card stock-news">
     <div className="research-section-heading"><div><h3>相关资讯</h3><p>点击查看事件摘要与 AI 深入解读</p></div>{onReload && <button type="button" className="research-text-button" disabled={loading} onClick={onReload} aria-label="更新个股资讯"><RefreshCw size={13} className={loading ? "spin" : ""} />更新资讯</button>}</div>
-    {loading ? <div className="research-loading" role="status"><Loader2 size={16} className="spin" />正在获取资讯…</div> : error ? <p className="form-note danger" role="alert">{error}</p> : news.length ? <div className="news-list">{news.slice(0, 12).map(item => <button type="button" key={item.id} className="news-card news-detail-button" onClick={() => setSelected(item)}><div><span className={`badge ${tone(item.sentiment)}`}>{item.sentiment === "positive" ? "利好" : item.sentiment === "negative" ? "利空" : "中性"}</span><span>{item.source || "资讯"}</span></div><h3>{item.title}</h3><p>{item.summary || "查看事件详情与解读"}</p><small>{item.time}</small></button>)}</div> : <div className="empty-state">暂无相关资讯</div>}
+    {error && <p className="form-note danger" role="alert">{error}{news.length ? "，保留上次资讯。" : ""}</p>}
+    {loading && !news.length ? <div className="research-loading" role="status"><Loader2 size={16} className="spin" />正在获取资讯…</div> : news.length ? <div className="news-list">{news.slice(0, 12).map(item => <button type="button" key={item.id} className="news-card news-detail-button" onClick={() => setSelected(item)}><div><span className={`badge ${tone(item.sentiment)}`}>{item.sentiment === "positive" ? "利好" : item.sentiment === "negative" ? "利空" : "中性"}</span><span>{item.source || "资讯"}</span></div><h3>{item.title}</h3><p>{item.summary || "查看事件详情与解读"}</p><small>{item.time}</small></button>)}</div> : <div className="empty-state">暂无相关资讯</div>}
     {selected && <NewsDetail key={selected.id} apiBase={apiBase} stock={stock} market={market} news={selected} onClose={() => setSelected(null)} onAskAI={onAskAI} />}
   </section>;
 }

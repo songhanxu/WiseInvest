@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -25,8 +26,8 @@ func NewGroupChatHandler(svc *service.ConversationService, log *logger.Logger) *
 
 // groupChatRequest is the JSON body for POST /api/v1/messages/group-chat/stream.
 type groupChatRequest struct {
-	ConversationID uint     `json:"conversation_id" binding:"required"`
-	Content        string   `json:"content"         binding:"required"`
+	ConversationID uint   `json:"conversation_id" binding:"required"`
+	Content        string `json:"content"         binding:"required"`
 	// Participants lists the agent IDs to include (e.g. ["orchestrator","value"]).
 	// Leave empty to include all four agents in the default order.
 	Participants []string `json:"participants"`
@@ -40,6 +41,7 @@ type groupChatRequest struct {
 //	data: {"type":"agent_start","agent_id":"value","content":""}
 //	data: {"type":"content",    "agent_id":"value","content":"...chunk..."}
 //	data: {"type":"thought",    "agent_id":"value","content":"...thinking..."}
+//	data: {"type":"agent_error","agent_id":"value","content":"...safe diagnostic..."}
 //	data: {"type":"agent_end",  "agent_id":"value","content":""}
 //	data: [DONE]
 func (h *GroupChatHandler) SendGroupChatStream(c *gin.Context) {
@@ -50,10 +52,14 @@ func (h *GroupChatHandler) SendGroupChatStream(c *gin.Context) {
 	}
 
 	// SSE headers
+	if !checkConversationOwner(c, h.service, req.ConversationID) {
+		return
+	}
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("Transfer-Encoding", "chunked")
+	c.Header("X-Accel-Buffering", "no")
 
 	w := c.Writer
 	flusher, ok := w.(http.Flusher)
@@ -63,6 +69,19 @@ func (h *GroupChatHandler) SendGroupChatStream(c *gin.Context) {
 	}
 
 	writer := bufio.NewWriter(w)
+	var writeMu sync.Mutex
+	writeFrame := func(frame string) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		if _, err := writer.WriteString(frame); err != nil {
+			return err
+		}
+		if err := writer.Flush(); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	}
 
 	sendEvent := func(agentID, eventType, content string) error {
 		payload, err := json.Marshal(map[string]string{
@@ -73,26 +92,23 @@ func (h *GroupChatHandler) SendGroupChatStream(c *gin.Context) {
 		if err != nil {
 			return err
 		}
-		if _, err := fmt.Fprintf(writer, "data: %s\n\n", payload); err != nil {
-			return err
-		}
-		writer.Flush()
-		flusher.Flush()
-		return nil
+		return writeFrame(fmt.Sprintf("data: %s\n\n", payload))
 	}
 
 	// Heartbeat goroutine — prevents iOS URLSession from timing out during
 	// slow LLM inference.  SSE comment lines are ignored by the client parser.
 	heartbeatDone := make(chan struct{})
+	heartbeatExited := make(chan struct{})
 	go func() {
+		defer close(heartbeatExited)
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				fmt.Fprintf(writer, ": heartbeat\n\n")
-				writer.Flush()
-				flusher.Flush()
+				if err := writeFrame(": heartbeat\n\n"); err != nil {
+					return
+				}
 			case <-heartbeatDone:
 				return
 			case <-c.Request.Context().Done():
@@ -109,16 +125,13 @@ func (h *GroupChatHandler) SendGroupChatStream(c *gin.Context) {
 		sendEvent,
 	)
 	close(heartbeatDone)
+	<-heartbeatExited
 
 	if err != nil {
 		h.logger.WithField("error", err).Error("Group chat stream failed")
-		fmt.Fprintf(writer, "data: {\"error\":\"Group chat stream failed\"}\n\n")
-		writer.Flush()
-		flusher.Flush()
+		_ = writeFrame("data: {\"error\":\"圆桌请求失败，请重试或检查后端日志。\"}\n\n")
 		return
 	}
 
-	fmt.Fprintf(writer, "data: [DONE]\n\n")
-	writer.Flush()
-	flusher.Flush()
+	_ = writeFrame("data: [DONE]\n\n")
 }

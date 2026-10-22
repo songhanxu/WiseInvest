@@ -37,6 +37,23 @@ func (r *PriceAlertRepository) Save(ctx context.Context, row *model.PriceAlert) 
 		if err := tx.Exec("SELECT pg_advisory_xact_lock(?, ?)", 74001, int(row.UserID)).Error; err != nil {
 			return err
 		}
+		if row.AssetKey != "" {
+			var existing model.PriceAlert
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND asset_key = ?", row.UserID, row.AssetKey).Order("updated_at DESC, id DESC").First(&existing).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if err == nil {
+				if existing.Status == "sending" {
+					return errors.New("提醒正在发送，请稍后再修改")
+				}
+				// Keep one row/revision per asset, even when edited in another
+				// account. Source and currency are changed only on explicit save.
+				row.ID, row.CreatedAt, row.Revision = existing.ID, existing.CreatedAt, existing.Revision+1
+				row.LastCheckedAt, row.TriggeredAt, row.SentAt, row.LastError = nil, nil, nil, ""
+				return tx.Save(row).Error
+			}
+		}
 		var count int64
 		if err := tx.Model(&model.PriceAlert{}).Where("user_id = ? AND holding_id <> ?", row.UserID, row.HoldingID).Count(&count).Error; err != nil {
 			return err
@@ -44,11 +61,45 @@ func (r *PriceAlertRepository) Save(ctx context.Context, row *model.PriceAlert) 
 		if count >= 100 {
 			return errors.New("最多保存 100 项到价提醒")
 		}
-		err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "user_id"}, {Name: "holding_id"}}, DoUpdates: clause.Assignments(map[string]any{"account_id": row.AccountID, "name": row.Name, "code": row.Code, "currency": row.Currency, "target_price": row.TargetPrice, "direction": row.Direction, "trigger_mode": row.TriggerMode, "status": "armed", "revision": gorm.Expr("price_alerts.revision + 1"), "last_price": row.LastPrice, "last_checked_at": nil, "triggered_at": nil, "sent_at": nil, "last_error": "", "updated_at": time.Now()})}).Create(row).Error
+		err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "user_id"}, {Name: "holding_id"}}, DoUpdates: clause.Assignments(map[string]any{"asset_key": row.AssetKey, "account_id": row.AccountID, "name": row.Name, "code": row.Code, "currency": row.Currency, "target_price": row.TargetPrice, "direction": row.Direction, "trigger_mode": row.TriggerMode, "status": "armed", "revision": gorm.Expr("price_alerts.revision + 1"), "last_price": row.LastPrice, "last_checked_at": nil, "triggered_at": nil, "sent_at": nil, "last_error": "", "updated_at": time.Now()})}).Create(row).Error
 		if err != nil {
 			return err
 		}
 		return tx.Where("user_id = ? AND holding_id = ?", row.UserID, row.HoldingID).First(row).Error
+	})
+}
+
+func (r *PriceAlertRepository) ReconcileIdentities(ctx context.Context, user uint, identities map[string]string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(?, ?)", 74001, int(user)).Error; err != nil {
+			return err
+		}
+		for holding, asset := range identities {
+			if err := tx.Model(&model.PriceAlert{}).Where("user_id = ? AND holding_id = ? AND (asset_key IS NULL OR asset_key = '')", user, holding).UpdateColumn("asset_key", asset).Error; err != nil {
+				return err
+			}
+		}
+		var rows []model.PriceAlert
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND asset_key <> ''", user).Order("updated_at DESC, id DESC").Find(&rows).Error; err != nil {
+			return err
+		}
+		// A currently sending revision cannot be withdrawn. Retain it while
+		// retiring duplicates, so the monitor cannot dispatch them as well.
+		keepers := map[string]model.PriceAlert{}
+		for _, row := range rows {
+			previous, exists := keepers[row.AssetKey]
+			if !exists || row.Status == "sending" && previous.Status != "sending" {
+				keepers[row.AssetKey] = row
+			}
+		}
+		for _, row := range rows {
+			if row.ID != keepers[row.AssetKey].ID && row.Status != "sending" {
+				if err := tx.Where("id = ? AND user_id = ? AND status <> ?", row.ID, user, "sending").Delete(&model.PriceAlert{}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	})
 }
 func (r *PriceAlertRepository) Remove(ctx context.Context, user uint, holding string) error {

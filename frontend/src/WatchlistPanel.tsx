@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Loader2, Plus, RefreshCw, Search, Trash2, ListPlus } from "lucide-react";
-import { requestJson } from "./App";
+import { requestJson, searchStocks } from "./App";
 import { StockResearchTable, numeric, stockKey, useStockFundamentals } from "./StockResearchTable";
 import type { Market, MarketId, StockQuote } from "./App";
 import { PriceAlertSettings, TargetPriceCell, usePriceAlerts } from "./PriceAlerts";
 import { useDismissiblePopover } from "./useDismissiblePopover";
 import { mergeQuoteRows } from "./quote-presentation";
+import { applyWatchlistChange, watchlistState } from "./watchlist-state";
 
 const WATCHLIST_FRESH_MS = 60000;
 
@@ -17,6 +18,7 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
   onOpenStock: (market: Market, stock: StockQuote) => void;
   onNeedToken: () => void;
 }) {
+  const sharedWatchlist = watchlistState(apiBase, token);
   const priceAlerts = usePriceAlerts(apiBase, token, isActive);
   const { rootRef: searchRef, isOpen: searchOpen, setIsOpen: setSearchOpen } = useDismissiblePopover<HTMLElement>();
   const [stocks, setStocks] = useState<StockQuote[]>([]);
@@ -39,35 +41,41 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
   const refreshInFlight = useRef(false);
   const lastAttemptAt = useRef(0);
   const lastSuccessAt = useRef(0);
+  const membershipDirty = useRef(false);
   const membership = useMemo(() => new Set(stocks.map(stockKey)), [stocks]);
 
   const refresh = useCallback(async (force = false) => {
     if (refreshInFlight.current && !force) return;
     const version = ++requestVersion.current;
     const mutation = mutationVersion.current;
+    const sharedVersion = sharedWatchlist.version;
     if (!token) { setStocks([]); setLoading(false); return; }
     refreshInFlight.current = true;
     lastAttemptAt.current = Date.now();
     setLoading(true); setError("");
     try {
       let rows: StockQuote[];
+      let loadedMarkets = new Set<string>(markets.map(market => market.id));
       const response = await fetch(`${apiBase}/api/v1/stocks/watchlist/all`, { headers: { Authorization: `Bearer ${token}` } });
       if (response.status === 404) {
         // Allows the new page to read existing lists while the backend is upgraded.
         const partial = await Promise.allSettled(markets.map(market => requestJson<StockQuote[]>(apiBase, `/api/v1/stocks/watchlist?market=${market.id}`, token)));
         if (partial.every(result => result.status === "rejected")) throw new Error("无法读取自选列表，请检查登录状态和后端连接");
         rows = partial.flatMap(result => result.status === "fulfilled" ? result.value : []);
+        loadedMarkets = new Set(partial.flatMap((result, index) => result.status === "fulfilled" ? [markets[index].id] : []));
         const failures = partial.flatMap((result, i) => result.status === "rejected" ? [markets[i].displayName] : []);
         if (failures.length && version === requestVersion.current) setError(`${failures.join("、")}自选暂未加载，可稍后刷新`);
       } else {
         if (!response.ok) throw new Error(response.status === 401 ? "登录已过期，请重新登录" : "自选列表加载失败");
         rows = await response.json() as StockQuote[];
       }
-      if (version !== requestVersion.current || mutation !== mutationVersion.current) return;
+      if (version !== requestVersion.current || mutation !== mutationVersion.current || sharedVersion !== sharedWatchlist.version) return;
       if (!Array.isArray(rows)) throw new Error("后端返回的自选列表格式不正确");
-      setStocks(previous => mergeQuoteRows(previous, [...new Map(rows.map(stock => [stockKey(stock), stock])).values()]));
+      markets.filter(market => loadedMarkets.has(market.id)).forEach(market => sharedWatchlist.record(market.id, rows.filter(row => row.market === market.id), sharedVersion));
+      setStocks(previous => mergeQuoteRows(previous, [...new Map([...rows, ...previous.filter(row => !loadedMarkets.has(row.market)).map(row => ({ ...row, quote_stale: true }))].map(stock => [stockKey(stock), stock])).values()]));
       if (rows.some(stock => stock.quote_available === false || !(stock.current_price > 0))) setError("部分行情暂不可用，已有报价保留并标注为缓存。");
       lastSuccessAt.current = Date.now();
+      membershipDirty.current = false;
       setUpdatedAt(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
     } catch (err) {
       if (version === requestVersion.current) {
@@ -75,12 +83,12 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
         setError(err instanceof Error ? err.message : "自选列表加载失败");
       }
     } finally { if (version === requestVersion.current) { refreshInFlight.current = false; setLoading(false); } }
-  }, [apiBase, token, markets]);
+  }, [apiBase, token, markets, sharedWatchlist]);
 
   useEffect(() => {
     actionSession.current++;
     setStocks([]); setBusy([]); setActionError(""); setUpdatedAt("");
-    lastAttemptAt.current = 0; lastSuccessAt.current = 0;
+    lastAttemptAt.current = 0; lastSuccessAt.current = 0; membershipDirty.current = false;
     if (activeRef.current) void refresh();
     const timer = window.setInterval(() => {
       if (activeRef.current && !document.hidden && Date.now() - lastAttemptAt.current >= WATCHLIST_FRESH_MS) void refresh();
@@ -92,8 +100,17 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
     if (!isActive) { setSearchOpen(false); return; }
     // Keep rows, fundamentals, table preferences and target-price drafts when
     // navigating away. Revalidate stale quotes without an empty loading screen.
-    if (!lastAttemptAt.current || Date.now() - lastSuccessAt.current >= WATCHLIST_FRESH_MS) void refresh();
+    if (membershipDirty.current || !lastAttemptAt.current || Date.now() - lastSuccessAt.current >= WATCHLIST_FRESH_MS) void refresh();
   }, [isActive, refresh, setSearchOpen]);
+
+  useEffect(() => sharedWatchlist.subscribe(change => {
+    if (change.type !== "mutation") return;
+    mutationVersion.current++; requestVersion.current++; refreshInFlight.current = false;
+    membershipDirty.current = true;
+    setStocks(previous => applyWatchlistChange(previous, change.stock, change.remove));
+    if (activeRef.current) void refresh(true);
+    else setLoading(false);
+  }), [sharedWatchlist, refresh]);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,7 +120,7 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
     setResults([]); setSearching(true);
     const timer = window.setTimeout(async () => {
       const targets = markets.filter(market => searchMarket === "all" || market.id === searchMarket);
-      const responses = await Promise.allSettled(targets.map(market => requestJson<StockQuote[]>(apiBase, `/api/v1/stocks/search?market=${market.id}&q=${encodeURIComponent(text)}`, "")));
+      const responses = await Promise.allSettled(targets.map(market => searchStocks(apiBase, market.id, text)));
       if (cancelled) return;
       setResults(responses.flatMap(result => result.status === "fulfilled" && Array.isArray(result.value) ? result.value : []));
       const failed = responses.flatMap((result, i) => result.status === "rejected" ? [targets[i].displayName] : []);
@@ -121,16 +138,13 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
     setBusy(previous => [...previous, key]); setActionError("");
     try {
       await requestJson(apiBase, "/api/v1/stocks/watchlist", token, { method: remove ? "DELETE" : "POST", body: JSON.stringify({ stock_code: stock.id, symbol: stock.symbol, name: stock.name, market: stock.market }) });
-      if (session !== actionSession.current) return;
-      mutationVersion.current++;
-      setStocks(previous => remove ? previous.filter(row => stockKey(row) !== key) : membership.has(key) ? previous : [...previous, stock]);
-      void refresh(true);
+      sharedWatchlist.changed(stock, remove);
     } catch (err) { if (session === actionSession.current) setActionError(err instanceof Error ? err.message : "保存自选失败"); }
     finally { if (session === actionSession.current) setBusy(previous => previous.filter(item => item !== key)); }
   }
 
   const visible = stocks.filter(stock => filter === "all" || stock.market === filter);
-  const initialLoading = loading && !lastSuccessAt.current;
+  const initialLoading = loading && !lastSuccessAt.current && !stocks.length;
   const financialUnavailable = stocks.some(stock => fundamentals[stockKey(stock)]?.status === "unavailable");
   return <section className="workspace watchlist-workspace">
     <div className="watchlist-heading">
@@ -174,6 +188,6 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
       renderTarget={stock => <TargetPriceCell stock={{ ...stock, stale: stock.quote_stale, holding_id: `watchlist:${stockKey(stock)}`, account_id: "watchlist", currency: stock.currency || ({ a_share: "CNY", us_stock: "USD", hk_stock: "HKD", crypto: "USDT" } as Record<string, string>)[stock.market] }} alerts={priceAlerts} />}
       renderAction={stock => <button className="watchlist-remove" aria-label={`移除 ${stock.name}`} disabled={busy.includes(stockKey(stock))} onClick={() => void changeMembership(stock, true)}>{busy.includes(stockKey(stock)) ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} />}</button>}
     />
-    <p className="watchlist-data-note">美股、港股及加密货币行情来自 Bitget。EPS、PE 和远期 PE 属于标的公司；公司指引与分析师预测分别列示。缺失数据显示「—」，加密货币及基金的公司财报指标显示「不适用」。</p>
+    <p className="watchlist-data-note">行情优先使用 Bitget，美港股使用腾讯兜底，加密货币使用 Binance 兜底；每条价格显示实际来源和报价时间。EPS、PE 和远期 PE 属于标的公司；公司指引与分析师预测分别列示。缺失数据显示「—」，加密货币及基金的公司财报指标显示「不适用」。</p>
   </section>;
 }

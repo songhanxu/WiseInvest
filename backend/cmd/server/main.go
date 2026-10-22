@@ -64,6 +64,9 @@ func main() {
 		log.Fatalf("Failed to seed default data: %v", err)
 	}
 	log.Info("Default data seeded successfully")
+	if err := database.BootstrapPasswordAccount(db, cfg.AccountBootstrap); err != nil {
+		log.Fatalf("Account credential setup failed: %v", err)
+	}
 
 	// Initialize Redis cache
 	redisClient, err := cache.NewRedisClient(cfg.Redis)

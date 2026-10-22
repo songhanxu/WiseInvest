@@ -118,23 +118,34 @@ type Position struct {
 	MarginMode        string `json:"marginMode"`
 }
 
+type AccountAssets struct {
+	Assets     []Asset
+	USDTEquity string
+}
+
 func (c *AccountClient) Assets(ctx context.Context, accountType string) ([]Asset, error) {
+	data, err := c.AssetsSnapshot(ctx, accountType)
+	return data.Assets, err
+}
+
+func (c *AccountClient) AssetsSnapshot(ctx context.Context, accountType string) (AccountAssets, error) {
 	if accountType == "classic" {
 		var assets []Asset
 		err := c.PrivateGET(ctx, "/api/v2/spot/account/assets", nil, &assets)
-		return assets, err
+		return AccountAssets{Assets: assets}, err
 	}
 	var data struct {
-		Assets *[]Asset `json:"assets"`
+		Assets     *[]Asset `json:"assets"`
+		USDTEquity string   `json:"usdtEquity"`
 	}
 	err := c.PrivateGET(ctx, "/api/v3/account/assets", nil, &data)
 	if err != nil {
-		return nil, err
+		return AccountAssets{}, err
 	}
 	if data.Assets == nil {
-		return nil, &AccountError{Kind: "response"}
+		return AccountAssets{}, &AccountError{Kind: "response"}
 	}
-	return *data.Assets, nil
+	return AccountAssets{Assets: *data.Assets, USDTEquity: data.USDTEquity}, nil
 }
 
 func (c *AccountClient) Positions(ctx context.Context, accountType string) ([]Position, error) {

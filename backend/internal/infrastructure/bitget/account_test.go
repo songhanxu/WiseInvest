@@ -91,7 +91,7 @@ func TestAccountDecodingAndDecimalHoldings(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v3/account/assets":
-			w.Write([]byte(`{"code":"00000","data":{"assets":[{"coin":"rAAPL","balance":"0.000000000000000001","equity":"9"}]}}`))
+			w.Write([]byte(`{"code":"00000","data":{"usdtEquity":"123.456789","assets":[{"coin":"rAAPL","balance":"0.000000000000000001","equity":"9"}]}}`))
 		case "/api/v3/position/current-position":
 			if r.URL.Query().Get("category") != "USDT-FUTURES" {
 				t.Error("wrong category")
@@ -109,6 +109,10 @@ func TestAccountDecodingAndDecimalHoldings(t *testing.T) {
 	defer server.Close()
 	c := NewAccountClient(Credentials{APIKey: "key", Secret: "secret", Passphrase: "pass"})
 	c.BaseURL = server.URL
+	summary, err := c.AssetsSnapshot(context.Background(), "uta")
+	if err != nil || summary.USDTEquity != "123.456789" || len(summary.Assets) != 1 {
+		t.Fatal("exchange account equity was discarded")
+	}
 	for _, accountType := range []string{"uta", "classic"} {
 		assets, err := c.Assets(context.Background(), accountType)
 		if err != nil || len(assets) != 1 {

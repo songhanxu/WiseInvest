@@ -14,7 +14,6 @@ import (
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/logger"
 )
 
-
 // ConversationHandler handles conversation-related HTTP requests
 type ConversationHandler struct {
 	service *service.ConversationService
@@ -71,6 +70,9 @@ func (h *ConversationHandler) GetConversation(c *gin.Context) {
 		return
 	}
 
+	if !checkConversationOwner(c, h.service, uint(id)) {
+		return
+	}
 	conversation, err := h.service.GetConversation(c.Request.Context(), uint(id))
 	if err != nil {
 		h.logger.WithField("error", err).Error("Failed to get conversation")
@@ -104,6 +106,9 @@ func (h *ConversationHandler) DeleteConversation(c *gin.Context) {
 		return
 	}
 
+	if !checkConversationOwner(c, h.service, uint(id)) {
+		return
+	}
 	if err := h.service.DeleteConversation(c.Request.Context(), uint(id)); err != nil {
 		h.logger.WithField("error", err).Error("Failed to delete conversation")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete conversation"})
@@ -127,6 +132,9 @@ func (h *ConversationHandler) SendMessage(c *gin.Context) {
 		return
 	}
 
+	if !checkConversationOwner(c, h.service, req.ConversationID) {
+		return
+	}
 	resp, err := h.service.SendMessage(c.Request.Context(), service.SendMessageRequest{
 		ConversationID: req.ConversationID,
 		Content:        req.Content,
@@ -153,6 +161,9 @@ func (h *ConversationHandler) SendMessageStream(c *gin.Context) {
 	}
 
 	// Set headers for SSE
+	if !checkConversationOwner(c, h.service, req.ConversationID) {
+		return
+	}
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")

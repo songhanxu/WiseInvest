@@ -2,11 +2,13 @@ package model
 
 import "time"
 
-// Each target is scoped to a user and an exact watchlist symbol or account holding.
+// A user's target is shared by the same market/symbol across account holdings
+// and the watchlist. The original currency and quote source remain explicit.
 type PriceAlert struct {
 	ID            uint       `gorm:"primaryKey" json:"id"`
 	UserID        uint       `gorm:"uniqueIndex:idx_price_alert_identity;not null;index" json:"-"`
 	HoldingID     string     `gorm:"size:200;uniqueIndex:idx_price_alert_identity;not null" json:"holding_id"`
+	AssetKey      string     `gorm:"size:200;index" json:"asset_key,omitempty"`
 	AccountID     string     `gorm:"size:32;not null" json:"account_id"`
 	Name          string     `gorm:"size:200" json:"name"`
 	Code          string     `gorm:"size:100" json:"code"`

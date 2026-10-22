@@ -23,6 +23,7 @@ func NewRouter(
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
+	_ = router.SetTrustedProxies([]string{"127.0.0.1", "::1", "172.16.0.0/12"})
 	router.Use(middleware.Logger(logger))
 	router.Use(middleware.Recovery(logger))
 	router.Use(middleware.CORS())
@@ -36,6 +37,8 @@ func NewRouter(
 		// ── Auth (public) ─────────────────────────────────────────────────
 		authGroup := v1.Group("/auth")
 		{
+			authGroup.POST("/login", authHandler.Login)
+			authGroup.POST("/register", authHandler.Register)
 			authGroup.POST("/wechat/login", authHandler.WeChatLogin)
 			authGroup.POST("/phone/send-code", authHandler.SendPhoneCode)
 		}

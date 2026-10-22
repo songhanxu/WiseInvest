@@ -245,3 +245,30 @@ func TestConcurrentMonitorsClaimOnceAndOldRevisionCannotCompleteNewTarget(t *tes
 		t.Fatal("old email result completed edited target")
 	}
 }
+
+func TestSharedAssetRetainsTheExplicitlySelectedQuoteSource(t *testing.T) {
+	store := newAlertStore()
+	mailer := &alertFakeMailer{ready: true}
+	price := 100.0
+	svc := &PriceAlertService{Store: store, Mailer: mailer, Quotes: func(context.Context, uint, string) ([]AlertQuote, error) {
+		return []AlertQuote{
+			{HoldingID: "bitget:futures:BTCUSDT", AssetKey: "crypto:BTC", Currency: "USDT", Price: 200, Fresh: true},
+			{HoldingID: "bitget:spot:BTC", AssetKey: "crypto:BTC", Currency: "USDT", Price: price, Fresh: true},
+		}, nil
+	}}
+	ctx := context.Background()
+	_ = svc.SaveEmail(ctx, 7, "test@example.invalid")
+	if _, err := svc.Save(ctx, 7, "bitget", "bitget:spot:BTC", 150, "auto"); err != nil {
+		t.Fatal(err)
+	}
+	svc.Run(ctx)
+	if mailer.calls != 0 {
+		t.Fatal("a different product's quote triggered the spot target")
+	}
+	price = 160
+	svc.Run(ctx)
+	svc.Run(ctx)
+	if mailer.calls != 1 {
+		t.Fatal("the actual source did not trigger once")
+	}
+}

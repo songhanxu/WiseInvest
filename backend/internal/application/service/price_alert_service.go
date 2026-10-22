@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/mail"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,7 @@ type PriceAlertStore interface {
 }
 type AlertQuote struct {
 	HoldingID, AccountID, Name, Code, Currency string
+	AssetKey                                   string
 	Price                                      float64
 	Fresh                                      bool
 }
@@ -79,7 +81,12 @@ func (s *PriceAlertService) Save(ctx context.Context, user uint, account, holdin
 				direction = "below"
 			}
 		}
-		row := model.PriceAlert{UserID: user, HoldingID: holding, AccountID: account, Name: q.Name, Code: q.Code, Currency: q.Currency, TargetPrice: target, Direction: direction, TriggerMode: triggerMode, Status: "armed", Revision: 1, LastPrice: &q.Price}
+		// Link legacy per-holding targets before saving the shared target. This
+		// preserves the latest setting rather than creating another email job.
+		if _, err := s.List(ctx, user); err != nil {
+			return model.PriceAlert{}, errors.New("提醒列表暂不可用，请稍后重试")
+		}
+		row := model.PriceAlert{UserID: user, HoldingID: holding, AssetKey: q.AssetKey, AccountID: account, Name: q.Name, Code: q.Code, Currency: q.Currency, TargetPrice: target, Direction: direction, TriggerMode: triggerMode, Status: "armed", Revision: 1, LastPrice: &q.Price}
 		if err = s.Store.Save(ctx, &row); err != nil {
 			return row, errors.New("目标价保存失败，请重试（每个用户最多 100 项）")
 		}
@@ -104,6 +111,41 @@ func (s *PriceAlertService) Run(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	// Upgrade/deduplicate old targets before monitoring, even if no page is open.
+	users := map[uint]bool{}
+	resolved := make([]model.PriceAlert, 0, len(alerts))
+	for _, row := range alerts {
+		if users[row.UserID] {
+			continue
+		}
+		users[row.UserID] = true
+		rows, readErr := s.List(ctx, row.UserID)
+		if readErr != nil {
+			continue
+		}
+		for _, latest := range rows {
+			if latest.Status == "armed" {
+				resolved = append(resolved, latest)
+			}
+		}
+	}
+	sort.SliceStable(resolved, func(i, j int) bool {
+		a, b := resolved[i], resolved[j]
+		if a.LastCheckedAt == nil {
+			return b.LastCheckedAt != nil || a.ID < b.ID
+		}
+		if b.LastCheckedAt == nil {
+			return false
+		}
+		if !a.LastCheckedAt.Equal(*b.LastCheckedAt) {
+			return a.LastCheckedAt.Before(*b.LastCheckedAt)
+		}
+		return a.ID < b.ID
+	})
+	if len(resolved) > 500 {
+		resolved = resolved[:500]
+	}
+	alerts = resolved
 	type group struct {
 		user    uint
 		account string
@@ -129,11 +171,21 @@ func (s *PriceAlertService) Run(ctx context.Context) {
 		quotes, err := s.Quotes(queryCtx, key.user, key.account)
 		cancel()
 		byID := map[string]AlertQuote{}
+		byAsset := map[string]AlertQuote{}
 		for _, q := range quotes {
 			byID[q.HoldingID] = q
+			if q.AssetKey != "" && q.Currency != "" {
+				key := q.AssetKey + ":" + q.Currency
+				if previous, exists := byAsset[key]; !exists || !previous.Fresh {
+					byAsset[key] = q
+				}
+			}
 		}
 		for _, row := range groups[key] {
 			q, ok := byID[row.HoldingID]
+			if row.AssetKey != "" && (!ok || q.AssetKey != row.AssetKey) {
+				q, ok = byAsset[row.AssetKey+":"+row.Currency]
+			}
 			if err != nil || !ok || !q.Fresh || q.Price <= 0 || math.IsNaN(q.Price) || math.IsInf(q.Price, 0) || q.Currency != row.Currency {
 				_ = s.Store.Checked(ctx, row, nil, "当前标的或行情暂不可用；本次未触发")
 				continue

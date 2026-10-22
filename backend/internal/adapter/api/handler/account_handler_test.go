@@ -23,6 +23,26 @@ type accountFixture struct {
 	calls                 atomic.Int32
 }
 
+type accountEquityFixture struct{ accountFixture }
+
+func (f *accountEquityFixture) AssetsSnapshot(context.Context, string) (bitget.AccountAssets, error) {
+	f.calls.Add(1)
+	return bitget.AccountAssets{Assets: []bitget.Asset{{Coin: "USDT", Balance: "10"}}, USDTEquity: "123.456789"}, nil
+}
+
+func TestAccountPreservesExchangeReportedEquity(t *testing.T) {
+	f := &accountEquityFixture{}
+	h := &AccountHandler{cfg: config.BitgetConfig{AccountType: "uta"}, private: f, market: accountMarketFixture(t, false)}
+	snapshot, err := h.readHoldings(context.Background())
+	if err != nil || f.calls.Load() != 1 || len(snapshot.Equities) != 1 || snapshot.Equities[0].Amount != "123.456789" {
+		t.Fatalf("account equity: %+v %v", snapshot, err)
+	}
+	decorated := decorateSnapshot(snapshot, AccountSummary{ID: "bitget", Name: "Test"})
+	if decorated.Equities[0].AccountID != "bitget" || snapshot.Equities[0].Amount != "123.456789" {
+		t.Fatal("decoration lost equity")
+	}
+}
+
 func (f *accountFixture) Assets(context.Context, string) ([]bitget.Asset, error) {
 	f.calls.Add(1)
 	return f.assets, f.assetErr

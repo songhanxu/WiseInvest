@@ -66,6 +66,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .surface-card { padding: 22px; }
 .market-matrix, .watch-grid { gap: 14px; }
 .market-desk-card { padding: 20px; min-height: 220px; gap: 14px; }
+.home-workspace .market-desk-card:hover, .home-workspace .recent-list button:hover, .home-workspace .prompt-stack button:hover { background:#f4f7f0; border-color:#cbd8c5; }
+.home-workspace button:focus-visible { outline:2px solid #86a17f; outline-offset:3px; }
 .market-card-head { gap: 10px; }
 .market-card-head h3 { font-size: 14px; font-weight: 600; }
 .market-card-head p { display: none; }
@@ -95,7 +97,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .prompt-stack button { padding: 12px; border-radius: 8px; border: 1px solid transparent; font-size: 12px; }
 .watch-panel { padding: 18px; }
 .watch-panel .watch-more { padding-inline:0; background: transparent; border: 0; color: var(--muted); font-size: 11px; }
-.watch-panel .watch-preview-row { display:grid; grid-template-columns:minmax(0,1fr) 96px 68px; align-items:center; gap:6px 8px; min-height:64px; padding:12px 0; border:0; border-bottom:1px solid #eef1eb; border-radius:0; text-align:left; }
+.watch-panel .watch-preview-row { position:relative; display:grid; grid-template-columns:minmax(0,1fr) 96px 68px; align-items:center; gap:6px 8px; min-height:64px; padding:12px 8px; margin:3px 0; border:0; border-radius:8px; text-align:left; }
+.watch-panel .watch-preview-row::after { content:""; position:absolute; left:8px; right:8px; bottom:-3px; height:1px; background:#eef1eb; pointer-events:none; }
+.watch-panel .watch-preview-row:hover, .watch-panel .watch-preview-row:focus-visible { background:#f0f5eb; border-color:transparent; }
+.watch-panel .watch-more:hover { color:#36533b; background:transparent; border-color:transparent; }
 .watch-panel .watch-preview-row .watch-symbol { min-width:0; text-align:left; font-size:12px; font-weight:550; }
 .watch-preview-row > .change-pill, .watch-preview-row > .watch-change-empty, .watch-preview-row > .watch-change-skeleton { justify-self:end; }
 .watch-preview-row > .change-pill { justify-content:center; min-width:62px; }
@@ -137,13 +142,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .account-connection-status.failed { color: var(--red); background: #faf0ef; }
 .account-description { max-width: 390px; gap: 9px 12px; margin-top: 0; font-size: 10px; padding-top: 0; border: 0; justify-content: flex-end; }
 .account-description svg { width: 12px; }
-.account-facts { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); padding: 4px 0 27px; border-bottom: 1px solid var(--line); gap: 0; }
-.account-facts > div { padding: 0 28px; border-left: 1px solid var(--line); }
-.account-facts > div:first-child { border: 0; padding-left: 0; }
-.account-facts > div > span { display: block; color: var(--muted); font-size: 11px; margin-bottom: 14px; }
-.account-facts strong { font-size: 29px; font-weight: 500; line-height: 1; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
-.account-facts strong small { font-size: 10px; color: var(--faint); margin-left: 6px; font-weight: 400; }
-.account-facts strong.fact-status { font-size: 18px; color: #456440; letter-spacing: 0; }
+/* Account valuation replaces the old count/sync strip. */
+.account-valuation { display:flex; align-items:flex-start; gap:36px; flex-wrap:wrap; padding:4px 0 25px; border-bottom:1px solid var(--line); }
+.account-valuation > div > span { display:block; color:var(--muted); font-size:11px; margin-bottom:12px; }
+.account-total-primary > span small { margin-left:8px; color:var(--faint); font-size:10px; }
+.account-total-primary strong { font-size:32px; font-weight:500; letter-spacing:-.03em; font-variant-numeric:tabular-nums; }
+.account-total-primary strong small { font-size:13px; color:var(--muted); margin-left:8px; letter-spacing:0; }
+.account-total-cny { border-left:1px solid var(--line); padding-left:36px; }
+.account-total-cny strong { display:block; padding-top:5px; font-size:24px; font-weight:400; color:var(--muted); font-variant-numeric:tabular-nums; }
+.account-valuation .account-valuation-note { flex:1; min-width:230px; padding-top:1px; }
+.account-valuation .account-valuation-note span { margin-bottom:5px; font-size:10px; line-height:1.6; }
+.account-valuation-note a { color:inherit; text-underline-offset:3px; }
+.holding-cell strong .holding-quantity { margin:0; color:inherit; font-size:inherit; font-weight:inherit; }
+@media(max-width:640px) { .account-valuation { gap:20px; } .account-total-cny { padding-left:20px; } .account-total-primary strong { font-size:27px; } .account-total-cny strong { font-size:20px; } .account-valuation .account-valuation-note { flex-basis:100%; } }
+
 .watchlist-toolbar { gap: 12px; }
 .watchlist-update { display:flex; align-items:center; gap:12px; margin-left:auto; }
 .watchlist-update-button { display:inline-flex; align-items:center; gap:5px; padding:5px 7px; border:0; border-radius:5px; background:transparent; color:#5e7059; font-size:11px; white-space:nowrap; cursor:pointer; }
@@ -190,8 +202,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .unified-watchlist-table th, .unified-watchlist-table td { padding:12px; border:0; text-align:center; }
 .unified-watchlist-table tbody tr:not(.research-expanded-row) { background: transparent; }
 .unified-watchlist-table tbody tr:nth-child(even):not(.research-expanded-row) > td { background: #f7f9f4; }
-.unified-watchlist-table tbody tr > td:first-child { border-radius: 6px 0 0 6px; }
-.unified-watchlist-table tbody tr > td:last-child { border-radius: 0 6px 6px 0; }
+.unified-watchlist-table tbody tr > td:first-child { border-radius: 9px 0 0 9px; }
+.unified-watchlist-table tbody tr > td:last-child { border-radius: 0 9px 9px 0; }
 .unified-watchlist-table th:not(:first-child), .unified-watchlist-table td:not(:first-child) { text-align:center; }
 .unified-watchlist-table td { font-variant-numeric: tabular-nums; }
 .unified-watchlist-table tbody tr:not(.research-expanded-row) > td { height:68px; }
@@ -208,6 +220,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .skeleton-date { width:72px; }
 .skeleton-action { width:13px; height:15px; }
 .unified-watchlist-table tbody tr:not(.research-expanded-row):hover > td { background: #eff4e9; }
+.unified-watchlist-table tbody tr:not(.research-expanded-row):hover { background:transparent; }
 .unified-watchlist-table td:first-child { min-width:0; max-width:none; }
 .unified-watchlist-table small { margin:6px auto 0; color:var(--faint); font-size:10px; line-height:1.5; }
 .unified-watchlist-table .quote-source-label, .unified-watchlist-table .quote-time-label { font-size:9px; }
@@ -215,6 +228,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .quote-currency { margin-left:4px; font-size:9px; font-weight:400; color:var(--faint); }
 .unified-watchlist-table .quote-source-label { max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .unified-watchlist-table .quote-time-label { margin-top:3px; }
+.unified-watchlist-table small.target-currency-note { margin:5px 0 0; color:#8c754f; font-size:9px; line-height:1.5; }
 .research-name-line { position:relative; display:flex; align-items:center; justify-content:center; width:fit-content; max-width:calc(100% - 22px); margin-inline:auto; }
 .watchlist-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:center; font-size:13px; font-weight:550; line-height:1.5; }
 .source-toggle { position:absolute; top:-5px; left:100%; display:flex; align-items:center; justify-content:center; width:18px; height:18px; padding:0; border:0; color:#a1ac99; background:transparent; cursor:pointer; }
@@ -238,6 +252,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .market-hero, .stock-header { background: transparent; border: 0; padding: 5px 0 25px; }
 .market-hero h2, .stock-header h2 { font-size: 30px; font-weight: 550; }
 .market-hero p:not(.eyebrow), .stock-header p:not(.eyebrow) { font-size: 11px; }
+.stock-header-actions { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:10px; }
+.stock-watchlist-control { position:relative; }
+.stock-watchlist-button { min-width:105px; white-space:nowrap; }
+.stock-watchlist-button.is-watched { color:#456344; border-color:#cfdbc9; background:#f2f6ee; }
+.stock-watchlist-error { position:absolute; right:0; top:calc(100% + 7px); z-index:5; width:max-content; max-width:260px; padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:#9a6254; font-size:11px; line-height:1.7; box-shadow:0 5px 15px #20351d12; }
 .index-card { padding: 20px; background: #fff; }
 .index-card strong { font-weight: 500; font-size: 27px; }
 .price-panel { background: #fff; padding: 25px; }
@@ -282,10 +301,26 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .chat-markdown .footnotes { margin-top: 20px; color: var(--muted); font-size: 12px; }
 .profile-header { margin-bottom: 30px; }
 .profile-header p:not(.eyebrow) { font-size: 12px; }
-.settings-grid { gap: 18px; }
+.settings-grid { gap: 18px; align-items:start; }
 .settings-card { padding: 24px; }
 .settings-card h3 { font-size: 15px; font-weight: 550; }
 .settings-card p { font-size: 12px; line-height: 1.8; }
+.account-profile { display:grid; gap:16px; padding:16px; border-radius:8px; background:#f5f8f1; }
+.account-card > .account-profile, .account-card > .account-tabs, .account-card > .account-form { grid-column:1 / -1; }
+.account-profile strong { display:block; font-size:16px; font-weight:550; }
+.account-profile span { display:block; margin-top:6px; font-size:11px; color:var(--muted); }
+.account-profile-actions { display:flex; gap:16px; }
+.settings-card .account-profile-actions button { width:auto; min-height:0; margin:0; padding:0; border:0; border-radius:0; background:transparent; color:#456344; font-size:11px; }
+.settings-card .account-profile-actions button:hover { text-decoration:underline; text-underline-offset:3px; }
+.account-tabs { display:flex; gap:20px; border-bottom:1px solid var(--line); }
+.settings-card .account-tabs button { width:auto; padding:9px 0; border:0; border-bottom:2px solid transparent; border-radius:0; background:transparent; color:var(--muted); font-size:12px; }
+.settings-card .account-tabs button[aria-selected="true"] { border-bottom-color:#53734c; color:#36533b; }
+.account-form { display:grid; gap:16px; }
+.account-form label { display:grid; gap:8px; color:var(--muted); font-size:11px; }
+.account-form input { width:100%; min-height:40px; padding:10px 12px; border:1px solid var(--line); border-radius:6px; background:#fafbf9; color:var(--text); font-size:13px; }
+.account-form input:focus { border-color:#a3b59a; background:#fff; outline:none; box-shadow:0 0 0 2px #edf3eb; }
+.settings-card .account-submit { display:flex; width:100%; min-height:40px; align-items:center; justify-content:center; gap:7px; margin:0; background:#36533b; color:#fff; border-color:#36533b; border-radius:6px; font-size:12px; }
+.settings-card .account-submit:hover:not(:disabled) { background:#2d4832; }
 @media (min-width: 1101px) {
   .home-workspace .dashboard-grid { grid-template-columns: minmax(0,1fr) 260px; }
   .insight-column { grid-template-columns: minmax(0,1fr); }
@@ -320,8 +355,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .mobile-tabs button { font-size: 10px; gap: 5px; padding: 6px; border-radius: 0; }
   .mobile-tabs button svg { width: 19px; height: 19px; stroke-width: 1.5; }
   .mobile-tabs button.active { color: #3a6240; background: transparent; font-weight: 600; }
-  .account-facts > div { padding: 0 16px; }
-  .account-facts strong { font-size: 25px; }
 }
 @media (max-width: 680px) {
   .workspace { padding: 26px 18px; }
@@ -337,10 +370,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .account-selector > svg { display: none; }
   .account-connection-status { margin-left: auto; }
   .account-description { gap: 10px; line-height: 1.8; justify-content: flex-start; margin-top: 15px; padding-top: 12px; border-top: 1px solid var(--line); }
-  .account-facts { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 24px 0; padding-bottom: 24px; }
-  .account-facts > div:nth-child(3) { border: 0; padding-left: 0; }
-  .account-facts > div > span { font-size: 10px; margin-bottom: 10px; }
-  .account-facts strong.fact-status { font-size: 17px; }
   .watchlist-filters { gap: 17px; }
   .watchlist-filters button { font-size: 11px; }
   .research-table-controls { padding: 12px 14px; gap: 13px; }

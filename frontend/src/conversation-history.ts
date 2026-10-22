@@ -7,6 +7,7 @@ export type Message = {
   thinking?: string[];
   agentId?: string;
   interrupted?: boolean;
+  responseError?: string;
 };
 
 export type SavedConversation = {

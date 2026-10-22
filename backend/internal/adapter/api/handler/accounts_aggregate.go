@@ -85,6 +85,11 @@ func decorateSnapshot(data HoldingsSnapshot, state AccountSummary) HoldingsSnaps
 		rows[i].Stale = data.Stale
 	}
 	data.Holdings = rows
+	equities := append([]AccountEquity{}, data.Equities...)
+	for i := range equities {
+		equities[i].AccountID = state.ID
+	}
+	data.Equities = equities
 	return data
 }
 func (h *AccountHandler) allHoldings(ctx context.Context, user uint) (HoldingsSnapshot, error) {
@@ -146,6 +151,7 @@ func (h *AccountHandler) allHoldings(ctx context.Context, user uint) (HoldingsSn
 				data.Warnings = append(data.Warnings, state.Name+"："+w)
 			}
 			data.Holdings = append(data.Holdings, snapshot.Holdings...)
+			data.Equities = append(data.Equities, snapshot.Equities...)
 			if data.AsOf == "" || snapshot.AsOf < data.AsOf {
 				data.AsOf = snapshot.AsOf
 			}

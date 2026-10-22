@@ -177,6 +177,14 @@ func (s *ConversationService) SendMessage(ctx context.Context, req SendMessageRe
 }
 
 // GetConversation gets a conversation with messages
+func (s *ConversationService) CheckConversationOwner(ctx context.Context, id, userID uint) error {
+	conversation, err := s.conversationRepo.GetByID(ctx, id)
+	if err != nil || userID == 0 || conversation.UserID != userID || conversation.Status == model.ConversationStatusDeleted {
+		return fmt.Errorf("conversation not found")
+	}
+	return nil
+}
+
 func (s *ConversationService) GetConversation(ctx context.Context, id uint) (*model.Conversation, error) {
 	return s.conversationRepo.GetWithMessages(ctx, id, 100)
 }
@@ -299,7 +307,7 @@ func (s *ConversationService) SendMessageStream(ctx context.Context, req SendMes
 
 // GroupChatEventCallback receives individual SSE events from persona agents.
 // agentID is the short persona ID ("orchestrator", "value", "trend", "quant").
-// eventType is one of: "agent_start", "content", "thought", "agent_end".
+// eventType is one of: "agent_start", "content", "thought", "agent_error", "agent_end".
 type GroupChatEventCallback func(agentID, eventType, content string) error
 
 // SendGroupChatStream streams a multi-agent roundtable response.
@@ -347,14 +355,22 @@ func (s *ConversationService) SendGroupChatStream(
 
 	// Create ordered persona agents
 	groupAgents := s.agentFactory.CreateGroupChatAgents(participants)
+	if len(groupAgents) == 0 {
+		return fmt.Errorf("no valid roundtable participants")
+	}
 
 	// Stream each agent sequentially; accumulate responses for cross-agent context
 	priorResponses := make([]string, 0, len(groupAgents))
 	var fullExchangeBuilder strings.Builder
 
 	for _, ga := range groupAgents {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		agentID := ga.AgentID()
-		_ = callback(agentID, "agent_start", "")
+		if err := callback(agentID, "agent_start", ""); err != nil {
+			return err
+		}
 
 		agentReq := agent.ProcessRequest{
 			UserMessage:         content,
@@ -375,12 +391,26 @@ func (s *ConversationService) SendGroupChatStream(
 			return callback(agentID, "content", chunk)
 		}
 
-		if err := ga.ProcessStream(ctx, agentReq, streamCB); err != nil {
-			s.logger.WithField("error", err).Errorf("Group agent %s stream error", agentID)
+		agentCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		streamErr := ga.ProcessStream(agentCtx, agentReq, streamCB)
+		cancel()
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if streamErr != nil || strings.TrimSpace(agentResponseBuilder.String()) == "" {
+			if streamErr == nil {
+				streamErr = fmt.Errorf("model returned an empty answer")
+			}
+			s.logger.WithField("error", streamErr).Errorf("Group agent %s stream error", agentID)
+			if err := callback(agentID, "agent_error", roundtableErrorMessage(streamErr)); err != nil {
+				return err
+			}
 			// Continue with remaining agents even if one fails
 		}
 
-		_ = callback(agentID, "agent_end", "")
+		if err := callback(agentID, "agent_end", ""); err != nil {
+			return err
+		}
 
 		if resp := agentResponseBuilder.String(); resp != "" {
 			name := agent.GroupPersonaDisplayName(agentID)

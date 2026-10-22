@@ -56,6 +56,13 @@
 .roundtable-speaker button { display:flex; align-items:center; padding:4px; margin-left:auto; border:0; background:transparent; color:#7d8c73; cursor:pointer; }
 .roundtable-progress { display:flex; align-items:center; gap:7px; color:var(--muted); font-size:11px; }
 .roundtable-interrupted { display:block; color:var(--muted); margin-top:10px; font-size:10px; }
+.roundtable-composer { position:relative; }
+.roundtable-mentions { position:absolute; bottom:calc(100% + 8px); left:0; width:min(360px,100%); padding:6px; border:1px solid var(--line); border-radius:8px; background:var(--panel); box-shadow:0 8px 28px #20351d1a; z-index:10; }
+.roundtable-mentions button { display:flex; align-items:center; gap:9px; width:100%; height:auto; padding:10px; border:0; border-radius:5px; background:transparent; color:var(--text); text-align:left; cursor:pointer; }
+.roundtable-mentions button[aria-selected="true"], .roundtable-mentions button:hover { background:#edf3eb; }
+.roundtable-mentions button > span { display:grid; place-items:center; width:24px; height:24px; border-radius:5px; background:#e7efdf; color:#54724c; font-size:10px; }
+.roundtable-mentions strong { font-size:12px; font-weight:550; }
+.roundtable-mentions small { margin-left:auto; color:var(--muted); font-size:10px; }
 .roundtable-role-list > div:not(.section-header) { display:flex; align-items:center; gap:10px; margin-top:18px; }
 .roundtable-role-list > div > span { display:flex; justify-content:center; align-items:center; width:30px; height:30px; border-radius:6px; background:#edf3eb; color:#54724c; font-size:12px; }
 .roundtable-role-list strong { font-size:12px; font-weight:550; }

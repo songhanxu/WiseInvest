@@ -5,12 +5,27 @@ export const roundtableAgents = [
   { id: "quant", name: "量化派", role: "数据、概率与风险", mark: "量" }
 ] as const;
 
-export const roundtableWelcome = "欢迎来到慧投圆桌。主持人、价值派、趋势派和量化派会从不同角度讨论你的问题。可以选择参与角色，也可以在问题中 @价值派、@趋势派 或 @量化派；@主持人 或 @all 邀请全部角色。";
+export const roundtableWelcome = "欢迎来到慧投圆桌。主持人、价值派、趋势派和量化派会从不同角度讨论你的问题。选择参与角色，或输入 @ 指定发言人；@所有人 邀请全部角色。";
 
 export function roundtableParticipants(text: string, selected: string[] = []) {
-  if (/@(?:主持人|所有人|all\b)/i.test(text)) return [];
-  const mentioned = roundtableAgents.filter(agent => agent.id !== "orchestrator" && text.includes(`@${agent.name}`)).map(agent => agent.id);
+  if (/@(?:所有人|all\b)/i.test(text)) return [];
+  const mentioned = roundtableAgents.filter(agent => text.includes(`@${agent.name}`)).map(agent => agent.id);
   return mentioned.length ? mentioned : selected.filter(id => roundtableAgents.some(agent => agent.id === id));
+}
+
+export const roundtableMentionOptions = [{ id: "all", name: "所有人", role: "邀请全部角色", mark: "全" }, ...roundtableAgents];
+export function roundtableMentionAt(text: string, caret: number) {
+  const prefix = text.slice(0, caret);
+  const match = /@([^@\s]*)$/.exec(prefix);
+  if (!match || (match.index > 0 && /[a-z\d_.]/i.test(prefix[match.index - 1]))) return null;
+  const query = match[1].toLowerCase();
+  const options = roundtableMentionOptions.filter(agent => agent.name.includes(query) || agent.id.startsWith(query));
+  return options.length ? { start: match.index, end: caret, options } : null;
+}
+
+export function insertRoundtableMention(text: string, range: { start: number; end: number }, name: string) {
+  const mention = `@${name} `;
+  return { text: text.slice(0, range.start) + mention + text.slice(range.end), caret: range.start + mention.length };
 }
 
 export type ResearchStreamChunk = { type?: string; agent_id?: string; content?: string; error?: string };

@@ -5,19 +5,40 @@ import ts from 'typescript';
 
 const source = await readFile(new URL('../src/research.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } });
-const { roundtableParticipants, readResearchStream, technicalOverview } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const { roundtableParticipants, roundtableMentionAt, insertRoundtableMention, readResearchStream, technicalOverview } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 
 function response(chunks) {
   return new Response(new ReadableStream({ start(controller) { for (const chunk of chunks) controller.enqueue(chunk); controller.close(); } }));
 }
 const encode = text => new TextEncoder().encode(text);
 
-test('mentions select agents and the host/all override selected roles', () => {
+test('mentions select the exact agents and only all overrides selected roles', () => {
   assert.deepEqual(roundtableParticipants('讨论风险', ['value']), ['value']);
   assert.deepEqual(roundtableParticipants('@量化派 @趋势派', ['value']), ['trend', 'quant']);
-  assert.deepEqual(roundtableParticipants('@主持人 @价值派', ['value']), []);
+  assert.deepEqual(roundtableParticipants('@主持人 @价值派', ['value']), ['orchestrator', 'value']);
+  assert.deepEqual(roundtableParticipants('@主持人', ['value']), ['orchestrator']);
   assert.deepEqual(roundtableParticipants('@all 讨论', ['value']), []);
   assert.deepEqual(roundtableParticipants('问题', ['unknown']), []);
+});
+
+test('mention suggestions follow the caret and insertion preserves surrounding Chinese text', () => {
+  assert.equal(roundtableMentionAt('请@', 2).options.length, 5);
+  const text = '请@价分析风险';
+  const range = roundtableMentionAt(text, 3);
+  assert.deepEqual(range.options.map(agent => agent.id), ['value']);
+  const result = insertRoundtableMention(text, range, '价值派');
+  assert.equal(result.text, '请@价值派 分析风险');
+  assert.equal(result.caret, 6);
+  assert.equal(roundtableMentionAt('name@example.com', 16), null);
+  assert.equal(roundtableMentionAt('@不存在', 4), null);
+  assert.equal(roundtableMentionAt('@价值派 ', 5), null);
+});
+
+test('an individual agent error does not discard a later successful reply', async () => {
+  const chunks = [];
+  await readResearchStream(response([encode('data: {"type":"agent_error","agent_id":"value","content":"AI 服务限流"}\n\ndata: {"type":"content","agent_id":"trend","content":"趋势观点"}\n\ndata: [DONE]\n\n')]), chunk => chunks.push(chunk));
+  assert.equal(chunks[0].type, 'agent_error');
+  assert.equal(chunks[1].content, '趋势观点');
 });
 
 test('SSE accepts single-byte UTF-8 chunks, heartbeats, CRLF and un-terminated DONE', async () => {

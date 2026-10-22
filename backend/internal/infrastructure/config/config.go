@@ -9,19 +9,20 @@ import (
 
 // Config holds all configuration for the application
 type Config struct {
-	Server         ServerConfig
-	Database       DatabaseConfig
-	Redis          RedisConfig
-	OpenAI         OpenAIConfig
-	Binance        BinanceConfig
-	Bitget         BitgetConfig
-	BinanceAccount ExchangeAccountConfig
-	GateAccount    ExchangeAccountConfig
-	Search         SearchConfig
-	JWT            JWTConfig
-	CORS           CORSConfig
-	WeChat         WeChatConfig
-	Notification   NotificationConfig
+	Server           ServerConfig
+	Database         DatabaseConfig
+	Redis            RedisConfig
+	OpenAI           OpenAIConfig
+	Binance          BinanceConfig
+	Bitget           BitgetConfig
+	BinanceAccount   ExchangeAccountConfig
+	GateAccount      ExchangeAccountConfig
+	Search           SearchConfig
+	JWT              JWTConfig
+	AccountBootstrap AccountBootstrapConfig
+	CORS             CORSConfig
+	WeChat           WeChatConfig
+	Notification     NotificationConfig
 }
 
 // NotificationConfig holds push notification configuration
@@ -92,6 +93,13 @@ type JWTConfig struct {
 	Expiration time.Duration
 }
 
+// Optional one-time migration of an explicitly selected existing account.
+type AccountBootstrapConfig struct {
+	UserID   uint
+	Username string
+	Password string `json:"-"`
+}
+
 // CORSConfig holds CORS configuration
 type CORSConfig struct {
 	AllowedOrigins []string
@@ -99,6 +107,14 @@ type CORSConfig struct {
 
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
+	bootstrap := AccountBootstrapConfig{Username: os.Getenv("AUTH_BOOTSTRAP_USERNAME"), Password: os.Getenv("AUTH_BOOTSTRAP_PASSWORD")}
+	if rawID := os.Getenv("AUTH_BOOTSTRAP_USER_ID"); rawID != "" || bootstrap.Username != "" || bootstrap.Password != "" {
+		id, err := strconv.ParseUint(rawID, 10, 32)
+		if err != nil || id == 0 || bootstrap.Username == "" || bootstrap.Password == "" {
+			return nil, fmt.Errorf("AUTH_BOOTSTRAP_USER_ID, AUTH_BOOTSTRAP_USERNAME and AUTH_BOOTSTRAP_PASSWORD must be configured together")
+		}
+		bootstrap.UserID = uint(id)
+	}
 	bitgetConfig, err := loadBitgetConfig()
 	if err != nil {
 		return nil, err
@@ -122,8 +138,9 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		Bitget:         bitgetConfig,
-		BinanceAccount: binanceAccount, GateAccount: gateAccount,
+		AccountBootstrap: bootstrap,
+		Bitget:           bitgetConfig,
+		BinanceAccount:   binanceAccount, GateAccount: gateAccount,
 		Server: ServerConfig{
 			Port: getEnv("SERVER_PORT", "8080"),
 			Mode: getEnv("SERVER_MODE", "debug"),

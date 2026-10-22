@@ -16,7 +16,7 @@ type PriceAlertHandler struct{ Service *service.PriceAlertService }
 func (h *PriceAlertHandler) List(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 	user := c.GetUint("userID")
-	rows, err := h.Service.Store.List(c.Request.Context(), user)
+	rows, err := h.Service.List(c.Request.Context(), user)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "提醒列表读取失败"})
 		return
@@ -104,7 +104,11 @@ func (h *AccountHandler) PriceAlertQuotes(ctx context.Context, user uint, accoun
 		available := row.QuoteAvailable == nil || *row.QuoteAvailable
 		quoteFresh := fresh
 		quoteFresh = quoteFresh && alertQuoteTimeFresh(row.QuoteTime)
-		rows = append(rows, service.AlertQuote{HoldingID: row.HoldingID, AccountID: state.ID, Name: row.Name, Code: row.ID, Currency: row.Currency, Price: row.CurrentPrice, Fresh: quoteFresh && available})
+		assetKey := alertAssetKey(row.Market, row.ID, row.Symbol)
+		if assetKey == "" {
+			assetKey = "holding:" + row.HoldingID
+		}
+		rows = append(rows, service.AlertQuote{HoldingID: row.HoldingID, AssetKey: assetKey, AccountID: state.ID, Name: row.Name, Code: row.ID, Currency: row.Currency, Price: row.CurrentPrice, Fresh: quoteFresh && available})
 	}
 	return rows, nil
 }
@@ -142,9 +146,19 @@ func (h *StockHandler) WatchlistPriceAlertQuotes(ctx context.Context, user uint)
 		}
 		quotes = append(quotes, service.AlertQuote{
 			HoldingID: fmt.Sprintf("watchlist:%s:%s", stock.Market, canonicalWatchCode(stock.Market, stock.ID, stock.Symbol)),
+			AssetKey:  alertAssetKey(stock.Market, stock.ID, stock.Symbol),
 			AccountID: "watchlist", Name: stock.Name, Code: stock.ID, Currency: currency, Price: stock.CurrentPrice,
 			Fresh: (stock.QuoteAvailable == nil || *stock.QuoteAvailable) && alertQuoteTimeFresh(stock.QuoteTime),
 		})
 	}
 	return quotes, nil
+}
+
+func alertAssetKey(market, code, symbol string) string {
+	switch market {
+	case "a_share", "us_stock", "hk_stock", "crypto":
+		return market + ":" + canonicalWatchCode(market, code, symbol)
+	}
+	// Unknown products must not accidentally share a stock's target.
+	return ""
 }
