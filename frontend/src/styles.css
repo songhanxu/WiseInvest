@@ -2035,8 +2035,8 @@ p {
 .has-report .unified-watchlist-table { min-width: 1200px; }
 .research-report-col { width: 180px; }
 .has-report .col-report { min-width: 180px; }
-.filing-cell { display: grid; gap: 6px; min-width: 0; }
-.filing-cell-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.filing-cell { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.filing-cell-copy { display: grid; gap: 6px; min-width: 0; }
 .filing-period-link { padding: 0; border: 0; background: transparent; color: var(--blue); font: inherit; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .01em; white-space: nowrap; cursor: pointer; }
 .filing-period-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .filing-cell-meta { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -2048,7 +2048,7 @@ p {
 @media (max-width: 680px) {
  .has-report .unified-watchlist-table { min-width: 0; }
  .has-report .col-report { min-width: 0; width: auto; }
- .filing-cell-main { gap: 5px; }
+ .filing-cell { gap: 5px; }
  .filing-period-link { font-size: 11px; }
  .filing-cell-meta { gap: 5px; font-size: 9px; }
  .report-ai-button { flex-basis: 25px; width: 25px; height: 25px; }
