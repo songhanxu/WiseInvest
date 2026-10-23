@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { requestJson } from "./App";
 import type { Market, StockQuote } from "./App";
@@ -9,12 +9,22 @@ import { quoteCurrency, quoteStatusLabel, quoteTimeLabel } from "./quote-present
 
 export type Fundamentals = {
   description?: string;
-  metrics?: Record<string, { source: string; currency?: string; as_of: string }>;
+  metrics?: Record<string, { source: string; source_url?: string; currency?: string; as_of: string }>;
   eps: number | null;
+  eps_basis?: string;
+  eps_period_start?: string;
+  eps_period_end?: string;
+  eps_filed_date?: string;
+  sec_cik?: string;
+  financial_reports?: {
+    form: string; filed_date: string; report_date: string; source_url: string; accession: string;
+    metrics?: Record<string, { value: number; unit: string; period_start?: string; period_end: string; tag: string }>;
+  }[];
   pe: number | null;
   forward_pe: number | null;
   forward_eps: number | null;
   forward_period?: string;
+  forward_basis?: string;
   guidance_eps: number | null;
   guidance_eps_low: number | null;
   guidance_eps_high: number | null;
@@ -23,6 +33,7 @@ export type Fundamentals = {
   guidance_report_date?: string;
   guidance_source_url?: string;
   next_earnings_date?: string;
+  next_earnings_date_end?: string;
   earnings_date_status?: string;
   currency?: string;
   source?: string;
@@ -37,6 +48,8 @@ export const numeric = (value?: number | null) => value == null || !Number.isFin
 export function useStockFundamentals(apiBase: string, stocks: StockQuote[], scope: string) {
   const [fundamentals, setFundamentals] = useState<Record<string, Fundamentals>>({});
   const [financialLoading, setFinancialLoading] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const refreshFundamentals = useCallback(() => setRefreshVersion(version => version + 1), []);
   const financialKeys = stocks.filter(stock => ["us_stock", "hk_stock", "a_share"].includes(stock.market)).map(stockKey).sort().join("|");
   useEffect(() => {
     let cancelled = false;
@@ -57,9 +70,9 @@ export function useStockFundamentals(apiBase: string, stocks: StockQuote[], scop
     Promise.all(Array.from({ length: Math.min(4, rows.length) }, worker)).finally(() => { if (!cancelled) setFinancialLoading(false); });
     return () => { cancelled = true; controller.abort(); };
     // Quote refreshes retain the same membership and don't refetch slow financial data.
-  }, [apiBase, scope, financialKeys]);
+  }, [apiBase, scope, financialKeys, refreshVersion]);
 
-  return { fundamentals, financialLoading };
+  return { fundamentals, financialLoading, refreshFundamentals };
 }
 
 export function StockResearchTable<T extends StockQuote>({ stocks, markets, fundamentals, onOpenStock, getRowKey, getHoldingValue, renderHolding, renderTarget, renderAction, emptyMessage, loading = false }: {
@@ -126,10 +139,8 @@ export function StockResearchTable<T extends StockQuote>({ stocks, markets, fund
     const metric = f?.metrics?.[key];
     return [metric?.source || f?.source, (key === "eps" || key === "guidance") ? metric?.currency || f?.currency : "", metric?.as_of || f?.as_of].filter(Boolean).join(" · ");
   };
-  const subscriptionLimited = stocks.some(stock => fundamentals[stockKey(stock)]?.message?.includes("HTTP 402"));
   const holdingCurrencies = new Set(stocks.map(stock => getHoldingValue?.(stock)?.currency).filter(Boolean));
   return <div className={`surface-card watchlist-table-container ${renderHolding ? "has-holdings" : ""} ${hidden.map(key => `hide-${key}`).join(" ")}`}>
-    {subscriptionLimited && <p className="form-note danger" role="status">部分标的的财报接口未包含在当前 FMP 订阅中，相应指标暂不可用。点击标的旁的 ⓘ 可查看具体原因；持仓和行情仍可正常显示。</p>}
     <div className="research-table-controls">
       <span className="research-count">{initialLoading ? <span className="skeleton-block research-count-skeleton" aria-hidden="true" /> : `${stocks.length} 项标的`}</span>
       <div className="research-table-actions" ref={controlsRef} onKeyDown={event => { if (event.key === "Escape") (menu === "sort" ? sortButton : columnsButton).current?.focus(); }}>
@@ -148,7 +159,7 @@ export function StockResearchTable<T extends StockQuote>({ stocks, markets, fund
     <div className="research-table-scroll" aria-busy={initialLoading}>
     <table className="unified-watchlist-table">
       <colgroup><col className="research-identity-col" /><col />{renderHolding && <col className="research-holding-col" />}{renderTarget && <col className="research-target-col" />}{Object.keys(columnLabels).filter(key => !hidden.includes(key)).map(key => <col key={key} />)}{renderAction && <col className="research-action-col" />}</colgroup>
-      <thead><tr><th>标的</th><th>最新价格</th>{renderHolding && <th>持仓详情</th>}{renderTarget && <th className="target-price-column">期望价格</th>}<th className="col-eps">EPS <small>TTM</small></th><th className="col-pe">PE <small>TTM</small></th><th className="col-forward">远期 PE</th><th className="col-guidance">公司指引 EPS</th><th className="col-earnings">下份财报时间</th>{renderAction && <th><span className="sr-only">操作</span></th>}</tr></thead>
+      <thead><tr><th>标的</th><th>最新价格</th>{renderHolding && <th>持仓详情</th>}{renderTarget && <th className="target-price-column">期望价格</th>}<th className="col-eps">EPS <small>披露口径</small></th><th className="col-pe">PE <small>TTM</small></th><th className="col-forward">远期 PE</th><th className="col-guidance">公司指引 EPS</th><th className="col-earnings">下份财报时间</th>{renderAction && <th><span className="sr-only">操作</span></th>}</tr></thead>
       <tbody>{initialLoading && Array.from({ length: 6 }, (_, index) => <tr className="research-skeleton-row" key={`loading-${index}`} aria-hidden="true">
         <td data-label="标的" className="research-identity"><div className="research-skeleton-line"><span className="skeleton-block skeleton-symbol" /></div><small><span className="skeleton-block skeleton-currency" /></small></td>
         <td data-label="价格"><div className="research-skeleton-line"><span className="skeleton-block skeleton-value" /></div><small><span className="skeleton-block skeleton-currency" /></small></td>
@@ -168,16 +179,31 @@ export function StockResearchTable<T extends StockQuote>({ stocks, markets, fund
           <td data-label="标的" className="research-identity"><div className="research-name-line"><button className="watchlist-name" title={code} disabled={!market} onClick={() => market && onOpenStock(market, stock)}>{code}</button><button className="source-toggle" aria-label={`${code}详情`} aria-expanded={expanded === rowKey} onClick={() => setExpanded(previous => previous === rowKey ? null : rowKey)}><Info size={10} /></button></div><small title={stock.provider_symbol}>{market?.displayName ?? "其他 / 待识别"}</small></td>
           <td data-label="价格" className="mono"><span className="quote-amount">{stock.quote_available === false || stock.current_price <= 0 ? "—" : numeric(stock.current_price)}<span className="quote-currency">{quoteCurrency(stock)}</span></span><small className="quote-source-label" title={quoteTimeLabel(stock)}>{quoteStatusLabel(stock)}</small></td>
           {renderHolding && <td data-label="持仓详情" className="holding-detail-cell">{renderHolding(stock)}</td>}{renderTarget && <td data-label="期望价格" className="target-price-column">{renderTarget(stock)}</td>}
-          <td data-label="EPS" className="mono col-eps" title={financialHint}>{f?.eps != null ? numeric(f.eps) : empty}{f?.eps != null && <small>{f.metrics?.eps?.currency || f.currency}</small>}</td>
+          <td data-label="EPS" className="mono col-eps" title={[financialHint, f?.eps_period_start && `${f.eps_period_start} 至 ${f.eps_period_end}`, f?.eps_filed_date && `提交于 ${f.eps_filed_date}`].filter(Boolean).join(" · ")}>{f?.eps != null ? numeric(f.eps) : empty}{f?.eps != null && <><small>{[f.metrics?.eps?.currency || f.currency, f.eps_basis].filter(Boolean).join(" · ")}</small>{f.eps_period_end && <small>截至 {f.eps_period_end}</small>}</>}</td>
           <td data-label="PE" className="mono col-pe" title={metricHint(f, "pe")}>{f?.pe != null && f.pe > 0 ? numeric(f.pe) : f?.eps != null && f.eps < 0 ? "亏损" : empty}</td>
-          <td data-label="远期 PE" className="mono col-forward" title={metricHint(f, "forward_pe")}>{f?.forward_pe != null ? numeric(f.forward_pe) : empty}{f?.forward_period && <small>年度期末 {f.forward_period}</small>}</td>
+          <td data-label="远期 PE" className="mono col-forward" title={metricHint(f, "forward_pe")}>{f?.forward_pe != null ? numeric(f.forward_pe) : empty}{f?.forward_period ? <small>年度期末 {f.forward_period}</small> : f?.forward_basis && <small>{f.forward_basis}</small>}</td>
           <td data-label="公司指引" className="mono col-guidance" title={f?.guidance_report_date ? `财报发布 ${f.guidance_report_date}` : financialHint}>{f?.guidance_source_url && /^https?:\/\//.test(f.guidance_source_url) ? <a href={f.guidance_source_url} target="_blank" rel="noreferrer">{guidance}</a> : guidance}<small>{f?.guidance_period ? `${f.guidance_period} · ${f.guidance_basis || ""} · ${f.metrics?.guidance?.currency || f.currency || ""}` : na ? "" : "未取得有效公司指引"}</small></td>
-          <td data-label="财报日期" className="mono col-earnings">{f?.next_earnings_date || empty}{f?.next_earnings_date && <small>{f.earnings_date_status === "confirmed" ? "公司已确认" : "预计日期"}</small>}</td>
+          <td data-label="财报日期" className="mono col-earnings" title={metricHint(f, "next_earnings_date")}>{f?.next_earnings_date || empty}{f?.next_earnings_date_end && ` 至 ${f.next_earnings_date_end}`}{f?.next_earnings_date && <small>{f.earnings_date_status === "confirmed" ? "公司已确认" : f.next_earnings_date_end ? "预计日期区间" : "预计日期"}</small>}</td>
           {renderAction && <td data-label="操作">{renderAction(stock)}</td>}
-        </tr>{expanded === rowKey && <tr className="research-expanded-row"><td ref={detailsRef} colSpan={7 + (renderHolding ? 1 : 0) + (renderTarget ? 1 : 0) + (renderAction ? 1 : 0) - hidden.length}><div className="research-provenance"><h4 className="research-asset-name">{stock.name}</h4><p className="research-asset-introduction">{assetIntroduction(stock, f?.description)}</p>{!na && <div>{Object.entries({eps:"EPS",pe:"PE",forward_pe:"远期 PE",guidance:"公司指引",next_earnings_date:"财报日期"}).map(([metric,label]) => <span key={metric}><b>{label}</b>{metricHint(f,metric) || "暂无来源数据"}</span>)}</div>}</div></td></tr>}</Fragment>;
+        </tr>{expanded === rowKey && <tr className="research-expanded-row"><td ref={detailsRef} colSpan={7 + (renderHolding ? 1 : 0) + (renderTarget ? 1 : 0) + (renderAction ? 1 : 0) - hidden.length}><div className="research-provenance"><h4 className="research-asset-name">{stock.name}</h4><p className="research-asset-introduction">{assetIntroduction(stock, f?.description)}</p>{!na && f?.message && <p className="watchlist-note" role="status">{f.message}</p>}{!na && <div>{Object.entries({eps:"EPS",pe:"PE",forward_pe:"远期 PE",guidance:"公司指引",next_earnings_date:"财报日期"}).map(([metric,label]) => <span key={metric}><b>{label}</b>{metricHint(f,metric) || "暂无来源数据"}</span>)}</div>}{!na && f?.financial_reports?.length ? <SECFinancialReports reports={f.financial_reports} /> : null}</div></td></tr>}</Fragment>;
       })}</tbody>
     </table>
     </div>
     {!stocks.length && !initialLoading && <div className="empty-state">{emptyMessage}</div>}
   </div>;
+}
+
+function SECFinancialReports({ reports }: { reports: NonNullable<Fundamentals["financial_reports"]> }) {
+  const labels: Record<string, string> = { revenue: "营收", net_income: "净利润", assets: "总资产", liabilities: "总负债", equity: "股东权益", operating_cash_flow: "经营现金流" };
+  return <section className="sec-financial-reports" aria-label="SEC 财报">
+    <h5>SEC 财报与财务摘要</h5>
+    <p className="watchlist-note">数值按各科目的披露期间列示；现金流可能为年初至今累计值。提交日期与未来业绩发布日期分别列示。</p>
+    {reports.map(report => <details key={report.accession}>
+      <summary>{report.form} · 报告期末 {report.report_date} · 提交 {report.filed_date}</summary>
+      <a href={report.source_url} target="_blank" rel="noreferrer">查看 SEC 原始财报</a>
+      <dl>{Object.entries(report.metrics || {}).map(([key, metric]) => <div key={key}>
+        <dt>{labels[key] || key}</dt><dd title={metric.tag}><strong>{numeric(metric.value)} {metric.unit}</strong><small>{metric.period_start ? `${metric.period_start} 至 ${metric.period_end}` : `截至 ${metric.period_end}`}</small></dd>
+      </div>)}</dl>
+    </details>)}
+  </section>;
 }

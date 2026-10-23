@@ -1,6 +1,6 @@
 # 股票行情与统一自选列表
 
-美股、港股与加密货币行情优先使用 Bitget，A 股保持原数据源。美股与港股报价、搜索在 Bitget 无结果或失败时使用腾讯兜底；加密货币使用 Binance 公开行情兜底。按缺失标的逐个补齐，不覆盖已经取得的 Bitget 报价。页面保留已取得的数据，刷新失败时标注缓存。FMP 等公司财报数据源保持独立。
+美股、港股与加密货币行情优先使用 Bitget，A 股保持原数据源。美股与港股报价、搜索在 Bitget 无结果或失败时使用腾讯兜底；加密货币使用 Binance 公开行情兜底。按缺失标的逐个补齐，不覆盖已经取得的 Bitget 报价。页面保留已取得的数据，刷新失败时标注缓存。公司财报数据源保持独立。
 
 周 K 由日 K 按 UTC 周一聚合，30 分钟 K 由 15 分钟 K 聚合。每条报价保留 `source`、`provider_symbol`、`currency`、`product_type`、`quote_time`、`quote_session` 和 `change_basis`，价格、币种及滚动 24 小时涨跌按 Bitget 原值展示。页面以普通标的列表展示股票，产品身份保留在内部以正确查询行情、K 线和分析。
 
@@ -25,17 +25,19 @@
 
 ## EPS、估值与财报数据
 
-Bitget 官方行情及股票资料接口提供交易行情、公司名称和交易时段，不提供这些公司财务指标。没有配置数据源时返回 JSON `null`，不生成或估算财报数据。
+Bitget 官方行情及股票资料接口提供交易行情、公司名称和交易时段，不提供这些公司财务指标。基本面使用独立的数据源链路：美股已披露 EPS 和财务摘要以 SEC EDGAR 为主，Yahoo Finance 补充估值、分析师预期和未覆盖的字段 / 市场，美股未来财报日期可通过 `FINNHUB_API_KEY` 启用 Finnhub 财报日历补充。所有来源都没有数据时返回 JSON `null`。
 
-可在后端环境中配置 `FMP_API_KEY`，使用 [FMP 官方 API](https://site.financialmodelingprep.com/developer/docs)：
+EPS 和 PE 属于标的股票，不是代币或合约指标；远期估值使用供应商提供的分析师预期。FMP 接入已移除，后端不再读取其密钥或调用其接口。
 
-- `income-statement-ttm`：稀释 EPS TTM 和报表币种。
-- `ratios-ttm`：标的股票 PE TTM。
-- `analyst-estimates?period=annual`：未来年度 EPS 共识，页面标明年度期末。
-- `profile`：股票价格及其报价币种；只有与 EPS 币种一致时才计算远期 PE。
-- `earnings`：未来财报公告日期，供应商日期显示为预计日期。
+SEC 默认启用（`SEC_FUNDAMENTALS_ENABLED=true`），通过后端 `SEC_USER_AGENT` 配置项目名和真实联系邮箱，不需要 API Key。官方 ticker → CIK 映射每日刷新；Company Facts 与 Submissions 按公司查询，客户端统一限制为每秒最多四次请求，403 / 429 后跨标的退避一分钟。联系邮箱只保存在后端环境中，不写进前端或提交到仓库。
 
-EPS 和 PE 属于标的股票，不是代币或合约指标；远期 PE 使用年度分析师预期。不同市场的数据覆盖与访问权限取决于 FMP 订阅。
+SEC EPS 采用实际披露的基本 / 稀释 EPS，保留 `eps_basis`、`eps_period_start`、`eps_period_end` 和 `eps_filed_date`。优先使用最新期间的稀释值，同一期间采用最新已提交的修订数据；不通过四季度相加或累计值相减生成 TTM。页面 EPS 列明确标示单季、年度或累计口径，Yahoo 补充值则标明供应商 TTM。PE TTM 仍由 Yahoo 提供并标明来源，不能拿单季度 EPS 计算或解释其 TTM PE。
+
+`financial_reports` 返回最近八份 10-K / 10-Q / 20-F / 40-F（含修订）的原始链接与财务摘要：营收、净利润、资产、负债、权益和经营现金流；每个科目分别保留币种、XBRL 标签和实际起止日期，不把现金流年初至今累计数当成单季度数。摘要只使用同一申报编号、同一报告期末的标准标签，不等于完整三张财务报表。缺失科目不补零。SEC 提交日期只用于历史申报展示，不写入“下份财报时间”。外籍 / ADR 主体的每普通股与每 ADS 换算未核验前，EPS 由 Yahoo 补充，仍可展示其 SEC 报表与标准科目。
+
+Yahoo Finance 参考 Stocksera 的 Yahoo 数据获取方式，后端直接处理 cookie / crumb 会话，不新增 Python 运行时。设置 `YAHOO_FUNDAMENTALS_ENABLED=false` 可关闭。Yahoo 的财务币种与股票报价币种分别处理，直接使用供应商估值，不用报价币种的价格除以另一币种 EPS。供应商未提供明确年度期末时，页面标注预期口径；预计财报日期支持区间，并按交易所时区转换。Finnhub 仅查询美股未来四个月日期，其季度 EPS 共识不会被当成年度 EPS 或公司指引。
+
+接口按指标返回 `metrics` 来源、币种与查询时间；失败原因使用受控提示，不返回上游原文或凭证。请求合并和缓存同时覆盖各数据源：核心字段齐全时缓存六小时，无数据或缺少 EPS、远期 PE、财报日期时缓存一分钟；Yahoo 会话初始化失败跨标的退避一分钟。公共 Yahoo 接口仍可能受网络、HTTP 429 或覆盖范围影响，不能视作有可用性保证的数据服务。完整数据缺口见 [Stocksera 数据覆盖对比](stocksera-data-comparison.md)。
 
 「最新财报预期 EPS」专指公司管理层指引，不用分析师共识替代。公司指引可通过 `STOCK_FUNDAMENTALS_FILE` 引入经核验的结构化财报记录。将 `backend/stock-fundamentals.example.json` 复制到自己的数据文件，按 `market:code` 编写；例子全部为空，不包含模拟财务数据。
 
@@ -82,7 +84,7 @@ BITGET_INCLUDE_FUTURES=true
 
 新增 `GET /api/v1/accounts` 与 `GET /api/v1/accounts/bitget/holdings`，均需要 JWT。账号未绑定、凭证未填完整时不会访问 Bitget 私有接口。私有请求固定访问官方主机，拒绝重定向，不把凭证写到 URL、返回值或上游错误消息；不允许调用交易接口。
 
-股票根据官方 `symbolType=stock` 资料识别，不用币名首字母猜测。加密资产也会展示；无法识别的资产保留原数量并归入其他分类。未出现在当前官方股票资料中的资产不会被归为股票。现货冻结/锁定数量计入持仓，合约多空分别展示；港股 Quanto 行情仍以 HKD 计价。列表不是完整账户权益报表。未配置 FMP/公司财报数据时财务列显示缺失，不从 Bitget 行情推算财报。
+股票根据官方 `symbolType=stock` 资料识别，不用币名首字母猜测。加密资产也会展示；无法识别的资产保留原数量并归入其他分类。未出现在当前官方股票资料中的资产不会被归为股票。现货冻结/锁定数量计入持仓，合约多空分别展示；港股 Quanto 行情仍以 HKD 计价。列表不是完整账户权益报表。公司财报数据源不可用时财务列显示缺失，不从 Bitget 行情推算财报。
 
 服务端完整持仓快照短暂缓存 10 秒，读取缓存前仍检查用户身份；部分失败不缓存。行情失败时保留持仓数量并显示价格缺失。凭证只在服务端读取；浏览器仅持有慧投登录 token。
 

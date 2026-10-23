@@ -2030,3 +2030,12 @@ p {
   .price-alert-recipient { max-width:100%; padding-left:29px; }
   .price-alert-recipient > span { max-width:calc(100vw - 160px); }
 }
+
+.sec-financial-reports { margin-top: 16px; border-top: 1px solid var(--border-color, #e5e7eb); padding-top: 12px; }
+.sec-financial-reports h5 { margin: 0 0 8px; font-size: 13px; }
+.sec-financial-reports details { margin: 10px 0; font-size: 12px; }
+.sec-financial-reports summary { cursor: pointer; padding: 6px 0; }
+.sec-financial-reports dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 10px 0; }
+.sec-financial-reports dt { font-size: 11px; opacity: .7; }
+.sec-financial-reports dd { margin: 4px 0 0; }
+.sec-financial-reports dd small { display: block; font-size: 10px; overflow-wrap: anywhere; }

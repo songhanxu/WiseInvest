@@ -22,7 +22,7 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
   const priceAlerts = usePriceAlerts(apiBase, token, isActive);
   const { rootRef: searchRef, isOpen: searchOpen, setIsOpen: setSearchOpen } = useDismissiblePopover<HTMLElement>();
   const [stocks, setStocks] = useState<StockQuote[]>([]);
-  const { fundamentals, financialLoading } = useStockFundamentals(apiBase, stocks, token);
+  const { fundamentals, financialLoading, refreshFundamentals } = useStockFundamentals(apiBase, stocks, token);
   const [loading, setLoading] = useState(Boolean(token));
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -175,7 +175,7 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
     </section>
 
     <div className="watchlist-toolbar"><div className="watchlist-filters">{[{ id: "all", displayName: "全部" }, ...markets].map(market => <button key={market.id} className={filter === market.id ? "active" : ""} onClick={() => setFilter(market.id as MarketId | "all")}>{market.displayName}<span>{initialLoading ? <span className="skeleton-block watch-count-skeleton" aria-hidden="true" /> : market.id === "all" ? stocks.length : stocks.filter(stock => stock.market === market.id).length}</span></button>)}</div>
-      <div className="watchlist-update"><span className="watchlist-note" role="status">{loading ? "行情更新中…" : updatedAt ? `更新于 ${updatedAt}` : financialLoading ? "财报加载中…" : ""}</span><button type="button" className="watchlist-update-button" aria-label="更新自选行情" title="更新自选报价和提醒状态" onClick={() => void Promise.all([refresh(true), priceAlerts.refresh()])} disabled={loading || !token}><RefreshCw size={13} className={loading ? "spin" : ""} /><span>更新行情</span></button></div>
+      <div className="watchlist-update"><span className="watchlist-note" role="status">{loading ? "行情更新中…" : financialLoading ? "财报加载中…" : updatedAt ? `更新于 ${updatedAt}` : ""}</span><button type="button" className="watchlist-update-button" aria-label="更新自选数据" title="更新行情、财报指标和提醒状态" onClick={() => { refreshFundamentals(); void Promise.all([refresh(true), priceAlerts.refresh()]); }} disabled={loading || financialLoading || !token}><RefreshCw size={13} className={loading || financialLoading ? "spin" : ""} /><span>更新数据</span></button></div>
     </div>
     {error && <p className="form-note danger" role="alert">{error}</p>}
     {actionError && <p className="form-note danger" role="alert">{actionError}</p>}
@@ -188,6 +188,6 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
       renderTarget={stock => <TargetPriceCell stock={{ ...stock, stale: stock.quote_stale, holding_id: `watchlist:${stockKey(stock)}`, account_id: "watchlist", currency: stock.currency || ({ a_share: "CNY", us_stock: "USD", hk_stock: "HKD", crypto: "USDT" } as Record<string, string>)[stock.market] }} alerts={priceAlerts} />}
       renderAction={stock => <button className="watchlist-remove" aria-label={`移除 ${stock.name}`} disabled={busy.includes(stockKey(stock))} onClick={() => void changeMembership(stock, true)}>{busy.includes(stockKey(stock)) ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} />}</button>}
     />
-    <p className="watchlist-data-note">行情优先使用 Bitget，美港股使用腾讯兜底，加密货币使用 Binance 兜底；每条价格显示实际来源和报价时间。EPS、PE 和远期 PE 属于标的公司；公司指引与分析师预测分别列示。缺失数据显示「—」，加密货币及基金的公司财报指标显示「不适用」。</p>
+    <p className="watchlist-data-note">行情优先使用 Bitget，美港股使用腾讯兜底，加密货币使用 Binance 兜底；每条价格显示实际来源和报价时间。EPS、PE 和远期 PE 属于标的公司，美股已披露 EPS 和财务摘要以 SEC 为主，Yahoo Finance 补充估值、预期及其他市场；未来财报日期由 Yahoo / Finnhub 提供；详情中显示实际来源。公司指引与分析师预测分别列示。缺失数据显示「—」，加密货币及基金的公司财报指标显示「不适用」。</p>
   </section>;
 }

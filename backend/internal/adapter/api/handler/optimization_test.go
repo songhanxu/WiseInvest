@@ -77,26 +77,26 @@ func TestHoldingsFailureRetainsCompleteSnapshotAndBacksOff(t *testing.T) {
 
 func TestFundamentalFlightCacheAndCurrencyProvenance(t *testing.T) {
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
+	y := yahooFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/income-statement-ttm":
-			w.Write([]byte(`[{"epsDiluted":5,"reportedCurrency":"USD"}]`))
-		case "/profile":
-			w.Write([]byte(`[{"price":100,"currency":"USD","description":"Company profile."}]`))
+		case "/cookie":
+			w.WriteHeader(404)
+		case "/crumb":
+			w.Write([]byte("crumb"))
 		default:
-			w.Write([]byte(`[]`))
+			calls.Add(1)
+			w.Write([]byte(`{"quoteSummary":{"result":[{"financialData":{"financialCurrency":"USD"},"defaultKeyStatistics":{"trailingEps":5},"assetProfile":{"longBusinessSummary":"Company profile."}}]}}`))
 		}
-	}))
-	defer server.Close()
+	})
 	file := filepath.Join(t.TempDir(), "verified.json")
 	data := map[string]FundamentalsResponse{"us_stock:AAPL": {EPS: floatPtr(99), Currency: "CNY", Source: "verified", AsOf: time.Now().UTC().Format(time.RFC3339), GuidanceEPS: floatPtr(2), GuidancePeriod: "2026Q4", GuidanceBasis: "GAAP", GuidanceSourceURL: "https://example.com/filing", GuidanceReportDate: time.Now().AddDate(-1, 0, 0).Format("2006-01-02")}}
 	raw, _ := json.Marshal(data)
 	if err := os.WriteFile(file, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	s := NewFundamentalsService("key", file)
-	s.BaseURL = server.URL
+	s := NewFundamentalsService(file)
+	s.SEC = nil
+	s.Yahoo, s.FinnhubAPIKey = y, ""
 	var wg sync.WaitGroup
 	for i := 0; i < 12; i++ {
 		wg.Add(1)
@@ -109,8 +109,8 @@ func TestFundamentalFlightCacheAndCurrencyProvenance(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if calls.Load() != 5 {
-		t.Fatalf("expected five upstream requests for one flight, got %d", calls.Load())
+	if calls.Load() != 1 {
+		t.Fatalf("expected one Yahoo request for one flight, got %d", calls.Load())
 	}
 	for i := 0; i < 512; i++ {
 		s.cache[time.Unix(int64(i), 0).String()] = fundamentalsCache{Time: time.Now()}

@@ -45,7 +45,6 @@ type StockHandler struct {
 	stopTicker    context.CancelFunc
 	searcher      search.Searcher   // Web search for news (may be NoopSearcher)
 	llmClient     *llm.OpenAIClient // LLM client for AI summaries (may be nil)
-	fmpAPIKey     string            // FMP (Financial Modeling Prep) API key
 	llmSem        chan struct{}     // Semaphore to limit concurrent LLM requests (prevents DeepSeek overload)
 	wsHub         *WSHub            // WebSocket hub for real-time push (may be nil)
 	binanceWS     *BinanceWSClient  // Binance WebSocket stream for real-time crypto data
@@ -65,13 +64,12 @@ func NewStockHandler(watchlistRepo *repository.WatchlistRepository, logger *logg
 	h := &StockHandler{
 		watchlistRepo: watchlistRepo,
 		bitget:        bitget.NewClient(os.Getenv("BITGET_BASE_URL")),
-		fundamentals:  NewFundamentalsService(os.Getenv("FMP_API_KEY"), os.Getenv("STOCK_FUNDAMENTALS_FILE")),
+		fundamentals:  NewFundamentalsService(os.Getenv("STOCK_FUNDAMENTALS_FILE")),
 		logger:        logger,
 		httpClient:    &http.Client{Timeout: 10 * time.Second},
 		cache:         quoteCache,
 		searcher:      searcher,
 		llmClient:     llmClient,
-		fmpAPIKey:     os.Getenv("FMP_API_KEY"),
 		llmSem:        make(chan struct{}, 3), // Max 3 concurrent LLM requests to avoid DeepSeek overload
 		wsHub:         NewWSHub(logger),       // WebSocket hub for real-time push
 	}

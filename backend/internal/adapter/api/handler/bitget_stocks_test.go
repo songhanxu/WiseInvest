@@ -67,7 +67,9 @@ func TestMergeWatchlistKeepsMissingQuotesAndDeduplicatesLegacyCodes(t *testing.T
 }
 
 func TestFundamentalsDoNotInventDataOrAcceptUntraceableGuidance(t *testing.T) {
-	s := NewFundamentalsService("", "")
+	s := NewFundamentalsService("")
+	s.SEC = nil
+	s.Yahoo, s.FinnhubAPIKey = nil, ""
 	row := s.Fetch(context.Background(), "us_stock", "AAPL")
 	data, _ := json.Marshal(row)
 	if !strings.Contains(string(data), `"eps":null`) || row.Status != "unavailable" {
@@ -81,66 +83,6 @@ func TestFundamentalsDoNotInventDataOrAcceptUntraceableGuidance(t *testing.T) {
 	s.File = file
 	if row = s.Fetch(context.Background(), "us_stock", "AAPL"); row.GuidanceEPS != nil {
 		t.Fatal("untraceable guidance accepted")
-	}
-}
-
-func TestFMPForwardPENeverMixesEPSCurrencyOrConsensusWithGuidance(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/income-statement-ttm":
-			w.Write([]byte(`[{"epsDiluted":4,"reportedCurrency":"CNY"}]`))
-		case "/ratios-ttm":
-			w.Write([]byte(`[{"priceToEarningsRatioTTM":12}]`))
-		case "/profile":
-			w.Write([]byte(`[{"price":100,"currency":"HKD"}]`))
-		case "/analyst-estimates":
-			w.Write([]byte(`[{"date":"2099-12-31","epsAvg":5}]`))
-		case "/earnings":
-			w.Write([]byte(`[{"date":"2020-01-01"},{"date":"2099-10-14"}]`))
-		}
-	}))
-	defer server.Close()
-	s := NewFundamentalsService("test-key", "")
-	s.BaseURL = server.URL
-	row := s.Fetch(context.Background(), "hk_stock", "00700")
-	if row.ForwardPE != nil || row.GuidanceEPS != nil || row.ForwardEPS == nil || *row.ForwardEPS != 5 || row.NextEarningsDate != "2099-10-14" {
-		t.Fatalf("misleading fundamental values: %+v", row)
-	}
-}
-
-func TestFMPSubscriptionErrorsAreExplicitAndSanitized(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/profile" {
-			w.Write([]byte(`[{"price":100,"currency":"USD"}]`))
-			return
-		}
-		if r.URL.Query().Get("symbol") == "PARTIAL" && r.URL.Path == "/ratios-ttm" {
-			w.Write([]byte(`[{"priceToEarningsRatioTTM":12}]`))
-			return
-		}
-		w.WriteHeader(http.StatusPaymentRequired)
-		w.Write([]byte("Restricted Endpoint: private-api-key https://example.com/?apikey=private-api-key"))
-	}))
-	defer server.Close()
-	s := NewFundamentalsService("private-api-key", "")
-	s.BaseURL = server.URL
-	for _, symbol := range []string{"AVGO", "PARTIAL"} {
-		row := s.Fetch(context.Background(), "us_stock", symbol)
-		if !strings.Contains(row.Message, "EPS：当前 FMP 订阅无接口权限（HTTP 402）") || !strings.Contains(row.Message, "财报日期：") {
-			t.Fatalf("missing subscription diagnosis: %+v", row)
-		}
-		if strings.Contains(row.Message, "private-api-key") || strings.Contains(row.Message, "https://") {
-			t.Fatal("upstream credential leaked")
-		}
-		if row.EPS != nil || row.NextEarningsDate != "" || row.ForwardPE != nil {
-			t.Fatal("fabricated restricted data")
-		}
-		if symbol == "PARTIAL" && (row.PE == nil || *row.PE != 12 || row.Status != "available") {
-			t.Fatal("partial available data lost")
-		}
-		if symbol == "AVGO" && row.Status != "unavailable" {
-			t.Fatal("restricted data marked available")
-		}
 	}
 }
 
