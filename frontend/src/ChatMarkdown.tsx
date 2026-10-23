@@ -15,10 +15,15 @@ const components: Components = {
   img: ({ node: _node, ...props }) => <img {...props} loading="lazy" />
 };
 
-export function ChatMarkdown({ content }: { content: string }) {
+export function ChatMarkdown({ content, disableExternalContent = false }: { content: string; disableExternalContent?: boolean }) {
+  const safeComponents: Components = disableExternalContent ? {
+    ...components,
+    a: ({ children }) => <span>{children}</span>,
+    img: () => null,
+  } : components;
   return (
     <div className="chat-markdown">
-      <Markdown remarkPlugins={plugins} components={components}>{content}</Markdown>
+      <Markdown remarkPlugins={plugins} components={safeComponents}>{content}</Markdown>
     </div>
   );
 }

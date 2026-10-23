@@ -47,6 +47,23 @@ func (qc *QuoteCache) SetJSON(ctx context.Context, key string, value interface{}
 	return qc.redis.Set(ctx, key, string(data), ttl)
 }
 
+func (qc *QuoteCache) SetNX(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+	return qc.redis.SetNX(ctx, key, "1", ttl)
+}
+
+func (qc *QuoteCache) Exists(ctx context.Context, key string) (bool, error) {
+	count, err := qc.redis.Exists(ctx, key)
+	return count > 0, err
+}
+
+func (qc *QuoteCache) Delete(ctx context.Context, key string) error {
+	return qc.redis.Delete(ctx, key)
+}
+
+func (qc *QuoteCache) Expire(ctx context.Context, key string, ttl time.Duration) error {
+	return qc.redis.Expire(ctx, key, ttl)
+}
+
 // GetJSON reads a key from Redis and deserializes it into dest.
 // Returns false if the key does not exist (cache miss).
 func (qc *QuoteCache) GetJSON(ctx context.Context, key string, dest interface{}) (bool, error) {

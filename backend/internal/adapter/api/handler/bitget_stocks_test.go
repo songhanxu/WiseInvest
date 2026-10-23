@@ -37,6 +37,7 @@ func TestUSQuotePartialFallbackOnlyRequestsMissingSymbols(t *testing.T) {
 		}
 		fields := make([]string, 50)
 		fields[1] = "Microsoft"
+		fields[2] = "MSFT.OQ"
 		fields[3] = "200"
 		fields[4] = "190"
 		fields[31] = "10"
@@ -49,7 +50,7 @@ func TestUSQuotePartialFallbackOnlyRequestsMissingSymbols(t *testing.T) {
 	if err != nil || len(rows) != 2 {
 		t.Fatalf("quotes %+v: %v", rows, err)
 	}
-	if rows[0].ID != "AAPL" || rows[0].Source != "bitget" || rows[1].ID != "MSFT" || rows[1].Source != "tencent" || rows[1].Currency != "USD" || rows[1].QuoteTime != "2026-10-20T16:00:01-04:00" || rows[1].QuoteSession != "close" {
+	if rows[0].ID != "AAPL" || rows[0].Source != "bitget" || rows[1].ID != "MSFT" || rows[1].Source != "tencent" || rows[1].ProviderSymbol != "MSFT.OQ" || rows[1].Currency != "USD" || rows[1].QuoteTime != "2026-10-20T16:00:01-04:00" || rows[1].QuoteSession != "close" {
 		t.Fatalf("mixed-source quotes wrong: %+v", rows)
 	}
 }

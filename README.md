@@ -163,6 +163,7 @@ WiseInvest/
 | `OPENAI_API_KEY` | LLM API Key（必填） | — |
 | `OPENAI_BASE_URL` | LLM 接口地址 | `https://api.openai.com/v1` |
 | `OPENAI_MODEL` | 使用的模型 | `gpt-4-turbo-preview` |
+| `SEC_USER_AGENT` | SEC 财报访问标识（项目名和联系邮箱） | — |
 | `SERPER_API_KEY` | Serper 搜索 API Key | — |
 | `SERVER_PORT` | 后端端口 | `8080` |
 | `DB_*` | PostgreSQL 连接配置 | `localhost:5432` |
@@ -170,6 +171,8 @@ WiseInvest/
 | `WECHAT_APP_ID` | 微信开放平台 AppID | — |
 | `WECHAT_APP_SECRET` | 微信开放平台 AppSecret | — |
 | `BINANCE_API_KEY` | 币安 API（交易功能，可选） | — |
+
+自选列表的最新 SEC 财报和每日 AI 解读配置、数据范围见 [财报解读说明](docs/filing-insights.md)。
 
 ## 接入真实微信登录
 

@@ -46,8 +46,13 @@ type StockHandler struct {
 	searcher      search.Searcher   // Web search for news (may be NoopSearcher)
 	llmClient     *llm.OpenAIClient // LLM client for AI summaries (may be nil)
 	llmSem        chan struct{}     // Semaphore to limit concurrent LLM requests (prevents DeepSeek overload)
-	wsHub         *WSHub            // WebSocket hub for real-time push (may be nil)
-	binanceWS     *BinanceWSClient  // Binance WebSocket stream for real-time crypto data
+	insightSem    chan struct{}     // Limit automatic filing analysis work.
+	insightCtx    context.Context
+	stopInsights  context.CancelFunc
+	insightMu     sync.Mutex
+	insights      map[string]FilingInsight
+	wsHub         *WSHub           // WebSocket hub for real-time push (may be nil)
+	binanceWS     *BinanceWSClient // Binance WebSocket stream for real-time crypto data
 
 	// In-memory caches for slow-changing crypto data (sparklines, fear/greed index).
 	// Updated every 60 s by a dedicated goroutine in backgroundRefreshLoop.
@@ -61,6 +66,7 @@ type StockHandler struct {
 // If quoteCache is non-nil, background tickers will be started to pre-populate
 // Redis with fresh market data; HTTP handlers will read from the cache first.
 func NewStockHandler(watchlistRepo *repository.WatchlistRepository, logger *logger.Logger, quoteCache *cache.QuoteCache, searcher search.Searcher, llmClient *llm.OpenAIClient) *StockHandler {
+	insightCtx, stopInsights := context.WithCancel(context.Background())
 	h := &StockHandler{
 		watchlistRepo: watchlistRepo,
 		bitget:        bitget.NewClient(os.Getenv("BITGET_BASE_URL")),
@@ -71,7 +77,11 @@ func NewStockHandler(watchlistRepo *repository.WatchlistRepository, logger *logg
 		searcher:      searcher,
 		llmClient:     llmClient,
 		llmSem:        make(chan struct{}, 3), // Max 3 concurrent LLM requests to avoid DeepSeek overload
-		wsHub:         NewWSHub(logger),       // WebSocket hub for real-time push
+		insightSem:    make(chan struct{}, 2),
+		insightCtx:    insightCtx,
+		stopInsights:  stopInsights,
+		insights:      make(map[string]FilingInsight),
+		wsHub:         NewWSHub(logger), // WebSocket hub for real-time push
 	}
 	if quoteCache != nil {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -96,6 +106,9 @@ func (h *StockHandler) WSHub() *WSHub {
 
 // Stop gracefully shuts down background tickers and Binance WebSocket.
 func (h *StockHandler) Stop() {
+	if h.stopInsights != nil {
+		h.stopInsights()
+	}
 	if h.binanceWS != nil {
 		h.binanceWS.Stop()
 	}
@@ -1255,19 +1268,20 @@ func (h *StockHandler) fetchTencentUSStocksBySymbol(ctx context.Context, symbols
 		}
 
 		stocks = append(stocks, StockResponse{
-			ID:            sym,
-			Symbol:        sym,
-			Name:          displayName,
-			Market:        "us_stock",
-			CurrentPrice:  currentPrice,
-			Change:        change,
-			ChangePercent: changePct,
-			Volume:        volume / 1e8, // to 亿股
-			High:          high,
-			Low:           low,
-			Open:          openPrice,
-			PreviousClose: previousClose,
-			Source:        "tencent", Currency: "USD", ProductType: "equity", ChangeBasis: "previous_close", QuoteTime: tencentQuoteTime(fields[30], "us_stock"), QuoteSession: tencentQuoteSession(fields[30], "us_stock"),
+			ID:             sym,
+			Symbol:         sym,
+			ProviderSymbol: fields[2],
+			Name:           displayName,
+			Market:         "us_stock",
+			CurrentPrice:   currentPrice,
+			Change:         change,
+			ChangePercent:  changePct,
+			Volume:         volume / 1e8, // to 亿股
+			High:           high,
+			Low:            low,
+			Open:           openPrice,
+			PreviousClose:  previousClose,
+			Source:         "tencent", Currency: "USD", ProductType: "equity", ChangeBasis: "previous_close", QuoteTime: tencentQuoteTime(fields[30], "us_stock"), QuoteSession: tencentQuoteSession(fields[30], "us_stock"),
 		})
 	}
 	return stocks, nil

@@ -170,6 +170,25 @@ func TestSECReportsPreserveCashFlowYTDAndFilingIdentity(t *testing.T) {
 	}
 }
 
+func TestSECInsightFactsStayWithinLatestFilingAndPeriod(t *testing.T) {
+	now := time.Now().UTC()
+	end := now.AddDate(0, 0, -30).Format("2006-01-02")
+	start := now.AddDate(0, 0, -120).Format("2006-01-02")
+	filed := now.AddDate(0, 0, -10).Format("2006-01-02")
+	fact := secFact{Start: start, End: end, Filed: filed, Form: "10-Q", Accession: "0000000123-26-000001", Value: floatPtr(100)}
+	other := fact
+	other.Accession, other.Value = "0000000123-26-000002", floatPtr(999)
+	data := secCompanyFacts{CIK: 123, Facts: map[string]map[string]secConcept{"us-gaap": {
+		"Revenues":     {Units: map[string][]secFact{"USD": {fact, other}}},
+		"UnrelatedTag": {Units: map[string][]secFact{"USD": {fact}}},
+	}}}
+	sec := secFixture(t, func(w http.ResponseWriter, r *http.Request) { json.NewEncoder(w).Encode(data) })
+	rows, err := sec.reportFacts(context.Background(), "0000000123", SECFinancialReport{Accession: fact.Accession, ReportDate: end})
+	if err != nil || len(rows) != 1 || rows[0].Value != 100 || rows[0].Tag != "us-gaap:Revenues" || rows[0].PeriodStart != start {
+		t.Fatalf("wrong filing concepts: %+v, %v", rows, err)
+	}
+}
+
 func TestSECIsPrimaryAndYahooKeepsItsOwnValuationProvenance(t *testing.T) {
 	facts, submissions := secExampleData(time.Now())
 	sec := secFixture(t, func(w http.ResponseWriter, r *http.Request) {
@@ -330,5 +349,5 @@ func TestSECLiveClient(t *testing.T) {
 	if row.Status != "available" || row.EPS == nil || row.TrailingEPS == nil || row.Metrics["eps"].SourceURL == "" || len(row.FinancialReports) == 0 {
 		t.Fatalf("official SEC client failed: status=%s diagnostic=%s", row.Status, row.Message)
 	}
-	t.Logf("live SEC client verified: CIK=%s, EPS period=%s to %s, basis=%s, trailing EPS=%v for %s to %s, reports=%d", row.SECCIK, row.EPSPeriodStart, row.EPSPeriodEnd, row.EPSBasis, *row.TrailingEPS, row.TrailingEPSStart, row.TrailingEPSEnd, len(row.FinancialReports))
+	t.Logf("live SEC client verified: CIK=%s, EPS period=%s to %s, basis=%s, trailing EPS=%v for %s to %s, reports=%d, latest=%s", row.SECCIK, row.EPSPeriodStart, row.EPSPeriodEnd, row.EPSBasis, *row.TrailingEPS, row.TrailingEPSStart, row.TrailingEPSEnd, len(row.FinancialReports), row.FinancialReports[0].SourceURL)
 }

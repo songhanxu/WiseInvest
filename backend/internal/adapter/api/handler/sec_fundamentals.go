@@ -29,14 +29,14 @@ func newSECFundamentalsClient(userAgent string) *secFundamentalsClient {
 
 // Reserve at most four requests per second across this service, including ticker
 // lookup and filings. A SEC rejection backs off across all symbols.
-func (s *secFundamentalsClient) get(ctx context.Context, address string, target any) string {
+func (s *secFundamentalsClient) request(ctx context.Context, address, accept string) (*http.Response, string) {
 	if s.userAgent == "" {
-		return "SEC_USER_AGENT 未配置，请提供项目名和联系邮箱"
+		return nil, "SEC_USER_AGENT 未配置，请提供项目名和联系邮箱"
 	}
 	s.rateMu.Lock()
 	if time.Now().Before(s.blockedUntil) {
 		s.rateMu.Unlock()
-		return "SEC 访问暂时受限，稍后重试"
+		return nil, "SEC 访问暂时受限，稍后重试"
 	}
 	start := time.Now()
 	if start.Before(s.nextRequest) {
@@ -49,27 +49,36 @@ func (s *secFundamentalsClient) get(ctx context.Context, address string, target 
 	select {
 	case <-timer.C:
 	case <-ctx.Done():
-		return "SEC 查询超时"
+		return nil, "SEC 查询超时"
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
-		return "SEC 请求配置无效"
+		return nil, "SEC 请求配置无效"
 	}
 	req.Header.Set("User-Agent", s.userAgent)
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", accept)
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return "SEC 连接失败或查询超时"
+		return nil, "SEC 连接失败或查询超时"
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden {
 			s.rateMu.Lock()
 			s.blockedUntil = time.Now().Add(time.Minute)
 			s.rateMu.Unlock()
 		}
-		return fmt.Sprintf("SEC 数据暂不可用（HTTP %d）", resp.StatusCode)
+		return nil, fmt.Sprintf("SEC 数据暂不可用（HTTP %d）", resp.StatusCode)
 	}
+	return resp, ""
+}
+
+func (s *secFundamentalsClient) get(ctx context.Context, address string, target any) string {
+	resp, message := s.request(ctx, address, "application/json")
+	if message != "" {
+		return message
+	}
+	defer resp.Body.Close()
 	if json.NewDecoder(io.LimitReader(resp.Body, 32<<20)).Decode(target) != nil {
 		return "SEC 返回格式异常"
 	}

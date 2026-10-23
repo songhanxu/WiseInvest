@@ -118,6 +118,8 @@ func NewRouter(
 				watchlist.GET("/watchlist/all", stockHandler.GetAllWatchlist)
 				watchlist.POST("/watchlist", stockHandler.AddToWatchlist)
 				watchlist.DELETE("/watchlist", stockHandler.RemoveFromWatchlist)
+				watchlist.GET("/watchlist/filing-insights", stockHandler.GetFilingInsights)
+				watchlist.POST("/watchlist/filing-insights/refresh", stockHandler.RefreshFilingInsights)
 			}
 		}
 	}
