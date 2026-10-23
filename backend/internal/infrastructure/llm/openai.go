@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"strings"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -12,8 +14,9 @@ import (
 
 // OpenAIClient wraps the OpenAI client
 type OpenAIClient struct {
-	client *openai.Client
-	model  string
+	client           *openai.Client
+	model            string
+	deepSeekEndpoint bool
 }
 
 const thoughtChunkPrefix = "__THOUGHT__:"
@@ -38,10 +41,13 @@ func NewOpenAIClient(cfg config.OpenAIConfig) *OpenAIClient {
 	if cfg.BaseURL != "" {
 		clientConfig.BaseURL = cfg.BaseURL
 	}
+	clientConfig.HTTPClient.Transport = completionOptionsTransport{base: http.DefaultTransport}
+	endpoint, _ := url.Parse(clientConfig.BaseURL)
 
 	return &OpenAIClient{
-		client: openai.NewClientWithConfig(clientConfig),
-		model:  cfg.Model,
+		client:           openai.NewClientWithConfig(clientConfig),
+		model:            cfg.Model,
+		deepSeekEndpoint: endpoint != nil && strings.EqualFold(endpoint.Hostname(), "api.deepseek.com"),
 	}
 }
 
@@ -72,15 +78,17 @@ type ChatMessage struct {
 
 // ChatCompletionRequest represents a chat completion request
 type ChatCompletionRequest struct {
-	Messages    []ChatMessage
-	Temperature float32
-	MaxTokens   int
-	Stream      bool
-	Model       string // Optional: override the default model for this request
+	Messages     []ChatMessage
+	Temperature  float32
+	MaxTokens    int
+	Stream       bool
+	Model        string // Optional: override the default model for this request
+	ThinkingMode string // enabled/disabled; only applied to supported official DeepSeek models.
 }
 
 // ChatCompletionResponse represents a chat completion response
 type ChatCompletionResponse struct {
+	Model        string
 	Content      string
 	FinishReason string
 	Usage        Usage
@@ -209,6 +217,9 @@ func (c *OpenAIClient) CreateChatCompletion(ctx context.Context, req ChatComplet
 	if req.Model != "" {
 		model = req.Model
 	}
+	if (req.ThinkingMode == "disabled" || req.ThinkingMode == "enabled") && req.Model == "" && c.SupportsThinkingControl() {
+		ctx = context.WithValue(ctx, thinkingModeKey{}, req.ThinkingMode)
+	}
 
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model:       model,
@@ -225,6 +236,7 @@ func (c *OpenAIClient) CreateChatCompletion(ctx context.Context, req ChatComplet
 	}
 
 	return &ChatCompletionResponse{
+		Model:        model,
 		Content:      resp.Choices[0].Message.Content,
 		FinishReason: string(resp.Choices[0].FinishReason),
 		Usage: Usage{

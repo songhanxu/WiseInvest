@@ -85,13 +85,10 @@ func main() {
 	deviceTokenRepo := repository.NewDeviceTokenRepository(db)
 	watchlistRepo := repository.NewWatchlistRepository(db)
 
-	// Initialize web searcher (enabled when SEARCH_API_KEY is set in .env)
-	searcher := search.New(cfg.Search.Provider, cfg.Search.APIKey)
-	if cfg.Search.APIKey != "" {
-		log.Infof("Web search enabled (provider: %s)", cfg.Search.Provider)
-	} else {
-		log.Info("Web search disabled (set SEARCH_PROVIDER + SEARCH_API_KEY in .env to enable)")
-	}
+	// Prefer DeepSeek's Search API when using its official model endpoint;
+	// retain a configured Serper/Brave provider as the fallback.
+	searcher := search.NewWithDeepSeek(cfg.Search.Provider, cfg.Search.APIKey, cfg.OpenAI.BaseURL, cfg.OpenAI.APIKey)
+	log.Infof("Web search provider: %T", searcher)
 
 	// ── Skill Registries ──────────────────────────────────────────────────────
 	// Each market agent gets its own registry with market-appropriate tools.
@@ -177,7 +174,7 @@ func main() {
 
 	// Initialize quote cache for high-frequency market data
 	quoteCache := cache.NewQuoteCache(redisClient, log)
-	stockHandler := handler.NewStockHandler(watchlistRepo, log, quoteCache, searcher, llmClient)
+	stockHandler := handler.NewStockHandler(watchlistRepo, log, quoteCache, searcher, llmClient, cfg.FilingInsight)
 	accountHandler := handler.NewAccountHandler(cfg.Bitget)
 	accountHandler.AddExchange(cfg.BinanceAccount)
 	accountHandler.AddExchange(cfg.GateAccount)

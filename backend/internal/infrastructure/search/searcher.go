@@ -2,12 +2,12 @@
 // When configured with a search API key, agents can retrieve real-time
 // information (stock news, company announcements, market data, etc.)
 //
-// Supported providers (set SEARCH_PROVIDER + SEARCH_API_KEY in .env):
+// The DeepSeek Search API is preferred when the configured LLM endpoint is
+// api.deepseek.com. SEARCH_PROVIDER + SEARCH_API_KEY provide a fallback:
 //   - "serper"  → Serper.dev  (https://serper.dev, free tier: 2500 queries/month)
-//   - "bing"    → Bing Search API
 //   - "brave"   → Brave Search API (https://brave.com/search/api, free tier: 2000/month)
 //
-// If SEARCH_API_KEY is empty, NoopSearcher is used (returns empty results).
+// Without any configured search credential, NoopSearcher returns empty results.
 package search
 
 import (
@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -36,7 +37,7 @@ type Searcher interface {
 // New returns the appropriate Searcher based on configuration.
 // Falls back to NoopSearcher when no API key is provided.
 func New(provider, apiKey string) Searcher {
-	if apiKey == "" {
+	if strings.TrimSpace(apiKey) == "" {
 		return &NoopSearcher{}
 	}
 	switch provider {
@@ -47,6 +48,22 @@ func New(provider, apiKey string) Searcher {
 	default:
 		return &NoopSearcher{}
 	}
+}
+
+// NewWithDeepSeek uses the configured DeepSeek credential for search when the
+// model endpoint is the official DeepSeek API. A configured legacy provider is
+// tried only when DeepSeek search fails or has no results.
+func NewWithDeepSeek(provider, apiKey, modelBaseURL, modelAPIKey string) Searcher {
+	legacy := New(provider, apiKey)
+	endpoint, err := url.Parse(modelBaseURL)
+	if err != nil || endpoint.Scheme != "https" || !strings.EqualFold(endpoint.Hostname(), "api.deepseek.com") || endpoint.Port() != "" || strings.TrimSpace(modelAPIKey) == "" {
+		return legacy
+	}
+	primary := &DeepSeekSearcher{apiKey: modelAPIKey, endpoint: deepSeekSearchURL, client: &http.Client{Timeout: 10 * time.Second}}
+	if _, disabled := legacy.(*NoopSearcher); disabled {
+		return primary
+	}
+	return &FallbackSearcher{primary: primary, fallback: legacy}
 }
 
 // --- NoopSearcher (default, no API key required) ---

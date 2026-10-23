@@ -19,6 +19,7 @@ import (
 	"github.com/songhanxu/wiseinvest/internal/domain/model"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/bitget"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/cache"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/config"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/llm"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/logger"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/search"
@@ -51,6 +52,7 @@ type StockHandler struct {
 	stopInsights  context.CancelFunc
 	insightMu     sync.Mutex
 	insights      map[string]FilingInsight
+	filingConfig  config.FilingInsightConfig
 	wsHub         *WSHub           // WebSocket hub for real-time push (may be nil)
 	binanceWS     *BinanceWSClient // Binance WebSocket stream for real-time crypto data
 
@@ -65,7 +67,7 @@ type StockHandler struct {
 // NewStockHandler creates a new StockHandler.
 // If quoteCache is non-nil, background tickers will be started to pre-populate
 // Redis with fresh market data; HTTP handlers will read from the cache first.
-func NewStockHandler(watchlistRepo *repository.WatchlistRepository, logger *logger.Logger, quoteCache *cache.QuoteCache, searcher search.Searcher, llmClient *llm.OpenAIClient) *StockHandler {
+func NewStockHandler(watchlistRepo *repository.WatchlistRepository, logger *logger.Logger, quoteCache *cache.QuoteCache, searcher search.Searcher, llmClient *llm.OpenAIClient, filingConfig config.FilingInsightConfig) *StockHandler {
 	insightCtx, stopInsights := context.WithCancel(context.Background())
 	h := &StockHandler{
 		watchlistRepo: watchlistRepo,
@@ -81,6 +83,7 @@ func NewStockHandler(watchlistRepo *repository.WatchlistRepository, logger *logg
 		insightCtx:    insightCtx,
 		stopInsights:  stopInsights,
 		insights:      make(map[string]FilingInsight),
+		filingConfig:  filingConfig,
 		wsHub:         NewWSHub(logger), // WebSocket hub for real-time push
 	}
 	if quoteCache != nil {

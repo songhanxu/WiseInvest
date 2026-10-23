@@ -2,10 +2,12 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/config"
@@ -44,5 +46,74 @@ func TestToolLoopRejectsEmptyAnswer(t *testing.T) {
 	err := client.StreamChatCompletionWithToolLoop(context.Background(), ChatCompletionRequest{}, nil, nil, 1, func(string) error { t.Fatal("must not emit empty success"); return nil })
 	if err == nil || !strings.Contains(err.Error(), "empty answer") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestThinkingControlIsScopedToOptedInDeepSeekCompletions(t *testing.T) {
+	var modes []string
+	var mu sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Model     string `json:"model"`
+			MaxTokens int    `json:"max_tokens"`
+			Thinking  *struct {
+				Type string `json:"type"`
+			} `json:"thinking"`
+			Messages []ChatMessage `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if r.URL.Path != "/chat/completions" || body.Model != "deepseek-v4-flash" || body.MaxTokens != 8192 || len(body.Messages) != 1 || body.Messages[0].Content != "资料" || r.Header.Get("Authorization") != "Bearer test-only" {
+			t.Errorf("extension changed the original request: %+v", body)
+		}
+		mode := ""
+		if body.Thinking != nil {
+			mode = body.Thinking.Type
+		}
+		mu.Lock()
+		modes = append(modes, mode)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"完整正文","reasoning_content":"private analysis"},"finish_reason":"stop"}],"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120}}`)
+	}))
+	defer server.Close()
+	client := NewOpenAIClient(config.OpenAIConfig{APIKey: "test-only", BaseURL: server.URL, Model: "deepseek-v4-flash"})
+	// Route an official-provider request to the local fixture without real API access.
+	client.deepSeekEndpoint = true
+	for _, mode := range []string{"disabled", "", "enabled", ""} {
+		answer, err := client.CreateChatCompletion(context.Background(), ChatCompletionRequest{Messages: []ChatMessage{{Role: "user", Content: "资料"}}, MaxTokens: 8192, ThinkingMode: mode})
+		if err != nil || answer.Content != "完整正文" || answer.Usage.CompletionTokens != 20 || answer.FinishReason != "stop" {
+			t.Fatalf("wrong completion: %+v %v", answer, err)
+		}
+	}
+	client.deepSeekEndpoint = false
+	_, err := client.CreateChatCompletion(context.Background(), ChatCompletionRequest{Messages: []ChatMessage{{Role: "user", Content: "资料"}}, MaxTokens: 8192, ThinkingMode: "disabled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(modes, ",") != "disabled,,enabled,," {
+		t.Fatalf("thinking extension leaked to ordinary or third-party requests: %q", modes)
+	}
+}
+
+func TestThinkingControlOnlySupportsKnownOfficialModels(t *testing.T) {
+	for _, test := range []struct {
+		base, model string
+		want        bool
+	}{
+		{"https://api.deepseek.com/v1", "deepseek-v4-flash", true},
+		{"https://api.deepseek.com", "deepseek-v4-pro", true},
+		{"https://api.deepseek.com", "deepseek-flash", true},
+		{"https://api.deepseek.com", "deepseek-reasoner", false},
+		{"https://api.openai.com/v1", "gpt-4-turbo-preview", false},
+		{"https://third-party.example/v1", "deepseek-v4-flash", false},
+	} {
+		client := NewOpenAIClient(config.OpenAIConfig{BaseURL: test.base, Model: test.model})
+		if client.SupportsThinkingControl() != test.want {
+			t.Errorf("wrong thinking capability for %s %s", test.base, test.model)
+		}
 	}
 }

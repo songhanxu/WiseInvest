@@ -13,6 +13,7 @@ type Config struct {
 	Database         DatabaseConfig
 	Redis            RedisConfig
 	OpenAI           OpenAIConfig
+	FilingInsight    FilingInsightConfig
 	Binance          BinanceConfig
 	Bitget           BitgetConfig
 	BinanceAccount   ExchangeAccountConfig
@@ -50,7 +51,8 @@ type WeChatConfig struct {
 }
 
 // SearchConfig holds web search configuration.
-// Set SEARCH_PROVIDER (serper|brave) and SEARCH_API_KEY to enable real-time search.
+// SEARCH_PROVIDER (serper|brave) and SEARCH_API_KEY configure a fallback when
+// the official DeepSeek API is used, or the primary provider otherwise.
 type SearchConfig struct {
 	Provider string // "serper" | "brave" | "" (disabled)
 	APIKey   string
@@ -136,8 +138,13 @@ func Load() (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid JWT_EXPIRATION: %w", err)
 	}
+	filingInsight, err := loadFilingInsightConfig()
+	if err != nil {
+		return nil, err
+	}
 
 	return &Config{
+		FilingInsight:    filingInsight,
 		AccountBootstrap: bootstrap,
 		Bitget:           bitgetConfig,
 		BinanceAccount:   binanceAccount, GateAccount: gateAccount,

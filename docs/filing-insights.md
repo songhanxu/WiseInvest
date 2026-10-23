@@ -12,9 +12,15 @@ SEC_USER_AGENT=WiseInvest your-contact@example.com
 OPENAI_API_KEY=your-model-key
 OPENAI_BASE_URL=https://your-openai-compatible-endpoint/v1
 OPENAI_MODEL=your-model-name
+FILING_INSIGHT_MAX_TOKENS=8192
+FILING_INSIGHT_RETRY_MAX_TOKENS=16384
+FILING_INSIGHT_TIMEOUT=180s
+FILING_INSIGHT_THINKING=auto
 ```
 
-`SEC_USER_AGENT` 必须填写实际项目名和联系邮箱。模型密钥只放在后端 `backend/.env.production` 或服务器环境变量里，绝不放进前端。`docker-compose.yml` 已通过 `env_file` 读取该文件。搜索服务密钥是可选的；未配置时只依据 SEC 与行情数据分析。
+`SEC_USER_AGENT` 必须填写实际项目名和联系邮箱。模型密钥只放在后端 `backend/.env.production` 或服务器环境变量里，绝不放进前端。`docker-compose.yml` 已通过 `env_file` 读取该文件。使用官方 DeepSeek API 地址和有效模型密钥时，新闻搜索优先调用 DeepSeek Search；可继续配置 `SEARCH_PROVIDER=serper` / `brave` 和 `SEARCH_API_KEY` 作为失败或无结果时的备选。其他模型服务商仍使用原来的搜索配置。
+
+财报解读只在模型返回非空正文且 `finish_reason=stop` 时标记成功。若首次返回 `length`，会用同一份资料和更紧凑的输出要求重试一次；第二次仍截断则记为失败，绝不保存截断内容。上述令牌数是请求上限，应按实际模型支持范围调整；`FILING_INSIGHT_RETRY_MAX_TOKENS` 不得小于首次上限。`FILING_INSIGHT_TIMEOUT` 是两次尝试共享的总时限。`FILING_INSIGHT_THINKING=auto` 对官方 DeepSeek V4/Flash 的这类财报解读请求关闭思考模式，对其他模型不增加 DeepSeek 专用参数；普通聊天不受此设置影响。
 
 生成时先从 SEC Submissions 确认最新 10-K、10-Q、20-F 或 40-F，再取该申报的 Company Facts、尝试读取 SEC 原文，并对照腾讯美股与标普 500 日线。SEC 原文无法读取时，解读会标注正文缺失，避免把结构化摘要写成完整财报。历史行情若不覆盖财报提交前一日，不能计算财报后累计涨跌；新闻搜索结果只作为可能原因的线索。AI 被要求区分事实、推断和不确定性，比较同口径期间，给出未来情景及有条件的买入、持有、减仓或卖出倾向。解读是研究意见，生成后行情与公告会变化。
 
