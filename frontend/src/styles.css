@@ -2032,11 +2032,27 @@ p {
 }
 
 .sec-financial-reports { margin-top: 16px; border-top: 1px solid var(--border-color, #e5e7eb); padding-top: 12px; }
-.report-column-actions { display: flex; align-items: center; gap: 6px; }
-.report-detail-link, .report-ai-button { border: 0; background: transparent; color: var(--blue); cursor: pointer; padding: 3px 0; font: inherit; text-align: left; }
-.report-detail-link:hover { text-decoration: underline; }
-.report-ai-button { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; min-height: 26px; border-radius: 6px; }
-.report-ai-button:hover { background: rgba(74,144,226,.12); }
+.has-report .unified-watchlist-table { min-width: 1200px; }
+.research-report-col { width: 180px; }
+.has-report .col-report { min-width: 180px; }
+.filing-cell { display: grid; gap: 6px; min-width: 0; }
+.filing-cell-main { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.filing-period-link { padding: 0; border: 0; background: transparent; color: var(--blue); font: inherit; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .01em; white-space: nowrap; cursor: pointer; }
+.filing-period-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.filing-cell-meta { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.filing-form { padding: 2px 5px; border: 1px solid #d6e2d5; border-radius: 4px; color: #426647; background: #f2f6f0; font-size: 10px; font-weight: 600; line-height: 1.2; }
+.filing-filed { overflow: hidden; text-overflow: ellipsis; }
+.report-ai-button { display: inline-flex; flex: 0 0 27px; align-items: center; justify-content: center; width: 27px; height: 27px; padding: 0; border: 1px solid #d9e6dc; border-radius: 7px; background: #f1f7f2; color: #4e7655; cursor: pointer; }
+.report-ai-button:hover { border-color: #9eb9a3; background: #e6f0e7; color: #2f5b38; }
+.filing-period-link:focus-visible, .report-ai-button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+@media (max-width: 680px) {
+ .has-report .unified-watchlist-table { min-width: 0; }
+ .has-report .col-report { min-width: 0; width: auto; }
+ .filing-cell-main { gap: 5px; }
+ .filing-period-link { font-size: 11px; }
+ .filing-cell-meta { gap: 5px; font-size: 9px; }
+ .report-ai-button { flex-basis: 25px; width: 25px; height: 25px; }
+}
 .filing-dialog-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(22,31,43,.58); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .filing-dialog { width: min(780px, 100%); max-height: min(88vh, 920px); display: flex; flex-direction: column; background: var(--panel, #fff); color: var(--text); border-radius: 14px; box-shadow: 0 22px 70px rgba(0,0,0,.25); overflow: hidden; }
 .filing-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 22px; border-bottom: 1px solid var(--line); }
