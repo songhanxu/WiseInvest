@@ -130,6 +130,89 @@ func latestSECEPS(data secCompanyFacts, submissions secSubmissions, now time.Tim
 	return selected, selectedUnit, "GAAP " + kind + " · " + period, true
 }
 
+// Build trailing EPS from a reported fiscal year and matching current/prior
+// year-to-date figures. The result is an estimate because reported EPS uses
+// period-specific weighted average shares; it must be labelled accordingly.
+func secTrailingEPS(data secCompanyFacts, latest secFact, basis string, now time.Time) (float64, string, string, bool) {
+	if latest.Value == nil || !strings.HasPrefix(basis, "GAAP ") {
+		return 0, "", "", false
+	}
+	tag := "EarningsPerShareDiluted"
+	if strings.Contains(basis, "基本") {
+		tag = "EarningsPerShareBasic"
+	}
+	facts := data.Facts["us-gaap"][tag].Units["USD/shares"]
+	if secDuration(latest) >= 330 && strings.TrimSuffix(latest.Form, "/A") == "10-K" {
+		return *latest.Value, latest.Start, latest.End, true
+	}
+	if secDuration(latest) > 300 {
+		return 0, "", "", false
+	}
+	var annual secFact
+	for _, fact := range facts {
+		if !secFactValid(fact, now) || strings.TrimSuffix(fact.Form, "/A") != "10-K" || secDuration(fact) < 330 || secDuration(fact) > 400 || fact.End >= latest.End {
+			continue
+		}
+		if fact.End > annual.End || (fact.End == annual.End && fact.Filed > annual.Filed) {
+			annual = fact
+		}
+	}
+	if annual.Value == nil {
+		return 0, "", "", false
+	}
+	annualStart, _ := time.Parse("2006-01-02", annual.Start)
+	annualEnd, _ := time.Parse("2006-01-02", annual.End)
+	var current, prior secFact
+	for _, fact := range facts {
+		if !secFactValid(fact, now) || strings.TrimSuffix(fact.Form, "/A") != "10-Q" || secDuration(fact) < 60 || secDuration(fact) > 300 {
+			continue
+		}
+		start, _ := time.Parse("2006-01-02", fact.Start)
+		if fact.End == latest.End && absDays(start.Sub(annualEnd.AddDate(0, 0, 1))) <= 7 {
+			if current.Value == nil || fact.Filed > current.Filed || (fact.Filed == current.Filed && secDuration(fact) > secDuration(current)) {
+				current = fact
+			}
+		}
+	}
+	if current.Value == nil {
+		return 0, "", "", false
+	}
+	for _, fact := range facts {
+		if !secFactValid(fact, now) || strings.TrimSuffix(fact.Form, "/A") != "10-Q" || fact.End >= annual.End || absDaysDuration(secDuration(fact)-secDuration(current)) > 10 {
+			continue
+		}
+		start, _ := time.Parse("2006-01-02", fact.Start)
+		if absDays(start.Sub(annualStart)) > 7 {
+			continue
+		}
+		if prior.Value == nil || (fact.Accession == current.Accession && prior.Accession != current.Accession) || (fact.Accession == prior.Accession && fact.Filed > prior.Filed) {
+			prior = fact
+		}
+	}
+	if prior.Value == nil {
+		return 0, "", "", false
+	}
+	priorEnd, _ := time.Parse("2006-01-02", prior.End)
+	start := priorEnd.AddDate(0, 0, 1)
+	end, _ := time.Parse("2006-01-02", current.End)
+	if days := absDays(end.Sub(start)) + 1; days < 330 || days > 400 {
+		return 0, "", "", false
+	}
+	return *annual.Value + *current.Value - *prior.Value, start.Format("2006-01-02"), current.End, true
+}
+
+func absDays(d time.Duration) int {
+	days := int(d.Hours() / 24)
+	return absDaysDuration(days)
+}
+
+func absDaysDuration(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
 func buildSECReports(data secCompanyFacts, submissions secSubmissions, cik string, now time.Time) []SECFinancialReport {
 	var reports []SECFinancialReport
 	recent := submissions.Filings.Recent
@@ -145,7 +228,12 @@ func buildSECReports(data secCompanyFacts, submissions secSubmissions, cik strin
 		}
 		reports = append(reports, SECFinancialReport{Form: recent.Form[i], FiledDate: recent.Filed[i], ReportDate: recent.ReportDate[i], Accession: accession, SourceURL: link})
 	}
-	sort.SliceStable(reports, func(i, j int) bool { return reports[i].FiledDate > reports[j].FiledDate })
+	sort.SliceStable(reports, func(i, j int) bool {
+		if reports[i].ReportDate != reports[j].ReportDate {
+			return reports[i].ReportDate > reports[j].ReportDate
+		}
+		return reports[i].FiledDate > reports[j].FiledDate
+	})
 	if len(reports) > 8 {
 		reports = reports[:8]
 	}

@@ -188,6 +188,6 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
       renderTarget={stock => <TargetPriceCell stock={{ ...stock, stale: stock.quote_stale, holding_id: `watchlist:${stockKey(stock)}`, account_id: "watchlist", currency: stock.currency || ({ a_share: "CNY", us_stock: "USD", hk_stock: "HKD", crypto: "USDT" } as Record<string, string>)[stock.market] }} alerts={priceAlerts} />}
       renderAction={stock => <button className="watchlist-remove" aria-label={`移除 ${stock.name}`} disabled={busy.includes(stockKey(stock))} onClick={() => void changeMembership(stock, true)}>{busy.includes(stockKey(stock)) ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} />}</button>}
     />
-    <p className="watchlist-data-note">行情优先使用 Bitget，美港股使用腾讯兜底，加密货币使用 Binance 兜底；每条价格显示实际来源和报价时间。EPS、PE 和远期 PE 属于标的公司，美股已披露 EPS 和财务摘要以 SEC 为主，Yahoo Finance 补充估值、预期及其他市场；未来财报日期由 Yahoo / Finnhub 提供；详情中显示实际来源。公司指引与分析师预测分别列示。缺失数据显示「—」，加密货币及基金的公司财报指标显示「不适用」。</p>
+    <p className="watchlist-data-note">行情优先使用 Bitget，美港股使用腾讯兜底，加密货币使用 Binance 兜底；每条价格显示实际来源和报价时间。美股 EPS、TTM 估算及财务摘要以 SEC 为主；Yahoo Finance 补充估值、预期及其他市场。Yahoo PE 缺失时，使用腾讯美元美股现货报价与 SEC TTM EPS 计算，Bitget 股票代币报价不参与 PE。最新财报提交日和下一份预计日期分别列示，完整原文见 SEC 链接。公司指引与分析师预测分别列示。缺失数据显示「—」，加密货币及基金的公司财报指标显示「不适用」。</p>
   </section>;
 }

@@ -15,6 +15,12 @@ export type Fundamentals = {
   eps_period_start?: string;
   eps_period_end?: string;
   eps_filed_date?: string;
+  trailing_eps?: number;
+  trailing_eps_basis?: string;
+  trailing_eps_period_start?: string;
+  trailing_eps_period_end?: string;
+  pe_price?: number;
+  pe_price_time?: string;
   sec_cik?: string;
   financial_reports?: {
     form: string; filed_date: string; report_date: string; source_url: string; accession: string;
@@ -110,7 +116,7 @@ export function StockResearchTable<T extends StockQuote>({ stocks, markets, fund
     observer.observe(code);
     return () => observer.disconnect();
   }, [expanded, stocks]);
-  const columnLabels: Record<string, string> = { eps: "EPS", pe: "PE", forward: "远期 PE", guidance: "公司指引", earnings: "财报日期" };
+  const columnLabels: Record<string, string> = { eps: "EPS", pe: "PE", forward: "远期 PE", guidance: "公司指引", earnings: "财报时间" };
   const sortOptions = [...(getHoldingValue ? [{ value: "market_value", label: "持仓市值：高到低" }] : []), { value: "original", label: "默认顺序" }, { value: "name", label: "名称排序" }, { value: "price", label: "价格：高到低" }, { value: "pe", label: "PE：低到高" }, { value: "earnings", label: "财报日期：近到远" }];
   const toggleMenu = (next: "sort" | "columns") => { setMenu(next); setIsOpen(previous => menu === next ? !previous : true); };
   const sorted = [...stocks].sort((a, b) => {
@@ -173,6 +179,7 @@ export function StockResearchTable<T extends StockQuote>({ stocks, markets, fund
         const empty = na ? "不适用" : "—";
         const guidance = f?.guidance_eps != null ? numeric(f.guidance_eps) : f?.guidance_eps_low != null && f.guidance_eps_high != null ? `${numeric(f.guidance_eps_low)}–${numeric(f.guidance_eps_high)}` : empty;
         const financialHint = [f?.message, metricHint(f, "eps")].filter(Boolean).join(" · ");
+        const latestReport = f?.financial_reports?.[0];
         const rowKey = getRowKey ? getRowKey(stock) : key;
         const code = stock.symbol || stock.id;
         return <Fragment key={rowKey}><tr>
@@ -180,10 +187,10 @@ export function StockResearchTable<T extends StockQuote>({ stocks, markets, fund
           <td data-label="价格" className="mono"><span className="quote-amount">{stock.quote_available === false || stock.current_price <= 0 ? "—" : numeric(stock.current_price)}<span className="quote-currency">{quoteCurrency(stock)}</span></span><small className="quote-source-label" title={quoteTimeLabel(stock)}>{quoteStatusLabel(stock)}</small></td>
           {renderHolding && <td data-label="持仓详情" className="holding-detail-cell">{renderHolding(stock)}</td>}{renderTarget && <td data-label="期望价格" className="target-price-column">{renderTarget(stock)}</td>}
           <td data-label="EPS" className="mono col-eps" title={[financialHint, f?.eps_period_start && `${f.eps_period_start} 至 ${f.eps_period_end}`, f?.eps_filed_date && `提交于 ${f.eps_filed_date}`].filter(Boolean).join(" · ")}>{f?.eps != null ? numeric(f.eps) : empty}{f?.eps != null && <><small>{[f.metrics?.eps?.currency || f.currency, f.eps_basis].filter(Boolean).join(" · ")}</small>{f.eps_period_end && <small>截至 {f.eps_period_end}</small>}</>}</td>
-          <td data-label="PE" className="mono col-pe" title={metricHint(f, "pe")}>{f?.pe != null && f.pe > 0 ? numeric(f.pe) : f?.eps != null && f.eps < 0 ? "亏损" : empty}</td>
+          <td data-label="PE" className="mono col-pe" title={[metricHint(f, "pe"), f?.pe_price != null && f.trailing_eps != null && `${numeric(f.pe_price)} USD ÷ ${numeric(f.trailing_eps)} USD/股`, f?.trailing_eps_basis].filter(Boolean).join(" · ")}>{f?.pe != null && f.pe > 0 ? numeric(f.pe) : f?.trailing_eps != null && f.trailing_eps <= 0 ? "亏损" : empty}{f?.pe_price != null && f.trailing_eps != null && <small>现货 {numeric(f.pe_price)} ÷ TTM {numeric(f.trailing_eps)}</small>}{f?.pe == null && f?.trailing_eps != null && f.trailing_eps > 0 && <small>缺有效美元现货报价</small>}</td>
           <td data-label="远期 PE" className="mono col-forward" title={metricHint(f, "forward_pe")}>{f?.forward_pe != null ? numeric(f.forward_pe) : empty}{f?.forward_period ? <small>年度期末 {f.forward_period}</small> : f?.forward_basis && <small>{f.forward_basis}</small>}</td>
           <td data-label="公司指引" className="mono col-guidance" title={f?.guidance_report_date ? `财报发布 ${f.guidance_report_date}` : financialHint}>{f?.guidance_source_url && /^https?:\/\//.test(f.guidance_source_url) ? <a href={f.guidance_source_url} target="_blank" rel="noreferrer">{guidance}</a> : guidance}<small>{f?.guidance_period ? `${f.guidance_period} · ${f.guidance_basis || ""} · ${f.metrics?.guidance?.currency || f.currency || ""}` : na ? "" : "未取得有效公司指引"}</small></td>
-          <td data-label="财报日期" className="mono col-earnings" title={metricHint(f, "next_earnings_date")}>{f?.next_earnings_date || empty}{f?.next_earnings_date_end && ` 至 ${f.next_earnings_date_end}`}{f?.next_earnings_date && <small>{f.earnings_date_status === "confirmed" ? "公司已确认" : f.next_earnings_date_end ? "预计日期区间" : "预计日期"}</small>}</td>
+          <td data-label="财报时间" className="mono col-earnings" title={metricHint(f, "next_earnings_date")}>{latestReport ? <><a href={latestReport.source_url} target="_blank" rel="noreferrer">最新提交 {latestReport.filed_date}</a><small>{latestReport.form} · 期末 {latestReport.report_date}</small></> : empty}{f?.next_earnings_date && <small>下份{f.earnings_date_status === "confirmed" ? "已确认" : "预计"} {f.next_earnings_date}{f.next_earnings_date_end && ` 至 ${f.next_earnings_date_end}`}</small>}</td>
           {renderAction && <td data-label="操作">{renderAction(stock)}</td>}
         </tr>{expanded === rowKey && <tr className="research-expanded-row"><td ref={detailsRef} colSpan={7 + (renderHolding ? 1 : 0) + (renderTarget ? 1 : 0) + (renderAction ? 1 : 0) - hidden.length}><div className="research-provenance"><h4 className="research-asset-name">{stock.name}</h4><p className="research-asset-introduction">{assetIntroduction(stock, f?.description)}</p>{!na && f?.message && <p className="watchlist-note" role="status">{f.message}</p>}{!na && <div>{Object.entries({eps:"EPS",pe:"PE",forward_pe:"远期 PE",guidance:"公司指引",next_earnings_date:"财报日期"}).map(([metric,label]) => <span key={metric}><b>{label}</b>{metricHint(f,metric) || "暂无来源数据"}</span>)}</div>}{!na && f?.financial_reports?.length ? <SECFinancialReports reports={f.financial_reports} /> : null}</div></td></tr>}</Fragment>;
       })}</tbody>
@@ -197,8 +204,8 @@ function SECFinancialReports({ reports }: { reports: NonNullable<Fundamentals["f
   const labels: Record<string, string> = { revenue: "营收", net_income: "净利润", assets: "总资产", liabilities: "总负债", equity: "股东权益", operating_cash_flow: "经营现金流" };
   return <section className="sec-financial-reports" aria-label="SEC 财报">
     <h5>SEC 财报与财务摘要</h5>
-    <p className="watchlist-note">数值按各科目的披露期间列示；现金流可能为年初至今累计值。提交日期与未来业绩发布日期分别列示。</p>
-    {reports.map(report => <details key={report.accession}>
+    <p className="watchlist-note">这里展示六项财务摘要；点击原始财报可查看完整正文。数值按各科目的披露期间列示，现金流可能为年初至今累计值。</p>
+    {reports.map((report, index) => <details key={report.accession} open={index === 0}>
       <summary>{report.form} · 报告期末 {report.report_date} · 提交 {report.filed_date}</summary>
       <a href={report.source_url} target="_blank" rel="noreferrer">查看 SEC 原始财报</a>
       <dl>{Object.entries(report.metrics || {}).map(([key, metric]) => <div key={key}>

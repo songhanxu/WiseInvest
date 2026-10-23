@@ -88,6 +88,46 @@ func TestSECReportedEPSKeepsDurationAmendmentsAndUnits(t *testing.T) {
 	}
 }
 
+func TestSECTrailingEPSRequiresMatchingFiscalPeriods(t *testing.T) {
+	now := time.Date(2026, 10, 23, 0, 0, 0, 0, time.UTC)
+	annual := secFact{Start: "2024-09-29", End: "2025-09-27", Filed: "2025-10-31", Form: "10-K", Accession: "0000000123-25-000001", Value: floatPtr(8)}
+	prior := secFact{Start: annual.Start, End: "2025-06-28", Filed: "2026-08-01", Form: "10-Q", Accession: "0000000123-26-000001", Value: floatPtr(6)}
+	current := secFact{Start: "2025-09-28", End: "2026-06-27", Filed: prior.Filed, Form: "10-Q", Accession: prior.Accession, Value: floatPtr(7)}
+	latest := secFact{Start: "2026-03-29", End: current.End, Filed: current.Filed, Form: "10-Q", Accession: current.Accession, Value: floatPtr(2.5)}
+	facts := secCompanyFacts{Facts: map[string]map[string]secConcept{"us-gaap": {"EarningsPerShareDiluted": {Units: map[string][]secFact{"USD/shares": {annual, prior, current, latest}}}}}}
+	value, start, end, ok := secTrailingEPS(facts, latest, "GAAP 稀释 · 单季", now)
+	if !ok || value != 9 || start != "2025-06-29" || end != latest.End {
+		t.Fatalf("wrong trailing EPS: %v %s %s %v", value, start, end, ok)
+	}
+	if value, _, _, ok = secTrailingEPS(facts, annual, "GAAP 稀释 · 年度", now); !ok || value != 8 {
+		t.Fatal("annual EPS should be the latest fiscal-year result")
+	}
+	delete(facts.Facts["us-gaap"]["EarningsPerShareDiluted"].Units, "USD/shares")
+	if _, _, _, ok = secTrailingEPS(facts, latest, "GAAP 稀释 · 单季", now); ok {
+		t.Fatal("missing comparative periods must not produce estimated EPS")
+	}
+}
+
+func TestSECPEDemandsFreshUSDStockQuote(t *testing.T) {
+	now := time.Date(2026, 10, 23, 0, 0, 0, 0, time.UTC)
+	row := FundamentalsResponse{TrailingEPS: floatPtr(5), Metrics: map[string]MetricProvenance{"eps": {SourceURL: "https://www.sec.gov/Archives/example"}}}
+	quote := StockResponse{CurrentPrice: 100, Currency: "USD", Source: "tencent", ProductType: "equity", QuoteTime: now.Add(-time.Hour).Format(time.RFC3339)}
+	setSECTrailingPE(&row, quote, now)
+	if row.PE == nil || *row.PE != 20 || row.PEPrice == nil || *row.PEPrice != 100 || row.Metrics["pe"].SourceURL == "" {
+		t.Fatalf("verified quote failed: %+v", row)
+	}
+	for _, invalid := range []StockResponse{
+		{CurrentPrice: 100, Currency: "USDT", Source: "bitget", ProductType: "stock_token", QuoteTime: quote.QuoteTime},
+		{CurrentPrice: 100, Currency: "USD", Source: "tencent", ProductType: "equity", QuoteTime: now.Add(-8 * 24 * time.Hour).Format(time.RFC3339)},
+	} {
+		candidate := FundamentalsResponse{TrailingEPS: floatPtr(5)}
+		setSECTrailingPE(&candidate, invalid, now)
+		if candidate.PE != nil {
+			t.Fatalf("invalid quote produced PE: %+v", invalid)
+		}
+	}
+}
+
 func TestSECReportsPreserveCashFlowYTDAndFilingIdentity(t *testing.T) {
 	now := time.Now()
 	facts, submissions := secExampleData(now)
@@ -112,6 +152,16 @@ func TestSECReportsPreserveCashFlowYTDAndFilingIdentity(t *testing.T) {
 	}
 	if link := secArchiveURL("123", "not-an-accession", "https://evil.example/"); link != "" {
 		t.Fatal("invalid filing URL accepted")
+	}
+	// A newly filed amendment to an older period is not the latest report.
+	recent := &submissions.Filings.Recent
+	recent.Accession = append(recent.Accession, "0000000123-26-000002")
+	recent.Form = append(recent.Form, "10-Q/A")
+	recent.Filed = append(recent.Filed, now.AddDate(0, 0, -1).Format("2006-01-02"))
+	recent.ReportDate = append(recent.ReportDate, now.AddDate(0, -6, 0).Format("2006-01-02"))
+	recent.Document = append(recent.Document, "older-amendment.htm")
+	if reports = buildSECReports(facts, submissions, "0000000123", now); reports[0].ReportDate != report.ReportDate {
+		t.Fatal("older amended period shown as latest report")
 	}
 	// Broken column arrays must be ignored rather than panic.
 	submissions.Filings.Recent.ReportDate = nil
@@ -277,8 +327,8 @@ func TestSECLiveClient(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	row := client.fetch(ctx, "AAPL")
-	if row.Status != "available" || row.EPS == nil || row.Metrics["eps"].SourceURL == "" || len(row.FinancialReports) == 0 {
+	if row.Status != "available" || row.EPS == nil || row.TrailingEPS == nil || row.Metrics["eps"].SourceURL == "" || len(row.FinancialReports) == 0 {
 		t.Fatalf("official SEC client failed: status=%s diagnostic=%s", row.Status, row.Message)
 	}
-	t.Logf("live SEC client verified: CIK=%s, EPS period=%s to %s, basis=%s, reports=%d", row.SECCIK, row.EPSPeriodStart, row.EPSPeriodEnd, row.EPSBasis, len(row.FinancialReports))
+	t.Logf("live SEC client verified: CIK=%s, EPS period=%s to %s, basis=%s, trailing EPS=%v for %s to %s, reports=%d", row.SECCIK, row.EPSPeriodStart, row.EPSPeriodEnd, row.EPSBasis, *row.TrailingEPS, row.TrailingEPSStart, row.TrailingEPSEnd, len(row.FinancialReports))
 }

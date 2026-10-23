@@ -211,6 +211,14 @@ func (s *secFundamentalsClient) fetch(ctx context.Context, code string) Fundamen
 			provenance := row.Metrics["eps"]
 			provenance.SourceURL = secArchiveURL(cik, eps.Accession, "")
 			row.Metrics["eps"] = provenance
+			if trailing, start, end, complete := secTrailingEPS(facts, eps, basis, time.Now()); complete {
+				row.TrailingEPS, row.TrailingEPSStart, row.TrailingEPSEnd = &trailing, start, end
+				row.TrailingEPSBasis = basis + " · 最近财年"
+				if secDuration(eps) < 330 {
+					row.TrailingEPSBasis = "GAAP 每股收益 · TTM 估算（全年 + 本年累计 − 上年同期累计）"
+				}
+				row.Metrics["trailing_eps"] = provenance
+			}
 		}
 	}
 	var diagnostics []string

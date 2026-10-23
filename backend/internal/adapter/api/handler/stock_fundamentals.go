@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -31,6 +32,12 @@ type FundamentalsResponse struct {
 	EPSPeriodStart      string                      `json:"eps_period_start,omitempty"`
 	EPSPeriodEnd        string                      `json:"eps_period_end,omitempty"`
 	EPSFiledDate        string                      `json:"eps_filed_date,omitempty"`
+	TrailingEPS         *float64                    `json:"trailing_eps,omitempty"`
+	TrailingEPSBasis    string                      `json:"trailing_eps_basis,omitempty"`
+	TrailingEPSStart    string                      `json:"trailing_eps_period_start,omitempty"`
+	TrailingEPSEnd      string                      `json:"trailing_eps_period_end,omitempty"`
+	PEPrice             *float64                    `json:"pe_price,omitempty"`
+	PEPriceTime         string                      `json:"pe_price_time,omitempty"`
 	SECCIK              string                      `json:"sec_cik,omitempty"`
 	FinancialReports    []SECFinancialReport        `json:"financial_reports,omitempty"`
 	PE                  *float64                    `json:"pe"`
@@ -208,7 +215,34 @@ func (h *StockHandler) GetFundamentals(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 13*time.Second)
 	defer cancel()
-	c.JSON(http.StatusOK, h.fundamentals.Fetch(ctx, market, code))
+	row := h.fundamentals.Fetch(ctx, market, code)
+	if market == "us_stock" && row.PE == nil && row.TrailingEPS != nil && *row.TrailingEPS > 0 {
+		quoteCtx, quoteCancel := context.WithTimeout(ctx, 3*time.Second)
+		quotes, err := h.fetchTencentUSStocksBySymbol(quoteCtx, code)
+		quoteCancel()
+		if err == nil {
+			for _, quote := range quotes {
+				if strings.EqualFold(quote.ID, code) {
+					setSECTrailingPE(&row, quote, time.Now())
+					break
+				}
+			}
+		}
+	}
+	c.JSON(http.StatusOK, row)
+}
+
+func setSECTrailingPE(row *FundamentalsResponse, quote StockResponse, now time.Time) {
+	stamp, err := time.Parse(time.RFC3339, quote.QuoteTime)
+	if row.TrailingEPS == nil || *row.TrailingEPS <= 0 || quote.CurrentPrice <= 0 || math.IsNaN(quote.CurrentPrice) || math.IsInf(quote.CurrentPrice, 0) || quote.Currency != "USD" || quote.Source != "tencent" || quote.ProductType != "equity" || err != nil || stamp.After(now.Add(time.Minute)) || now.Sub(stamp) > 7*24*time.Hour {
+		return
+	}
+	pe := quote.CurrentPrice / *row.TrailingEPS
+	row.PE, row.PEPrice, row.PEPriceTime = &pe, &quote.CurrentPrice, quote.QuoteTime
+	if row.Metrics == nil {
+		row.Metrics = make(map[string]MetricProvenance)
+	}
+	row.Metrics["pe"] = MetricProvenance{Source: "腾讯美股现货报价 ÷ SEC 披露 TTM EPS（估算）", SourceURL: row.Metrics["eps"].SourceURL, AsOf: quote.QuoteTime}
 }
 
 func (s *FundamentalsService) cachedFetch(ctx context.Context, market, code string) FundamentalsResponse {
