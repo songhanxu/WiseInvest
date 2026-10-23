@@ -3,8 +3,10 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	openai "github.com/sashabaranov/go-openai"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/llm"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/search"
 )
@@ -347,11 +350,62 @@ func (h *StockHandler) generateFilingInsight(userID uint, day, code string) {
 		MaxTokens:   2600,
 	})
 	if err != nil || answer == nil || strings.TrimSpace(answer.Content) == "" {
-		result.Message = "AI 模型暂不可用，请稍后重试"
+		result.Message = filingModelFailure(err, answer)
+		if h.logger != nil {
+			entry := h.logger.WithField("stock", code).WithField("payload_bytes", len(payload)).WithField("reason", result.Message)
+			if err != nil {
+				entry = entry.WithField("error", err)
+			} else if answer != nil {
+				entry = entry.WithField("finish_reason", answer.FinishReason)
+			}
+			entry.Warn("SEC filing insight model request failed")
+		}
 		return
 	}
 	result.Status, result.Content, result.Message = "ready", strings.TrimSpace(answer.Content), ""
 	result.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
+}
+
+func filingModelFailure(err error, answer *llm.ChatCompletionResponse) string {
+	if err == nil {
+		if answer != nil && answer.FinishReason == "length" {
+			return "模型输出达到长度限制，未生成解读，请检查输出令牌设置"
+		}
+		return "模型返回了空解读，请检查模型配置后重试"
+	}
+	var apiErr *openai.APIError
+	var requestErr *openai.RequestError
+	status := 0
+	if errors.As(err, &apiErr) {
+		status = apiErr.HTTPStatusCode
+	} else if errors.As(err, &requestErr) {
+		status = requestErr.HTTPStatusCode
+	}
+	switch status {
+	case http.StatusBadRequest:
+		return "模型拒绝请求（HTTP 400），请检查模型兼容性或财报输入长度"
+	case http.StatusUnauthorized:
+		return "模型认证失败（HTTP 401），请检查后端 OPENAI_API_KEY"
+	case http.StatusForbidden:
+		return "模型访问被拒绝（HTTP 403），请检查账号的模型权限"
+	case http.StatusNotFound:
+		return "模型接口不存在（HTTP 404），请检查 OPENAI_MODEL 和 OPENAI_BASE_URL"
+	case http.StatusRequestEntityTooLarge:
+		return "财报输入超出模型限制（HTTP 413）"
+	case http.StatusTooManyRequests:
+		return "模型限流或额度不足（HTTP 429），请检查服务商额度"
+	}
+	if status >= 500 {
+		return fmt.Sprintf("模型服务暂不可用（HTTP %d），请稍后重试", status)
+	}
+	if status >= 400 {
+		return fmt.Sprintf("模型请求失败（HTTP %d），请查看后端日志", status)
+	}
+	var netErr net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &netErr) && netErr.Timeout() {
+		return "模型请求超时，请稍后重试"
+	}
+	return "模型请求失败；具体原因已记录在后端日志"
 }
 
 func (h *StockHandler) keepInsightLock(userID uint, day, code string, stop <-chan struct{}) {

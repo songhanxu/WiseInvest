@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -10,9 +11,32 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	openai "github.com/sashabaranov/go-openai"
 	"github.com/songhanxu/wiseinvest/internal/domain/model"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/llm"
 )
+
+func TestFilingModelFailureExplainsSafeFailureCategory(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		answer *llm.ChatCompletionResponse
+		want   string
+	}{
+		{"invalid key", fmt.Errorf("wrapped: %w", &openai.APIError{HTTPStatusCode: 401}), nil, "OPENAI_API_KEY"},
+		{"wrong endpoint", &openai.APIError{HTTPStatusCode: 404}, nil, "OPENAI_BASE_URL"},
+		{"rate limit", &openai.APIError{HTTPStatusCode: 429}, nil, "HTTP 429"},
+		{"timeout", context.DeadlineExceeded, nil, "超时"},
+		{"empty capped response", nil, &llm.ChatCompletionResponse{FinishReason: "length"}, "长度限制"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := filingModelFailure(test.err, test.answer); !strings.Contains(got, test.want) {
+				t.Fatalf("got %q, expected %q", got, test.want)
+			}
+		})
+	}
+}
 
 func TestFilingInsightsAreScopedToOwnedUSWatchlistAndDay(t *testing.T) {
 	repo := &alertWatchlistRepo{items: map[uint][]model.WatchlistItem{

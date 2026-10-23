@@ -24,3 +24,5 @@ OPENAI_MODEL=your-model-name
 - `POST /api/v1/stocks/watchlist/filing-insights/refresh`：空 JSON `{}` 提交今日全部美股自选；`{"code":"AAPL"}` 仅提交一只；`{"code":"AAPL","retry":true}` 重试失败结果。新财报时带 `retry:true` 和已展示财报的 `accession`，后端核对 SEC 后才替换旧解读。
 
 当前覆盖范围是 SEC 可识别的美股上市公司，其他市场在该列显示「—」。财报详情页内的标准化摘要是六项；完整正文通过 SEC 官方原文链接查看。若 SEC、模型或行情数据源暂时不可达，解读会显示失败原因并允许重试，不会伪造数值或走势。
+
+若弹窗提示模型失败，先在服务器检查后端日志中的 `SEC filing insight model request failed`。新版会在弹窗区分鉴权失败（401）、模型或地址不存在（404）、限流或额度（429）、请求不兼容（400）、超时和空回复；日志保留服务商返回的具体错误。可使用 `docker compose -f docker-compose.yml logs --tail=200 backend` 查看，不要将 `OPENAI_API_KEY` 的值贴到聊天或日志里。已有失败解读会短暂缓存；部署修复后点击“重新生成”可立即重试。
