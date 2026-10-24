@@ -87,14 +87,19 @@ func TestPasswordRegistrationLoginAndLegacyAccountMigration(t *testing.T) {
 	}
 	log := logger.NewLogger()
 	jwtSvc := auth.NewJWTService("test-signing-key", time.Hour)
-	h := NewAuthHandler(db, jwtSvc, nil, nil, log)
+	h := NewAuthHandler(db, jwtSvc, nil, fakeCodeService{}, fakeCodeService{}, log)
 	r := gin.New()
 	r.POST("/login", h.Login)
 	r.POST("/register", h.Register)
 	r.POST("/wechat", h.WeChatLogin)
 	r.GET("/me", middleware.Auth(jwtSvc), h.GetMe)
 	call := func(path, username, password string) *httptest.ResponseRecorder {
-		body, _ := json.Marshal(map[string]string{"username": username, "password": password, "code": "MOCK_WEB_LOGIN"})
+		payload := map[string]string{"username": username, "password": password, "code": "MOCK_WEB_LOGIN"}
+		if path == "/register" {
+			payload["email"] = "new-account@example.com"
+			payload["code"] = "123456"
+		}
+		body, _ := json.Marshal(payload)
 		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
@@ -129,7 +134,7 @@ func TestPasswordRegistrationLoginAndLegacyAccountMigration(t *testing.T) {
 		t.Fatal("credentials exposed in response")
 	}
 	registered := call("/register", " New_User ", "register-password")
-	if registered.Code != 201 {
+	if registered.Code != 200 {
 		t.Fatalf("registration status %d", registered.Code)
 	}
 	var created model.User

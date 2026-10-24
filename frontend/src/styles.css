@@ -1683,6 +1683,15 @@ p {
   grid-column: 1 / -1;
 }
 
+.contact-binding-card { grid-column: 1 / -1; }
+.contact-binding-summary { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 10px 20px; color: var(--muted); font-size: 12px; }
+.contact-binding-choices { grid-column: 1 / -1; display: flex; gap: 8px; }
+.contact-binding-choices button { width: auto; background: var(--panel-2); color: var(--muted); }
+.contact-binding-choices button.selected { background: var(--accent-soft); color: #304e39; }
+.contact-binding-code { grid-column: 1 / -1; display: flex; gap: 9px; }
+.contact-binding-code input { min-width: 0; flex: 1; }
+.contact-binding-code button { flex: none; }
+
 .settings-card h3 {
   margin-bottom: 4px;
 }

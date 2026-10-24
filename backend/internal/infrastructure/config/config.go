@@ -45,8 +45,10 @@ type NotificationConfig struct {
 
 // WeChatConfig holds WeChat OAuth configuration
 type WeChatConfig struct {
-	AppID     string
-	AppSecret string
+	AppID         string
+	AppSecret     string
+	MiniAppID     string
+	MiniAppSecret string
 }
 
 // SearchConfig holds web search configuration.
@@ -184,8 +186,10 @@ func Load() (*Config, error) {
 			},
 		},
 		WeChat: WeChatConfig{
-			AppID:     getEnv("WECHAT_APP_ID", ""),
-			AppSecret: getEnv("WECHAT_APP_SECRET", ""),
+			AppID:         getEnv("WECHAT_APP_ID", ""),
+			AppSecret:     getEnv("WECHAT_APP_SECRET", ""),
+			MiniAppID:     getEnv("WECHAT_MINI_APP_ID", ""),
+			MiniAppSecret: getEnv("WECHAT_MINI_APP_SECRET", ""),
 		},
 		Notification: NotificationConfig{
 			SMTPHost: getEnv("SMTP_HOST", ""), SMTPPort: getEnv("SMTP_PORT", "587"), SMTPUsername: getEnv("SMTP_USERNAME", ""), SMTPPassword: getEnv("SMTP_PASSWORD", ""), SMTPFrom: getEnv("SMTP_FROM", ""), SMTPTLSMode: getEnv("SMTP_TLS_MODE", "starttls"),

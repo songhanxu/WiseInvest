@@ -1,15 +1,31 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"time"
 )
 
 // WeChatService handles WeChat OAuth flow
 type WeChatService struct {
-	appID     string
-	appSecret string
+	appID         string
+	appSecret     string
+	miniAppID     string
+	miniAppSecret string
+	client        *http.Client
+	apiBase       string
+}
+
+// MiniProgramSession is returned by the mini-program code2Session API.
+type MiniProgramSession struct {
+	OpenID     string `json:"openid"`
+	UnionID    string `json:"unionid"`
+	SessionKey string `json:"session_key"`
+	ErrCode    int    `json:"errcode"`
+	ErrMsg     string `json:"errmsg"`
 }
 
 // WeChatTokenResponse is the response from WeChat code exchange
@@ -40,7 +56,47 @@ type WeChatUserInfo struct {
 
 // NewWeChatService creates a new WeChat service
 func NewWeChatService(appID, appSecret string) *WeChatService {
-	return &WeChatService{appID: appID, appSecret: appSecret}
+	return &WeChatService{appID: appID, appSecret: appSecret, client: &http.Client{Timeout: 8 * time.Second}, apiBase: "https://api.weixin.qq.com"}
+}
+
+// ConfigureMiniProgram configures the separate mini-program AppID and secret.
+func (s *WeChatService) ConfigureMiniProgram(appID, appSecret string) {
+	s.miniAppID, s.miniAppSecret = appID, appSecret
+}
+
+func (s *WeChatService) IsMiniProgramConfigured() bool {
+	return s.miniAppID != "" && s.miniAppSecret != "" &&
+		s.miniAppID != "your_mini_program_app_id_here" &&
+		s.miniAppSecret != "your_mini_program_app_secret_here"
+}
+
+// ExchangeMiniProgramCode validates a wx.login code server-side. SessionKey is
+// intentionally not returned to clients or stored in the application database.
+func (s *WeChatService) ExchangeMiniProgramCode(ctx context.Context, code string) (*MiniProgramSession, error) {
+	query := url.Values{
+		"appid": {s.miniAppID}, "secret": {s.miniAppSecret},
+		"js_code": {code}, "grant_type": {"authorization_code"},
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.apiBase+"/sns/jscode2session?"+query.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("wechat mini-program code exchange failed")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("wechat mini-program response status %d", resp.StatusCode)
+	}
+	var session MiniProgramSession
+	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
+		return nil, fmt.Errorf("wechat mini-program response decode failed: %w", err)
+	}
+	if session.ErrCode != 0 || session.OpenID == "" {
+		return nil, fmt.Errorf("wechat mini-program error %d: %s", session.ErrCode, session.ErrMsg)
+	}
+	return &session, nil
 }
 
 // IsConfigured returns true when real WeChat credentials are provided
@@ -53,13 +109,10 @@ func (s *WeChatService) IsConfigured() bool {
 
 // ExchangeCode exchanges a WeChat authorization code for an access token and openid
 func (s *WeChatService) ExchangeCode(code string) (*WeChatTokenResponse, error) {
-	url := fmt.Sprintf(
-		"https://api.weixin.qq.com/sns/oauth2/access_token?appid=%s&secret=%s&code=%s&grant_type=authorization_code",
-		s.appID, s.appSecret, code,
-	)
-	resp, err := http.Get(url) //nolint:noctx
+	query := url.Values{"appid": {s.appID}, "secret": {s.appSecret}, "code": {code}, "grant_type": {"authorization_code"}}
+	resp, err := s.client.Get(s.apiBase + "/sns/oauth2/access_token?" + query.Encode()) //nolint:noctx
 	if err != nil {
-		return nil, fmt.Errorf("wechat code exchange failed: %w", err)
+		return nil, fmt.Errorf("wechat code exchange failed")
 	}
 	defer resp.Body.Close()
 
@@ -70,18 +123,18 @@ func (s *WeChatService) ExchangeCode(code string) (*WeChatTokenResponse, error) 
 	if result.ErrCode != 0 {
 		return nil, fmt.Errorf("wechat error %d: %s", result.ErrCode, result.ErrMsg)
 	}
+	if result.OpenID == "" || result.AccessToken == "" {
+		return nil, fmt.Errorf("wechat OAuth response missing identity")
+	}
 	return &result, nil
 }
 
 // GetUserInfo fetches WeChat user profile information
 func (s *WeChatService) GetUserInfo(accessToken, openID string) (*WeChatUserInfo, error) {
-	url := fmt.Sprintf(
-		"https://api.weixin.qq.com/sns/userinfo?access_token=%s&openid=%s&lang=zh_CN",
-		accessToken, openID,
-	)
-	resp, err := http.Get(url) //nolint:noctx
+	query := url.Values{"access_token": {accessToken}, "openid": {openID}, "lang": {"zh_CN"}}
+	resp, err := s.client.Get(s.apiBase + "/sns/userinfo?" + query.Encode()) //nolint:noctx
 	if err != nil {
-		return nil, fmt.Errorf("wechat get user info failed: %w", err)
+		return nil, fmt.Errorf("wechat get user info failed")
 	}
 	defer resp.Body.Close()
 

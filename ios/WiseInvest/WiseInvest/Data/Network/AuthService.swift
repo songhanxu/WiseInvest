@@ -48,6 +48,31 @@ class AuthService {
 
     // MARK: - SMS Code
 
+    struct PhoneLoginResponse: Codable {
+        let token: String
+        let user: User
+    }
+
+    func phoneLogin(phone: String, code: String) -> AnyPublisher<PhoneLoginResponse, Error> {
+        guard let url = URL(string: "\(baseURL)/api/v1/auth/phone/login") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["phone": phone, "code": code])
+        return URLSession.shared.dataTaskPublisher(for: request)
+            .tryMap { data, response in
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    throw APIError.invalidResponse
+                }
+                return data
+            }
+            .decode(type: PhoneLoginResponse.self, decoder: JSONDecoder())
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+
     func sendPhoneCode(phone: String) -> AnyPublisher<Void, Error> {
         guard let url = URL(string: "\(baseURL)/api/v1/auth/phone/send-code") else {
             return Fail(error: APIError.invalidURL).eraseToAnyPublisher()

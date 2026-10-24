@@ -37,10 +37,14 @@ func NewRouter(
 		// ── Auth (public) ─────────────────────────────────────────────────
 		authGroup := v1.Group("/auth")
 		{
-			authGroup.POST("/login", authHandler.Login)
 			authGroup.POST("/register", authHandler.Register)
+			authGroup.POST("/login", authHandler.Login)
+			authGroup.POST("/email/send-code", authHandler.SendEmailCode)
+			authGroup.POST("/email/login", authHandler.EmailLogin)
 			authGroup.POST("/wechat/login", authHandler.WeChatLogin)
+			authGroup.POST("/wechat/miniprogram/login", authHandler.MiniProgramLogin)
 			authGroup.POST("/phone/send-code", authHandler.SendPhoneCode)
+			authGroup.POST("/phone/login", authHandler.PhoneLogin)
 		}
 
 		// ── Auth (requires token) ─────────────────────────────────────────
@@ -48,6 +52,7 @@ func NewRouter(
 		authProtected.Use(middleware.Auth(jwtSvc))
 		{
 			authProtected.POST("/phone/bind", authHandler.BindPhone)
+			authProtected.POST("/email/bind", authHandler.BindEmail)
 			authProtected.GET("/me", authHandler.GetMe)
 		}
 

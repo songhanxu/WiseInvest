@@ -2,7 +2,21 @@
   <view class="content safe-area-bottom">
     <view class="brand-block"><view class="brand-symbol"><view class="brand-bar short"></view><view class="brand-bar tall"></view><view class="brand-bar medium"></view></view><view class="brand-cn">慧投</view><view class="brand-en">WISEINVEST</view></view>
     <view class="login-intro"><view class="intro-eyebrow">你的投资研究助手</view><view class="intro-title">让研究有条理，<view>让决策有依据。</view></view><view class="brand-desc">关注市场、理解公司，继续每一个值得深入的问题。</view></view>
-    <view class="login-card"><view class="card-title">开始你的研究</view><view class="card-subtitle">使用微信登录，保存并继续你的研究对话。</view><button class="wechat-btn" loading="{{isLoading}}" disabled="{{isLoading}}" bindtap="loginWithWeChat" hover-class="is-pressed">{{isLoading ? '正在登录' : '微信登录'}}</button><view class="feature-row"><text>多市场研究</text><text class="feature-dot">·</text><text>AI 辅助分析</text><text class="feature-dot">·</text><text>对话留存</text></view></view>
+    <view class="login-card">
+      <view class="card-title">开始你的研究</view>
+      <view class="card-subtitle">登录后保存自选、账户和研究对话。</view>
+      <block wx:if="{{mode === 'wechat'}}">
+        <button class="wechat-btn" loading="{{isLoading}}" disabled="{{isLoading}}" bindtap="loginWithWeChat" hover-class="is-pressed">{{isLoading ? '正在登录' : '微信登录'}}</button>
+        <button class="login-alternate" bindtap="switchMode">使用手机号登录</button>
+      </block>
+      <block wx:else>
+        <input class="login-field" type="number" maxlength="11" placeholder="中国大陆手机号" value="{{phone}}" bindinput="onPhoneInput" />
+        <view class="login-code-row"><input class="login-field" type="number" maxlength="6" placeholder="6 位验证码" value="{{code}}" bindinput="onCodeInput" /><button class="login-code-button" disabled="{{isLoading || countdown > 0}}" bindtap="sendCode">{{countdown > 0 ? countdown + ' 秒' : (codeSent ? '重新发送' : '获取验证码')}}</button></view>
+        <button class="wechat-btn" loading="{{isLoading}}" disabled="{{isLoading || phone.length !== 11 || code.length !== 6}}" bindtap="loginWithPhone">手机号登录</button>
+        <button class="login-alternate" bindtap="switchMode">返回微信登录</button>
+      </block>
+      <view class="feature-row"><text>多市场研究</text><text class="feature-dot">·</text><text>AI 辅助分析</text><text class="feature-dot">·</text><text>对话留存</text></view>
+    </view>
     <view class="login-note">专注研究，审慎决策。</view>
   </view>
 </view>

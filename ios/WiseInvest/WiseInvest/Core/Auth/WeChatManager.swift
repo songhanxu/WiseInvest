@@ -1,5 +1,8 @@
 import Foundation
 import UIKit
+#if canImport(WechatOpenSDK)
+import WechatOpenSDK
+#endif
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WeChatManager
@@ -19,8 +22,16 @@ final class WeChatManager: NSObject {
     static let shared = WeChatManager()
 
     // ── 配置（填入真实值后解注释 SDK 代码）────────────────────────────────
-    let wechatAppID    = "wx_YOUR_APP_ID"
-    let universalLink  = "https://your-domain.com/wechat/"
+    let wechatAppID = Bundle.main.object(forInfoDictionaryKey: "WeChatAppID") as? String ?? ""
+    let universalLink = Bundle.main.object(forInfoDictionaryKey: "WeChatUniversalLink") as? String ?? ""
+
+    var isReady: Bool {
+        #if canImport(WechatOpenSDK)
+        return !wechatAppID.isEmpty && !wechatAppID.contains("YOUR_APP_ID") && universalLink.hasPrefix("https://")
+        #else
+        return false
+        #endif
+    }
 
     // 登录成功后回调，带微信授权 code
     var onLoginCode: ((String) -> Void)?
@@ -32,19 +43,21 @@ final class WeChatManager: NSObject {
     // MARK: - 注册 SDK（在 App 启动时调用）
 
     func registerApp() {
-        /* SDK:
-        WXApi.registerApp(wechatAppID, universalLink: universalLink)
-        WXApi.startLog(by: .detail) { msg in
-            print("[WeChat] \(msg)")
+        #if canImport(WechatOpenSDK)
+        if isReady {
+            WXApi.registerApp(wechatAppID, universalLink: universalLink)
         }
-        */
-        print("[WeChatManager] registerApp called (mock mode — SDK not yet integrated)")
+        #endif
     }
 
     // MARK: - 发起授权登录
 
     func sendAuthRequest(from viewController: UIViewController? = nil) {
-        /* SDK:
+        guard isReady else {
+            onLoginError?("微信登录尚未配置，请使用手机号登录")
+            return
+        }
+        #if canImport(WechatOpenSDK)
         let req = SendAuthReq()
         req.scope = "snsapi_userinfo"
         req.state = "wiseinvest_\(Int.random(in: 100000...999999))"
@@ -53,51 +66,46 @@ final class WeChatManager: NSObject {
                 self?.onLoginError?("无法打开微信，请确保微信已安装")
             }
         }
-        return
-        */
-
-        // ── Mock fallback（SDK 接入前使用）───────────────────────────────
-        print("[WeChatManager] sendAuthRequest — using mock code (SDK not integrated)")
-        let mockCode = "MOCK_WECHAT_CODE_\(Int.random(in: 10000...99999))"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.onLoginCode?(mockCode)
-        }
+        #endif
     }
 
     // MARK: - 处理微信回调 URL（在 AppDelegate 中调用）
 
     @discardableResult
     func handleOpen(url: URL) -> Bool {
-        /* SDK:
+        #if canImport(WechatOpenSDK)
         return WXApi.handleOpen(url, delegate: self)
-        */
+        #else
         return false
+        #endif
     }
 
     // MARK: - 处理 Universal Link 回调（在 AppDelegate 中调用）
 
     @discardableResult
     func handleUserActivity(_ userActivity: NSUserActivity) -> Bool {
-        /* SDK:
+        #if canImport(WechatOpenSDK)
         return WXApi.handleOpenUniversalLink(userActivity, delegate: self)
-        */
+        #else
         return false
+        #endif
     }
 
     // MARK: - 检查微信是否安装
 
     var isWeChatInstalled: Bool {
-        /* SDK:
+        #if canImport(WechatOpenSDK)
         return WXApi.isWXAppInstalled()
-        */
-        return UIApplication.shared.canOpenURL(URL(string: "weixin://")!)
+        #else
+        return false
+        #endif
     }
 }
 
 // MARK: - WXApiDelegate
 // 解注释此扩展并让 WeChatManager 遵循 WXApiDelegate 协议
 
-/* SDK:
+#if canImport(WechatOpenSDK)
 extension WeChatManager: WXApiDelegate {
     func onReq(_ req: BaseReq) {
         // 收到来自微信的请求（一般不需要处理）
@@ -116,4 +124,4 @@ extension WeChatManager: WXApiDelegate {
         }
     }
 }
-*/
+#endif

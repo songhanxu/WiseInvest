@@ -38,6 +38,23 @@ func (r *RedisClient) Set(ctx context.Context, key string, value interface{}, ex
 	return r.client.Set(ctx, key, value, expiration).Err()
 }
 
+func (r *RedisClient) SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) (bool, error) {
+	return r.client.SetNX(ctx, key, value, expiration).Result()
+}
+
+func (r *RedisClient) IncrementWithExpiry(ctx context.Context, key string, expiration time.Duration) (int64, error) {
+	count, err := r.client.Incr(ctx, key).Result()
+	if err != nil {
+		return 0, err
+	}
+	if count == 1 {
+		if err := r.client.Expire(ctx, key, expiration).Err(); err != nil {
+			return 0, err
+		}
+	}
+	return count, nil
+}
+
 // Get gets a value by key
 func (r *RedisClient) Get(ctx context.Context, key string) (string, error) {
 	return r.client.Get(ctx, key).Result()
