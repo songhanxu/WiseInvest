@@ -7,6 +7,8 @@ import { PriceAlertSettings, TargetPriceCell, usePriceAlerts } from "./PriceAler
 import { useDismissiblePopover } from "./useDismissiblePopover";
 import { mergeQuoteRows } from "./quote-presentation";
 import { applyWatchlistChange, watchlistState } from "./watchlist-state";
+import { FilingInsightDialog, ReportDetailDialog } from "./FilingDialogs";
+import type { FilingInsight } from "./FilingDialogs";
 
 const WATCHLIST_FRESH_MS = 60000;
 
@@ -22,7 +24,7 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
   const priceAlerts = usePriceAlerts(apiBase, token, isActive);
   const { rootRef: searchRef, isOpen: searchOpen, setIsOpen: setSearchOpen } = useDismissiblePopover<HTMLElement>();
   const [stocks, setStocks] = useState<StockQuote[]>([]);
-  const { fundamentals, financialLoading } = useStockFundamentals(apiBase, stocks, token);
+  const { fundamentals, financialLoading, refreshFundamentals } = useStockFundamentals(apiBase, stocks, token);
   const [loading, setLoading] = useState(Boolean(token));
   const [error, setError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -34,6 +36,12 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
   const [searchError, setSearchError] = useState("");
   const [busy, setBusy] = useState<string[]>([]);
   const [updatedAt, setUpdatedAt] = useState("");
+  const [insights, setInsights] = useState<Record<string, FilingInsight>>({});
+  const [insightError, setInsightError] = useState("");
+  const [insightBusy, setInsightBusy] = useState("");
+  const [filingView, setFilingView] = useState<{ code: string; type: "report" | "insight" } | null>(null);
+  const lastInsightRefresh = useRef("");
+  const insightScopeRef = useRef(`${apiBase}|${token}`); insightScopeRef.current = `${apiBase}|${token}`;
   const requestVersion = useRef(0);
   const mutationVersion = useRef(0);
   const actionSession = useRef(0);
@@ -43,6 +51,47 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
   const lastSuccessAt = useRef(0);
   const membershipDirty = useRef(false);
   const membership = useMemo(() => new Set(stocks.map(stockKey)), [stocks]);
+  const insightCodes = stocks.filter(stock => stock.market === "us_stock").map(stock => stock.id.toUpperCase()).sort().join("|");
+
+  const readInsights = useCallback(async () => {
+    if (!token) return;
+    const scope = `${apiBase}|${token}`;
+    const response = await requestJson<{ day: string; insights: Record<string, FilingInsight> }>(apiBase, "/api/v1/stocks/watchlist/filing-insights", token);
+    if (insightScopeRef.current === scope) setInsights(response.insights || {});
+  }, [apiBase, token]);
+
+  const refreshInsight = useCallback(async (code: string, retry = false, accession = "") => {
+    if (!token) return;
+    setInsightBusy(code); setInsightError("");
+    try {
+      await requestJson(apiBase, "/api/v1/stocks/watchlist/filing-insights/refresh", token, { method: "POST", body: JSON.stringify({ code, retry, accession }) });
+      await readInsights();
+    } catch (err) { setInsightError(err instanceof Error ? err.message : "AI 解读暂不可用"); }
+    finally { setInsightBusy(""); }
+  }, [apiBase, token, readInsights]);
+
+  useEffect(() => {
+    setInsights({}); setInsightError(""); setFilingView(null); lastInsightRefresh.current = "";
+  }, [apiBase, token]);
+
+  useEffect(() => {
+    if (!isActive || !token || !insightCodes || !lastSuccessAt.current) return;
+    const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const key = `${apiBase}|${token}|${day}|${insightCodes}`;
+    if (lastInsightRefresh.current === key) return;
+    lastInsightRefresh.current = key;
+    let cancelled = false;
+    void requestJson(apiBase, "/api/v1/stocks/watchlist/filing-insights/refresh", token, { method: "POST", body: "{}" })
+      .then(() => readInsights())
+      .catch(err => { if (!cancelled) { if (lastInsightRefresh.current === key) lastInsightRefresh.current = ""; setInsightError(err instanceof Error ? err.message : "AI 解读暂不可用"); } });
+    return () => { cancelled = true; };
+  }, [apiBase, token, isActive, insightCodes, readInsights]);
+
+  useEffect(() => {
+    if (!isActive || !token || !Object.values(insights).some(row => row.status === "pending")) return;
+    const timer = window.setInterval(() => { void readInsights().catch(() => {}); }, 5000);
+    return () => window.clearInterval(timer);
+  }, [isActive, token, insights, readInsights]);
 
   const refresh = useCallback(async (force = false) => {
     if (refreshInFlight.current && !force) return;
@@ -175,19 +224,31 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
     </section>
 
     <div className="watchlist-toolbar"><div className="watchlist-filters">{[{ id: "all", displayName: "全部" }, ...markets].map(market => <button key={market.id} className={filter === market.id ? "active" : ""} onClick={() => setFilter(market.id as MarketId | "all")}>{market.displayName}<span>{initialLoading ? <span className="skeleton-block watch-count-skeleton" aria-hidden="true" /> : market.id === "all" ? stocks.length : stocks.filter(stock => stock.market === market.id).length}</span></button>)}</div>
-      <div className="watchlist-update"><span className="watchlist-note" role="status">{loading ? "行情更新中…" : updatedAt ? `更新于 ${updatedAt}` : financialLoading ? "财报加载中…" : ""}</span><button type="button" className="watchlist-update-button" aria-label="更新自选行情" title="更新自选报价和提醒状态" onClick={() => void Promise.all([refresh(true), priceAlerts.refresh()])} disabled={loading || !token}><RefreshCw size={13} className={loading ? "spin" : ""} /><span>更新行情</span></button></div>
+      <div className="watchlist-update"><span className="watchlist-note" role="status">{loading ? "行情更新中…" : financialLoading ? "财报加载中…" : updatedAt ? `更新于 ${updatedAt}` : ""}</span><button type="button" className="watchlist-update-button" aria-label="更新自选数据" title="更新行情、财报指标和提醒状态" onClick={() => { refreshFundamentals(); void Promise.all([refresh(true), priceAlerts.refresh()]); }} disabled={loading || financialLoading || !token}><RefreshCw size={13} className={loading || financialLoading ? "spin" : ""} /><span>更新数据</span></button></div>
     </div>
     {error && <p className="form-note danger" role="alert">{error}</p>}
     {actionError && <p className="form-note danger" role="alert">{actionError}</p>}
+    {insightError && <p className="form-note danger" role="status">AI 财报解读：{insightError}</p>}
     {financialUnavailable && <p className="watchlist-note">部分财报指标暂未取得，悬停单元格可查看原因；价格和自选功能不受影响。</p>}
 
     {token && <PriceAlertSettings alerts={priceAlerts} />}
     <StockResearchTable stocks={visible} markets={markets} fundamentals={fundamentals} onOpenStock={onOpenStock}
+      onOpenReport={stock => setFilingView({ code: stock.id.toUpperCase(), type: "report" })}
+      onOpenInsight={stock => { const code = stock.id.toUpperCase(); const report = fundamentals[stockKey(stock)]?.financial_reports?.[0]; const stale = insights[code]?.status === "ready" && !!report && insights[code].accession !== report.accession; setFilingView({ code, type: "insight" }); if (!insights[code]?.status || insights[code]?.status === "unavailable" || stale) void refreshInsight(code, stale, report?.accession); }}
+      insightStatus={Object.fromEntries(Object.entries(insights).map(([code, insight]) => [code, insight.status]))}
       loading={initialLoading}
       emptyMessage={token ? "暂无自选，在上方搜索并添加标的。" : "登录后展示你的自选列表。"}
       renderTarget={stock => <TargetPriceCell stock={{ ...stock, stale: stock.quote_stale, holding_id: `watchlist:${stockKey(stock)}`, account_id: "watchlist", currency: stock.currency || ({ a_share: "CNY", us_stock: "USD", hk_stock: "HKD", crypto: "USDT" } as Record<string, string>)[stock.market] }} alerts={priceAlerts} />}
       renderAction={stock => <button className="watchlist-remove" aria-label={`移除 ${stock.name}`} disabled={busy.includes(stockKey(stock))} onClick={() => void changeMembership(stock, true)}>{busy.includes(stockKey(stock)) ? <Loader2 size={15} className="spin" /> : <Trash2 size={15} />}</button>}
     />
-    <p className="watchlist-data-note">行情优先使用 Bitget，美港股使用腾讯兜底，加密货币使用 Binance 兜底；每条价格显示实际来源和报价时间。EPS、PE 和远期 PE 属于标的公司；公司指引与分析师预测分别列示。缺失数据显示「—」，加密货币及基金的公司财报指标显示「不适用」。</p>
+    {filingView && (() => {
+      const stock = stocks.find(item => item.market === "us_stock" && item.id.toUpperCase() === filingView.code);
+      const data = stock && fundamentals[stockKey(stock)];
+      const report = data?.financial_reports?.[0];
+      if (!stock || !data || !report) return null;
+      return filingView.type === "report" ? <ReportDetailDialog stock={stock} fundamentals={data} onClose={() => setFilingView(null)} />
+        : <FilingInsightDialog stock={stock} report={report} insight={insights[filingView.code]} busy={insightBusy === filingView.code} onRetry={() => void refreshInsight(filingView.code, true, report.accession)} onClose={() => setFilingView(null)} />;
+    })()}
+    <p className="watchlist-data-note">行情优先使用 Bitget，美港股使用腾讯兜底，加密货币使用 Binance 兜底；每条价格显示实际来源和报价时间。美股 EPS、TTM 估算及财务摘要以 SEC 为主；Yahoo Finance 补充估值、预期及其他市场。Yahoo PE 缺失时，使用腾讯美元美股现货报价与 SEC TTM EPS 计算，Bitget 股票代币报价不参与 PE。当前最新财报与每日 AI 解读覆盖 SEC 收录的美股定期申报；点击财报查看摘要和原文，AI 图标查看依据财报及财报后行情生成的研究判断。其他市场缺少已核验的最新财报时显示「—」。公司指引与分析师预测分别列示。</p>
   </section>;
 }

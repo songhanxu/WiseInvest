@@ -1970,7 +1970,7 @@ p {
 .research-data-details summary { cursor:pointer; color:var(--blue); }
 .research-data-details { margin-top:8px; font-size:11px; color:var(--muted); }
 .research-data-details p { margin:8px 0; overflow-wrap:anywhere; line-height:1.6; }
-.hide-eps .col-eps, .hide-pe .col-pe, .hide-forward .col-forward, .hide-guidance .col-guidance, .hide-earnings .col-earnings { display:none; }
+.hide-eps .col-eps, .hide-report .col-report, .hide-pe .col-pe, .hide-forward .col-forward, .hide-guidance .col-guidance, .hide-earnings .col-earnings { display:none; }
 .connection-help { padding:18px; font-size:13px; line-height:1.8; }
 .connection-help ol { padding-left:22px; }
 @media (max-width:680px) {
@@ -1984,7 +1984,7 @@ p {
  .unified-watchlist-table td:first-child::before { display:none; }
  .unified-watchlist-table small { max-width:none; }
  .research-table-controls { gap:12px; }
- .hide-eps .col-eps, .hide-pe .col-pe, .hide-forward .col-forward, .hide-guidance .col-guidance, .hide-earnings .col-earnings { display:none; }
+ .hide-eps .col-eps, .hide-report .col-report, .hide-pe .col-pe, .hide-forward .col-forward, .hide-guidance .col-guidance, .hide-earnings .col-earnings { display:none; }
 }
 
 .account-provider-statuses { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px; }
@@ -2030,3 +2030,53 @@ p {
   .price-alert-recipient { max-width:100%; padding-left:29px; }
   .price-alert-recipient > span { max-width:calc(100vw - 160px); }
 }
+
+.sec-financial-reports { margin-top: 16px; border-top: 1px solid var(--border-color, #e5e7eb); padding-top: 12px; }
+.has-report .unified-watchlist-table { min-width: 1200px; }
+.research-report-col { width: 180px; }
+.has-report .col-report { min-width: 180px; }
+.filing-cell { display: grid; grid-template-columns: 22px minmax(0, 1fr) 22px; align-items: center; min-width: 0; }
+.filing-cell-copy { grid-column: 2; display: grid; justify-items: center; gap: 6px; min-width: 0; }
+.filing-period-link { padding: 0; border: 0; background: transparent; color: var(--blue); font: inherit; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: .01em; white-space: nowrap; cursor: pointer; }
+.filing-period-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.filing-cell-meta { display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--muted); font-size: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.filing-form { padding: 2px 5px; border: 1px solid #d6e2d5; border-radius: 4px; color: #426647; background: #f2f6f0; font-size: 10px; font-weight: 600; line-height: 1.2; }
+.filing-filed { overflow: hidden; text-overflow: ellipsis; }
+.report-ai-button { grid-column: 3; display: inline-flex; align-items: center; justify-content: center; justify-self: end; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #5c7b62; cursor: pointer; }
+.report-ai-button:hover { background: #e6f0e7; color: #2f5b38; }
+.filing-period-link:focus-visible, .report-ai-button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+@media (max-width: 680px) {
+ .has-report .unified-watchlist-table { min-width: 0; }
+ .has-report .col-report { min-width: 0; width: auto; }
+ .filing-cell { grid-template-columns: 20px minmax(0, 1fr) 20px; }
+ .filing-period-link { font-size: 11px; }
+ .filing-cell-meta { gap: 5px; font-size: 9px; }
+ .report-ai-button { width: 20px; height: 20px; }
+}
+.filing-dialog-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(22,31,43,.58); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.filing-dialog { width: min(780px, 100%); max-height: min(88vh, 920px); display: flex; flex-direction: column; background: var(--panel, #fff); color: var(--text); border-radius: 14px; box-shadow: 0 22px 70px rgba(0,0,0,.25); overflow: hidden; }
+.filing-dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 22px; border-bottom: 1px solid var(--line); }
+.filing-dialog-header h2 { margin: 0; font-size: 19px; }
+.filing-dialog-header button { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 5px; display: inline-flex; }
+.filing-dialog-body { padding: 20px 22px 26px; overflow-y: auto; }
+.filing-dialog-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.filing-dialog-meta span { border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; font-size: 12px; }
+.filing-metric-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; margin: 18px 0; }
+.filing-metric { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: grid; gap: 5px; }
+.filing-metric span, .filing-metric small { color: var(--muted); font-size: 11px; }
+.filing-metric strong { font-size: 15px; overflow-wrap: anywhere; }
+.filing-original-link, .filing-history a, .filing-insight-sources a { display: inline-flex; align-items: center; gap: 5px; color: var(--blue); text-decoration: none; }
+.filing-original-link:hover, .filing-history a:hover, .filing-insight-sources a:hover { text-decoration: underline; }
+.filing-history, .filing-insight-sources { display: grid; gap: 10px; margin-top: 25px; border-top: 1px solid var(--line); padding-top: 15px; }
+.filing-history h3, .filing-insight-sources h3 { margin: 0; font-size: 14px; }
+.filing-history a, .filing-insight-sources a { font-size: 12px; }
+.filing-insight-state { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; color: var(--muted); }
+.filing-insight-state p { margin: 0; }
+@media (max-width: 600px) { .filing-metric-grid { grid-template-columns: 1fr; } .filing-dialog-header, .filing-dialog-body { padding-left: 16px; padding-right: 16px; } }
+.sec-financial-reports h5 { margin: 0 0 8px; font-size: 13px; }
+.sec-financial-reports details { margin: 10px 0; font-size: 12px; }
+.sec-financial-reports summary { cursor: pointer; padding: 6px 0; }
+.sec-financial-reports dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 10px 0; }
+.sec-financial-reports dt { font-size: 11px; opacity: .7; }
+.sec-financial-reports dd { margin: 4px 0 0; }
+.sec-financial-reports dd small { display: block; font-size: 10px; overflow-wrap: anywhere; }

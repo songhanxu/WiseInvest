@@ -149,7 +149,7 @@ WiseInvest/
 │   │   └── infrastructure/
 │   │       ├── llm/         # LLM 客户端（Tool Calling / 流式）
 │   │       ├── skill/       # Skill 实现
-│   │       └── search/      # Serper 搜索封装
+│   │       └── search/      # DeepSeek 搜索与备用搜索源
 │   └── .env.example
 ├── ios/WiseInvest/          # SwiftUI iOS 客户端
 ├── start.sh                 # 一键启动脚本
@@ -163,13 +163,18 @@ WiseInvest/
 | `OPENAI_API_KEY` | LLM API Key（必填） | — |
 | `OPENAI_BASE_URL` | LLM 接口地址 | `https://api.openai.com/v1` |
 | `OPENAI_MODEL` | 使用的模型 | `gpt-4-turbo-preview` |
-| `SERPER_API_KEY` | Serper 搜索 API Key | — |
+| `SEC_USER_AGENT` | SEC 财报访问标识（项目名和联系邮箱） | — |
+| `SEARCH_PROVIDER` / `SEARCH_API_KEY` | Serper 或 Brave 备用搜索源；官方 DeepSeek 地址自动优先使用其 Search API | — |
+| `FILING_INSIGHT_*` | 财报解读的输出预算、超时和思考模式 | 见 `.env.example` |
 | `SERVER_PORT` | 后端端口 | `8080` |
 | `DB_*` | PostgreSQL 连接配置 | `localhost:5432` |
 | `REDIS_*` | Redis 连接配置 | `localhost:6379` |
 | `WECHAT_APP_ID` | 微信开放平台 AppID | — |
 | `WECHAT_APP_SECRET` | 微信开放平台 AppSecret | — |
 | `BINANCE_API_KEY` | 币安 API（交易功能，可选） | — |
+
+自选列表的最新 SEC 财报和每日 AI 解读配置、数据范围见 [财报解读说明](docs/filing-insights.md)。
+联网搜索的优先级和配置见 [搜索说明](docs/web-search.md)。
 
 ## 接入真实微信登录
 

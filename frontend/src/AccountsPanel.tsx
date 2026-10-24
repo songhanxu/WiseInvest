@@ -40,7 +40,7 @@ export function AccountsPanel({ apiBase, token, markets, isActive = true, onOpen
   const listVersion = useRef(0);
   const account: Account | undefined = accountId === "all" ? { id:"all", provider:"all", name:"全部账户", account_type:"all", status:accounts.some(item=>item.status==="ready") ? "ready" : "not_configured" } : accounts.find(item => item.id === accountId);
   const stocks = snapshot?.holdings ?? [];
-  const { fundamentals, financialLoading } = useStockFundamentals(apiBase, stocks, `${token}:${accountId}`);
+  const { fundamentals, financialLoading, refreshFundamentals } = useStockFundamentals(apiBase, stocks, `${token}:${accountId}`);
 
   const refreshAccounts = useCallback(async () => {
     const request = ++listVersion.current;
@@ -90,7 +90,7 @@ export function AccountsPanel({ apiBase, token, markets, isActive = true, onOpen
   const emptyMessage = loading ? "正在读取实际持仓…" : !token ? "登录并连接账户后展示实际持仓。" : accountError ? "账户列表暂不可用。" : account?.status !== "ready" ? "账户尚未连接，连接后将在这里展示实际持仓。" : holdingsError || (snapshot && !snapshot.complete) ? "持仓数据尚未完整取得，请稍后刷新。" : snapshot ? "该账户当前没有持仓。" : "等待持仓同步…";
 
   return <section className="workspace watchlist-workspace accounts-workspace">
-    <div className="watchlist-heading"><div><p className="eyebrow">我的投资</p><h2>实体账户</h2><p>持仓、行情与公司基本面，在这里一起看清。</p></div><button className="ghost-button" onClick={() => void refresh()} disabled={loading || accountLoading || !token}><RefreshCw size={16} className={loading || accountLoading ? "spin" : ""} />刷新</button></div>
+    <div className="watchlist-heading"><div><p className="eyebrow">我的投资</p><h2>实体账户</h2><p>持仓、行情与公司基本面，在这里一起看清。</p></div><button className="ghost-button" onClick={() => { refreshFundamentals(); void refresh(); }} disabled={loading || accountLoading || financialLoading || !token}><RefreshCw size={16} className={loading || accountLoading || financialLoading ? "spin" : ""} />刷新</button></div>
     <section className="surface-card account-selector-card">
       <div className="account-selector"><WalletCards size={24} /><div><label htmlFor="connected-account">选择账户</label><select id="connected-account" value={accountId} disabled={accountLoading} onChange={event => { setSnapshot(null); setHoldingsError(""); setAccountId(event.target.value); }}><option value="all">全部账户（合并）</option>{accounts.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div><span className={`account-connection-status ${token && account?.status === "ready" ? holdingsError || snapshot?.stale || snapshot?.complete === false ? "failed" : "ready" : ""}`}>{accountLoading ? "检查连接…" : token && account?.status === "ready" ? holdingsError ? "同步失败" : snapshot?.stale ? "数据已过期" : snapshot?.complete === false ? "同步不完整" : snapshot ? "同步正常" : "已配置" : "未连接"}</span></div>
       <div className="account-description"><ShieldCheck size={15} /><span>只读同步</span><span>{accountId === "all" ? "各平台持仓合并展示" : account?.account_type === "classic" ? "经典账户" : account?.account_type === "uta" || account?.account_type === "unified" ? "统一交易账户" : "现货账户"}</span>{snapshot?.as_of && <span>数据时间 {new Date(snapshot.as_of).toLocaleString("zh-CN", { hour12: false })}</span>}{snapshot?.stale && snapshot.last_success && <span>上次完整同步 {new Date(snapshot.last_success).toLocaleString("zh-CN", { hour12: false })}</span>}</div>
