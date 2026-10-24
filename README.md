@@ -176,9 +176,19 @@ WiseInvest/
 自选列表的最新 SEC 财报和每日 AI 解读配置、数据范围见 [财报解读说明](docs/filing-insights.md)。
 联网搜索的优先级和配置见 [搜索说明](docs/web-search.md)。
 
+## 网页账户登录
+
+网页端注册时设置账号名和密码，并通过邮箱验证码或短信验证码确认联系方式（`/api/v1/auth/register`）。登录页用同一个输入框接收账号名、邮箱或手机号，三者使用同一密码（`/api/v1/auth/login`）；已绑定的邮箱和手机号还能分别用验证码登录（`/api/v1/auth/email/login`、`/api/v1/auth/phone/login`）。注册时未填写的另一种联系方式可在「我的」页面验证后绑定到同一账户（`/api/v1/auth/email/bind`、`/api/v1/auth/phone/bind`）。账号名为 3–32 位字母、数字、下划线、点或短横线。密码以 bcrypt 哈希保存；网页登录后使用现有 JWT 访问自选、账户和对话接口。旧的微信模拟账号若未设置密码、未绑定联系方式，不能仅凭账号名登录，需先完成安全的凭证绑定或迁移。正式构建默认请求当前网站同源的 `/api/`；若 API 部署在另一域名，构建时设置 `VITE_API_BASE_URL=https://api.example.com`。登录页只允许通过 HTTPS（本机调试地址除外）提交凭证。上线前还需接入密码找回；多实例部署时需使用共享的登录限流存储。
+
+邮箱验证码需要配置 `SMTP_HOST`、`SMTP_PORT`、`SMTP_USERNAME`、`SMTP_PASSWORD` 和 `SMTP_FROM`；未配置时返回 503。短信验证码沿用腾讯云短信配置。仅本机调试且使用现有测试账号时，可在忽略的 `frontend/.env.local` 中设置 `VITE_ALLOW_HTTP_TEST_LOGIN=true`，允许向目前的 HTTP 测试服务器提交**测试密码**；注册与验证码仍须等待 HTTPS。
+
+手机号验证码登录使用 `POST /api/v1/auth/phone/send-code` 和 `POST /api/v1/auth/phone/login`，已登录用户仍可调用 `POST /api/v1/auth/phone/bind` 绑定手机号。验证码保存 5 分钟，并限制发送与验证次数。开发环境只有同时设置 `SERVER_MODE=debug` 和 `ALLOW_MOCK_AUTH=true` 才会在后端日志输出验证码；正式环境必须配置腾讯云短信的密钥、SdkAppID、审核通过的签名及单变量验证码模板，否则发送接口返回 503。平台配置见 `backend/.env.example`。
+
+小程序微信登录使用 `/api/v1/auth/wechat/miniprogram/login`，后端通过 `code2Session` 校验 `wx.login` 的 code；配置 `WECHAT_MINI_APP_ID` 和 `WECHAT_MINI_APP_SECRET`。iOS 使用原有 `/api/v1/auth/wechat/login` OAuth 接口，配置独立的 `WECHAT_APP_ID` 和 `WECHAT_APP_SECRET`。iOS 还需将官方 WechatOpenSDK 加入 Xcode 工程、填写 `Info.plist` 中的 AppID、配置 Universal Link 和 Associated Domains；未完成前微信按钮不会发起模拟的正式登录。两端可在同一微信开放平台 UnionID 可用时合并为同一账户。
+
 ## 接入真实微信登录
 
-> 未配置微信 AppID 时，系统自动进入开发模式（Mock 登录），不影响其他功能调试。
+> 未配置微信 AppID 时，微信登录不可用。仅本地调试可同时设置 `SERVER_MODE=debug` 与 `ALLOW_MOCK_AUTH=true` 开启 Mock 登录；公开服务器不要启用。
 
 ### 第一步：注册微信开放平台
 
@@ -188,7 +198,7 @@ WiseInvest/
 
 ### 第二步：后端配置
 
-在 `backend/.env` 中填入：
+在后端运行环境中填入（小程序另需 `WECHAT_MINI_APP_ID` 和 `WECHAT_MINI_APP_SECRET`）：
 
 ```bash
 WECHAT_APP_ID=wx1234567890abcdef
@@ -209,21 +219,14 @@ WECHAT_APP_SECRET=your_32_char_secret
 <string>wx1234567890abcdef</string>
 ```
 
-**3. 修改 `WeChatManager.swift`**
+**3. 配置 AppID 和 Universal Link**
 
-填入真实值并解注释 SDK 代码段：
-
-```swift
-let wechatAppID   = "wx1234567890abcdef"
-let universalLink = "https://your-domain.com/wechat/"
-```
-
-然后解注释 `/* SDK: ... */` 包裹的全部代码段，并让 `WeChatManager` 遵循 `WXApiDelegate`。
+在 `Info.plist` 中设置 `WeChatAppID`、`WeChatUniversalLink`，并将 `CFBundleURLSchemes` 中的占位值替换为同一个 AppID。`WeChatManager.swift` 会在 SDK 可导入且 AppID 已配置时启用微信授权；无 SDK 或配置时不会使用假登录。
 
 **4. 配置 Universal Link（必须）**
 
 - 在服务器根目录部署 `.well-known/apple-app-site-association` 文件
-- 在 Xcode → Signing & Capabilities → Associated Domains 中添加 `applinks:your-domain.com`
+- 在 Xcode → Signing & Capabilities → Associated Domains 中添加 `applinks:hanxusong.asia`，并确保开放平台登记的 Universal Link 与 `Info.plist` 一致
 
 ## 免责声明
 

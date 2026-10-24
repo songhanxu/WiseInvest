@@ -1,7 +1,6 @@
 import { FormEvent, PointerEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { WatchlistPanel } from "./WatchlistPanel";
 import { AccountsPanel } from "./AccountsPanel";
-import { AccountCard } from "./AccountCard";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { RoundtableIcon, RoundtableView } from "./RoundtableView";
 import { roundtableAgents, roundtableWelcome } from "./research";
@@ -17,6 +16,9 @@ import { enterStock, leaveStock, stockBackLabel } from "./stock-navigation";
 import type { StockOrigin, WorkspaceView } from "./stock-navigation";
 import { createConversationDraft, hasUserMessage } from "./conversation-history";
 import { useAccountHistory } from "./useAccountHistory";
+import { LoginPage } from "./LoginPage";
+import type { AuthUser } from "./LoginPage";
+
 import type { Message, SavedConversation } from "./conversation-history";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -52,10 +54,11 @@ import {
   Zap
 } from "lucide-react";
 
-const DEFAULT_API_BASE = "http://119.91.58.30";
+const DEFAULT_API_BASE = import.meta.env.VITE_API_BASE_URL?.trim() || (import.meta.env.PROD ? window.location.origin : "http://119.91.58.30");
 
 type Tab = "home" | "accounts" | "watchlist" | "chat" | "profile";
-type View = WorkspaceView;
+type View = WorkspaceView | "login";
+
 export type MarketId = "a_share" | "us_stock" | "hk_stock" | "crypto";
 type KLinePeriod = "5m" | "15m" | "30m" | "1h" | "4h" | "1d" | "1w";
 
@@ -225,6 +228,7 @@ const promptDeck: Record<MarketId, string[]> = {
 const storage = {
   apiBase: "wiseinvest.apiBase",
   token: "wiseinvest.token"
+
 };
 
 function uid() {
@@ -656,7 +660,10 @@ export function App() {
   const [accountsVisited, setAccountsVisited] = useState(false);
   const [apiBase, setApiBase] = useState(() => localStorage.getItem(storage.apiBase) || DEFAULT_API_BASE);
   const [token, setToken] = useState(() => localStorage.getItem(storage.token) || "");
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [afterLoginView, setAfterLoginView] = useState<WorkspaceView>("home");
   const { conversations, setConversations, historyScope } = useAccountHistory(apiBase, token);
+
   const [conversationDraft, setConversationDraft] = useState<SavedConversation | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeMarketId, setActiveMarketId] = useState<MarketId>("a_share");
@@ -698,6 +705,28 @@ export function App() {
   }, [token]);
 
   useEffect(() => {
+    if (!token) {
+      setUser(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`${apiBase}/api/v1/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (response) => {
+        if (cancelled) return;
+        if (response.status === 401) {
+          setToken(""); setUser(null); setConversationDraft(null); setActiveId(null);
+          return;
+        }
+        if (!response.ok) return;
+        const profile = await response.json() as AuthUser;
+        if (!cancelled) setUser(profile);
+      })
+      .catch(() => { /* Keep the session during temporary network failures. */ });
+    return () => { cancelled = true; };
+  }, [apiBase, token]);
+
+  useEffect(() => {
+
     healthCheck(apiBase).then(setIsOnline);
   }, [apiBase]);
 
@@ -709,7 +738,7 @@ export function App() {
 
   const openStock = (market: Market, stock: StockQuote) => {
     if (view === "stock" && activeMarketId === market.id && activeStock?.id === stock.id && activeStock?.provider_symbol === stock.provider_symbol && activeStock?.product_type === stock.product_type) return;
-    setStockTrail(previous => enterStock(previous, { view, marketId: activeMarketId, stock: activeStock, scrollY: window.scrollY }));
+    setStockTrail(previous => enterStock(previous, { view: view as WorkspaceView, marketId: activeMarketId, stock: activeStock, scrollY: window.scrollY }));
     setActiveMarketId(market.id);
     setActiveStock(stock);
     setView("stock");
@@ -762,6 +791,21 @@ export function App() {
     }
   };
 
+  const openLogin = () => {
+    setAfterLoginView(view === "login" ? "home" : view);
+    setView("login");
+  };
+
+  if (view === "login") {
+    return <LoginPage apiBase={apiBase} onBack={() => setView(afterLoginView)} onSuccess={(result) => {
+      setConversationDraft(null);
+      setActiveId(null);
+      setUser(result.user);
+      setToken(result.token);
+      setView(afterLoginView);
+    }} />;
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -803,10 +847,11 @@ export function App() {
       <main className="main">
         <TopBar
           key={`${view}:${activeMarketId}:${activeStock?.id ?? ""}:${activeStock?.provider_symbol ?? ""}:${activeId ?? ""}:${apiBase}`}
-          pageTitle={{home:"总览",accounts:"实体账户",watchlist:"自选列表",chat:"AI 分析",profile:"设置",market:activeMarket.displayName,stock:activeStock?.name ?? "个股详情"}[view]}
+          pageTitle={{home:"总览",accounts:"实体账户",watchlist:"自选列表",chat:"AI 分析",profile:"设置",market:activeMarket.displayName,stock:activeStock?.name ?? "个股详情",login:"登录"}[view]}
           apiBase={apiBase}
           isOnline={isOnline}
           token={token}
+          onOpenAccount={() => token ? setView("profile") : openLogin()}
           onOpenSettings={() => setView("profile")}
           onOpenStock={openStock}
         />
@@ -826,17 +871,18 @@ export function App() {
               setDraftPrompt("");
               setView("chat");
             }}
-            onNeedToken={() => setView("profile")}
+            onNeedToken={openLogin}
           />
         </div>
 
         {(accountsVisited || view === "accounts") && <div hidden={view !== "accounts"}>
-          <AccountsPanel key={`${apiBase}:${token}`} isActive={view === "accounts"} apiBase={apiBase} token={token} markets={markets} onOpenStock={openStock} onNeedToken={() => setView("profile")} />
+          <AccountsPanel key={`${apiBase}:${token}`} isActive={view === "accounts"} apiBase={apiBase} token={token} markets={markets} onOpenStock={openStock} onNeedToken={openLogin} />
         </div>}
 
         {(watchlistVisited || view === "watchlist") && <div hidden={view !== "watchlist"}>
-          <WatchlistPanel key={`${apiBase}:${token}`} isActive={view === "watchlist"} apiBase={apiBase} token={token} markets={markets} onOpenStock={openStock} onNeedToken={() => setView("profile")} />
+          <WatchlistPanel key={`${apiBase}:${token}`} isActive={view === "watchlist"} apiBase={apiBase} token={token} markets={markets} onOpenStock={openStock} onNeedToken={openLogin} />
         </div>}
+
 
         {markets.filter(market => visitedMarkets.includes(market.id) || (view === "market" && activeMarketId === market.id)).map(market => <div key={`${apiBase}:${token}:${market.id}`} hidden={view !== "market" || activeMarketId !== market.id}>
           <MarketPanel
@@ -849,7 +895,8 @@ export function App() {
             onBack={() => setView("home")}
             onOpenStock={(stock) => openStock(market, stock)}
             onOpenAgent={() => openAgentChat(market)}
-            onNeedToken={() => setView("profile")}
+            onNeedToken={openLogin}
+
           />
         </div>)}
 
@@ -887,7 +934,7 @@ export function App() {
             onOpenRoundtable={openRoundtable}
             onDelete={deleteConversation}
             onUpdate={updateConversation}
-            onNeedToken={() => setView("profile")}
+            onNeedToken={openLogin}
           />
         </div>}
 
@@ -895,9 +942,17 @@ export function App() {
           <ProfilePanel
             apiBase={apiBase}
             token={token}
+            user={user}
             isOnline={isOnline}
             onApiBaseChange={setApiBase}
-            onTokenChange={setToken}
+            onLogin={openLogin}
+            onAuthUpdate={(result) => { setToken(result.token); setUser(result.user); }}
+            onLogout={() => {
+              setToken("");
+              setUser(null);
+              setConversationDraft(null);
+              setActiveId(null);
+            }}
             onRefreshHealth={() => healthCheck(apiBase).then(setIsOnline)}
           />
         )}
@@ -919,6 +974,7 @@ function TopBar({
   apiBase,
   isOnline,
   token,
+  onOpenAccount,
   onOpenSettings,
   onOpenStock
 }: {
@@ -926,6 +982,7 @@ function TopBar({
   apiBase: string;
   isOnline: boolean | null;
   token: string;
+  onOpenAccount: () => void;
   onOpenSettings: () => void;
   onOpenStock: (market: Market, stock: StockQuote) => void;
 }) {
@@ -1031,7 +1088,7 @@ function TopBar({
       </form>
       <div className="topbar-actions">
         <span className={`connection-indicator ${isOnline ? "online" : ""}`}><i />{isOnline === null ? "连接中" : isOnline ? "数据已连接" : "连接待恢复"}</span>
-        <button className="topbar-account" aria-label={token ? "我的账户" : "登录账户"} onClick={onOpenSettings}><UserCircle size={18}/><span>{token ? "我的账户" : "登录账户"}</span></button>
+        <button className="topbar-account" aria-label={token ? "我的账户" : "登录账户"} onClick={onOpenAccount}><UserCircle size={18}/><span>{token ? "我的账户" : "登录账户"}</span></button>
         <button className="icon-button" onClick={onOpenSettings} aria-label="打开设置">
           <Settings size={18} />
         </button>
@@ -1242,8 +1299,9 @@ function MarketPanel({
           {!token && (
             <div className="auth-callout">
               <KeyRound size={18} />
-              <span>登录后即可读取你的自选股。</span>
-              <button onClick={onNeedToken}>去设置</button>
+              <span>登录后即可同步你的自选列表。</span>
+              <button onClick={onNeedToken}>去登录</button>
+
             </div>
           )}
           <StockTable
@@ -1690,7 +1748,8 @@ function ConversationView({
     const text = input.trim();
     if (!text || isLoading) return;
     if (!token) {
-      setError("请先登录后再开始对话。");
+      setError("请先登录，再开始对话。");
+
       onNeedToken();
       return;
     }
@@ -1748,7 +1807,8 @@ function ConversationView({
           <h2>{market.title}</h2>
           <p>{market.subtitle} · {conversation.backendId ? `Session #${conversation.backendId}` : "Local draft"}</p>
         </div>
-        <Badge tone={token ? "green" : "muted"}>{token ? "已登录" : "请登录"}</Badge>
+        <Badge tone={token ? "green" : "muted"}>{token ? "已登录" : "登录后可对话"}</Badge>
+
       </header>
 
       <div className="messages">
@@ -1795,16 +1855,22 @@ function ConversationView({
 function ProfilePanel({
   apiBase,
   token,
+  user,
   isOnline,
   onApiBaseChange,
-  onTokenChange,
+  onLogin,
+  onAuthUpdate,
+  onLogout,
   onRefreshHealth
 }: {
   apiBase: string;
   token: string;
+  user: AuthUser | null;
   isOnline: boolean | null;
   onApiBaseChange: (value: string) => void;
-  onTokenChange: (value: string) => void;
+  onLogin: () => void;
+  onAuthUpdate: (result: { token: string; user: AuthUser }) => void;
+  onLogout: () => void;
   onRefreshHealth: () => void;
 }) {
   return (
@@ -1813,7 +1879,7 @@ function ProfilePanel({
         <div>
           <p className="eyebrow">偏好与连接</p>
           <h2>账户与设置</h2>
-          <p>管理账户登录与服务连接。</p>
+          <p>管理你的账户与服务连接。</p>
         </div>
         <div className="profile-status">
           <CheckCircle2 size={22} />
@@ -1832,13 +1898,24 @@ function ProfilePanel({
           <button onClick={onRefreshHealth}>检测连接</button>
         </section>
 
-        <AccountCard apiBase={apiBase} token={token} onTokenChange={onTokenChange} />
+        <section className="settings-card">
+          <UserCircle size={22} />
+          <div>
+            <h3>{token ? (user?.display_name || "我的账户") : "登录慧投"}</h3>
+            <p>{token ? "你的研究空间已连接" : "登录后同步自选、账户与研究记录"}</p>
+          </div>
+          <button onClick={token ? onLogout : onLogin}>{token ? "退出登录" : "前往登录"}</button>
+        </section>
+
+
+        {token && user && <ContactBindingCard apiBase={apiBase} token={token} user={user} onAuthUpdate={onAuthUpdate} />}
 
         <section className="settings-card">
           <ShieldCheck size={22} />
           <div>
             <h3>你的研究空间</h3>
             <p>登录后同步自选列表与已绑定的实体账户。密码不会保存在浏览器中。</p>
+
           </div>
           <div className="check-list">
             <span>多市场自选</span>
@@ -1849,6 +1926,75 @@ function ProfilePanel({
       </div>
     </section>
   );
+}
+
+function ContactBindingCard({ apiBase, token, user, onAuthUpdate }: {
+  apiBase: string;
+  token: string;
+  user: AuthUser;
+  onAuthUpdate: (result: { token: string; user: AuthUser }) => void;
+}) {
+  const [kind, setKind] = useState<"email" | "phone">("email");
+  const [value, setValue] = useState("");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const secureApi = (() => {
+    try {
+      const url = new URL(apiBase);
+      return url.protocol === "https:" || (url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1"));
+    } catch { return false; }
+  })();
+  const needsEmail = !user.email;
+  const needsPhone = !user.phone;
+  const activeKind = (kind === "email" && needsEmail) || !needsPhone ? "email" : "phone";
+  const valid = activeKind === "email" ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()) : /^1[3-9]\d{9}$/.test(value.trim());
+
+  const sendCode = async () => {
+    if (!secureApi || !valid || busy) return;
+    setBusy(true); setStatus("");
+    try {
+      const response = await fetch(apiBase + "/api/v1/auth/" + activeKind + "/send-code", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [activeKind]: value.trim() })
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || "发送失败");
+      setStatus("验证码已发送，请查看邮箱或短信。");
+    } catch (cause) { setStatus(cause instanceof Error ? cause.message : "发送失败"); }
+    finally { setBusy(false); }
+  };
+
+  const bind = async () => {
+    if (!secureApi || !valid || !/^\d{6}$/.test(code) || busy) return;
+    setBusy(true); setStatus("");
+    try {
+      const response = await fetch(apiBase + "/api/v1/auth/" + activeKind + "/bind", {
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+        body: JSON.stringify({ [activeKind]: value.trim(), code })
+      });
+      const result = await response.json() as { token?: string; user?: AuthUser; error?: string };
+      if (!response.ok) throw new Error(result.error || "绑定失败");
+      if (!result.token || !result.user) throw new Error("服务返回了无效的绑定结果");
+      onAuthUpdate({ token: result.token, user: result.user });
+      setValue(""); setCode(""); setStatus("绑定成功");
+    } catch (cause) { setStatus(cause instanceof Error ? cause.message : "绑定失败"); }
+    finally { setBusy(false); }
+  };
+
+  return <section className="settings-card contact-binding-card">
+    <ShieldCheck size={22} />
+    <div><h3>登录方式</h3><p>已绑定的联系方式可以和账号名共用密码，也可以使用验证码登录。</p></div>
+    <div className="contact-binding-summary"><span>账号 · {user.username || user.display_name}</span><span>邮箱 · {user.email || "未绑定"}</span><span>手机 · {user.phone || "未绑定"}</span></div>
+    {(needsEmail || needsPhone) && <>
+      {needsEmail && needsPhone && <div className="contact-binding-choices"><button type="button" className={activeKind === "email" ? "selected" : ""} onClick={() => { setKind("email"); setValue(""); setCode(""); setStatus(""); }}>绑定邮箱</button><button type="button" className={activeKind === "phone" ? "selected" : ""} onClick={() => { setKind("phone"); setValue(""); setCode(""); setStatus(""); }}>绑定手机号</button></div>}
+      {!secureApi && <span className="form-note">绑定联系方式需要 HTTPS 服务地址。</span>}
+      <input type={activeKind === "email" ? "email" : "tel"} value={value} onChange={(event) => setValue(event.target.value)} placeholder={activeKind === "email" ? "输入要绑定的邮箱" : "输入要绑定的手机号"} disabled={!secureApi} />
+      <div className="contact-binding-code"><input value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6 位验证码" inputMode="numeric" disabled={!secureApi} /><button type="button" onClick={sendCode} disabled={!secureApi || !valid || busy}>获取验证码</button></div>
+      <button type="button" onClick={bind} disabled={!secureApi || !valid || code.length !== 6 || busy}>确认绑定</button>
+    </>}
+    {status && <span className="form-note">{status}</span>}
+  </section>;
 }
 
 function MarketDeskCard({

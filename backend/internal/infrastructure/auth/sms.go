@@ -2,59 +2,126 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
+	"errors"
 	"fmt"
-	"math/rand"
+	"math/big"
+	"os"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/cache"
 )
 
 const (
 	smsCachePrefix = "sms:code:"
 	smsTTL         = 5 * time.Minute
+	smsCooldown    = 60 * time.Second
 )
 
-// SMSService handles SMS verification code sending and verification
+var (
+	ErrSMSUnavailable = errors.New("sms provider is not configured")
+	ErrSMSRateLimited = errors.New("sms rate limit exceeded")
+)
+
+type SMSSender interface {
+	Send(ctx context.Context, phone, code string) error
+}
+
+// SMSService manages one-time codes and uses an explicit sender. No production
+// request can succeed until an SMS provider has been configured.
 type SMSService struct {
-	redis *cache.RedisClient
+	redis  *cache.RedisClient
+	sender SMSSender
 }
 
-// NewSMSService creates a new SMS service
-func NewSMSService(redis *cache.RedisClient) *SMSService {
-	return &SMSService{redis: redis}
+func NewSMSService(redisClient *cache.RedisClient) *SMSService {
+	var sender SMSSender
+	if tencent := NewTencentSMSSenderFromEnv(); tencent != nil {
+		sender = tencent
+	} else if os.Getenv("SERVER_MODE") == "debug" && os.Getenv("ALLOW_MOCK_AUTH") == "true" {
+		sender = localSMSSender{}
+	}
+	return &SMSService{redis: redisClient, sender: sender}
 }
 
-// SendCode generates and sends (mocked) an SMS verification code
-func (s *SMSService) SendCode(ctx context.Context, phone string) error {
-	code := fmt.Sprintf("%06d", rand.Intn(1000000)) //nolint:gosec
-	key := smsCachePrefix + phone
+func (s *SMSService) IsConfigured() bool { return s.sender != nil }
 
-	if err := s.redis.Set(ctx, key, code, smsTTL); err != nil {
-		return fmt.Errorf("failed to cache SMS code: %w", err)
+func (s *SMSService) SendCode(ctx context.Context, phone, ip string) error {
+	if s.sender == nil {
+		return ErrSMSUnavailable
+	}
+	phoneKey := smsCachePrefix + phone
+	phoneCount, err := s.redis.IncrementWithExpiry(ctx, "sms:send:phone:"+phone, time.Hour)
+	if err != nil {
+		return err
+	}
+	ipCount, err := s.redis.IncrementWithExpiry(ctx, "sms:send:ip:"+hashIdentifier(ip), time.Hour)
+	if err != nil {
+		return err
+	}
+	if phoneCount > 5 || ipCount > 10 {
+		return ErrSMSRateLimited
+	}
+	allowed, err := s.redis.SetNX(ctx, "sms:cooldown:"+phone, "1", smsCooldown)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrSMSRateLimited
 	}
 
-	// In production, replace with real SMS provider (e.g. Aliyun, Tencent Cloud SMS)
-	fmt.Printf("[SMS] Phone: %s  Code: %s  (expires in 5 min)\n", phone, code)
+	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
+	if err != nil {
+		return err
+	}
+	code := fmt.Sprintf("%06d", n.Int64())
+	hash := sha256.Sum256([]byte(code))
+	if err := s.redis.Set(ctx, phoneKey, hex.EncodeToString(hash[:]), smsTTL); err != nil {
+		_ = s.redis.Delete(ctx, "sms:cooldown:"+phone)
+		return err
+	}
+	if err := s.sender.Send(ctx, phone, code); err != nil {
+		_ = s.redis.Delete(ctx, phoneKey, "sms:cooldown:"+phone)
+		return err
+	}
 	return nil
 }
 
-// VerifyCode verifies an SMS code for a phone number
 func (s *SMSService) VerifyCode(ctx context.Context, phone, code string) (bool, error) {
-	key := smsCachePrefix + phone
-	stored, err := s.redis.Get(ctx, key)
+	count, err := s.redis.IncrementWithExpiry(ctx, "sms:verify:"+phone, smsTTL)
 	if err != nil {
-		// Key not found means code expired or never sent
+		return false, err
+	}
+	if count > 5 {
+		return false, ErrSMSRateLimited
+	}
+	stored, err := s.redis.Get(ctx, smsCachePrefix+phone)
+	if errors.Is(err, redis.Nil) {
 		return false, nil
 	}
-
-	if stored == code {
-		_ = s.redis.Delete(ctx, key)
-		return true, nil
+	if err != nil {
+		return false, err
 	}
-	return false, nil
+	provided := sha256.Sum256([]byte(code))
+	if subtle.ConstantTimeCompare([]byte(stored), []byte(hex.EncodeToString(provided[:]))) != 1 {
+		return false, nil
+	}
+	_ = s.redis.Delete(ctx, smsCachePrefix+phone, "sms:verify:"+phone)
+	return true, nil
 }
 
-// init seeds the random number generator
-func init() {
-	rand.New(rand.NewSource(time.Now().UnixNano())) //nolint:staticcheck
+func hashIdentifier(value string) string {
+	hash := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(hash[:8])
+}
+
+type localSMSSender struct{}
+
+func (localSMSSender) Send(_ context.Context, phone, code string) error {
+	fmt.Printf("[SMS DEV ONLY] %s: %s\n", phone, code)
+	return nil
 }

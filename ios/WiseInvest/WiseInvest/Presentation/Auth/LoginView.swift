@@ -4,6 +4,7 @@ import Combine
 struct LoginView: View {
     @EnvironmentObject var authState: AuthState
     @StateObject private var viewModel = LoginViewModel()
+    @State private var usePhoneLogin = false
 
     var body: some View {
         ZStack {
@@ -90,6 +91,9 @@ struct LoginView: View {
 
     private var loginCard: some View {
         VStack(spacing: 20) {
+            if usePhoneLogin {
+                phoneLoginForm
+            } else {
             // WeChat login button
             Button(action: { viewModel.loginWithWeChat(authState: authState) }) {
                 HStack(spacing: 12) {
@@ -126,19 +130,26 @@ struct LoginView: View {
                 .cornerRadius(16)
                 .shadow(color: Color(hex: "#4CAF50").opacity(0.3), radius: 12, x: 0, y: 4)
             }
-            .disabled(viewModel.isLoading)
+            .disabled(viewModel.isLoading || !WeChatManager.shared.isReady)
             .buttonStyle(ScaleButtonStyle())
 
             // Show a notice if WeChat is not installed
-            if !WeChatManager.shared.isWeChatInstalled {
+            if !WeChatManager.shared.isReady || !WeChatManager.shared.isWeChatInstalled {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.circle")
                         .font(.system(size: 12))
-                    Text("未检测到微信，将使用测试模式登录")
+                    Text("微信登录待完成平台配置，请使用手机号登录")
                         .font(.system(size: 12))
                 }
                 .foregroundColor(Color(hex: "#94A3B8"))
             }
+            }
+
+            Button(usePhoneLogin ? "返回微信登录" : "使用手机号登录") {
+                usePhoneLogin.toggle()
+            }
+            .font(.system(size: 14, weight: .medium))
+            .foregroundColor(Color(hex: "#9CC7A5"))
 
             // Divider
             HStack {
@@ -166,6 +177,41 @@ struct LoginView: View {
         )
     }
 
+    private var phoneLoginForm: some View {
+        VStack(spacing: 12) {
+            TextField("中国大陆手机号", text: $viewModel.phone)
+                .keyboardType(.phonePad)
+                .textContentType(.telephoneNumber)
+                .padding(14)
+                .background(Color(hex: "#1E293B"))
+                .cornerRadius(10)
+            HStack(spacing: 10) {
+                TextField("6 位验证码", text: $viewModel.code)
+                    .keyboardType(.numberPad)
+                    .textContentType(.oneTimeCode)
+                    .padding(14)
+                    .background(Color(hex: "#1E293B"))
+                    .cornerRadius(10)
+                Button(viewModel.resendCountdown > 0 ? "\(viewModel.resendCountdown) 秒" : viewModel.codeSent ? "重新发送" : "获取验证码") {
+                    viewModel.sendPhoneCode()
+                }
+                .disabled(viewModel.isLoading || viewModel.phone.count != 11 || viewModel.resendCountdown > 0)
+                .font(.system(size: 13))
+                .foregroundColor(Color(hex: "#9CC7A5"))
+            }
+            Button(viewModel.isLoading ? "请稍候…" : "手机号登录") {
+                viewModel.loginWithPhone(authState: authState)
+            }
+            .disabled(viewModel.isLoading || viewModel.phone.count != 11 || viewModel.code.count != 6)
+            .frame(maxWidth: .infinity)
+            .frame(height: 52)
+            .background(Color(hex: "#36543C"))
+            .foregroundColor(.white)
+            .cornerRadius(12)
+        }
+        .foregroundColor(.white)
+    }
+
     private func featureHint(icon: String, text: String) -> some View {
         VStack(spacing: 6) {
             Image(systemName: icon)
@@ -186,8 +232,54 @@ final class LoginViewModel: ObservableObject {
     @Published var showPhoneBinding = false
     @Published var showError = false
     @Published var errorMessage = ""
+    @Published var phone = ""
+    @Published var code = ""
+    @Published var codeSent = false
+    @Published var resendCountdown = 0
 
     private var cancellables = Set<AnyCancellable>()
+    private var resendTimer: AnyCancellable?
+
+    func sendPhoneCode() {
+        guard !isLoading else { return }
+        isLoading = true
+        AuthService.shared.sendPhoneCode(phone: phone)
+            .sink(receiveCompletion: { [weak self] completion in
+                self?.isLoading = false
+                if case .failure(let error) = completion {
+                    self?.errorMessage = error.localizedDescription
+                    self?.showError = true
+                }
+            }, receiveValue: { [weak self] in
+                self?.codeSent = true
+                self?.resendCountdown = 60
+                self?.resendTimer?.cancel()
+                self?.resendTimer = Timer.publish(every: 1, on: .main, in: .common)
+                    .autoconnect()
+                    .sink { [weak self] _ in
+                        guard let self = self else { return }
+                        self.resendCountdown -= 1
+                        if self.resendCountdown <= 0 { self.resendTimer?.cancel() }
+                    }
+            })
+            .store(in: &cancellables)
+    }
+
+    func loginWithPhone(authState: AuthState) {
+        guard !isLoading else { return }
+        isLoading = true
+        AuthService.shared.phoneLogin(phone: phone, code: code)
+            .sink(receiveCompletion: { [weak self] completion in
+                self?.isLoading = false
+                if case .failure(let error) = completion {
+                    self?.errorMessage = error.localizedDescription
+                    self?.showError = true
+                }
+            }, receiveValue: { response in
+                authState.signIn(token: response.token, user: response.user)
+            })
+            .store(in: &cancellables)
+    }
 
     /// Triggers the WeChat OAuth flow via WeChatManager.
     /// When the real SDK is integrated, this will jump to the WeChat app for authorization.

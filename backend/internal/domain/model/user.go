@@ -22,10 +22,11 @@ type User struct {
 	Avatar      string `json:"avatar"`
 
 	// WeChat OAuth
-	WeChatOpenID   *string `gorm:"uniqueIndex;column:wechat_open_id" json:"wechat_open_id,omitempty"`
-	WeChatUnionID  string  `gorm:"column:wechat_union_id" json:"wechat_union_id,omitempty"`
-	WeChatNickname string  `gorm:"column:wechat_nickname" json:"wechat_nickname,omitempty"`
-	WeChatAvatar   string  `gorm:"column:wechat_avatar" json:"wechat_avatar,omitempty"`
+	WeChatOpenID     *string `gorm:"uniqueIndex;column:wechat_open_id" json:"wechat_open_id,omitempty"`
+	WeChatMiniOpenID *string `gorm:"uniqueIndex;column:wechat_mini_open_id" json:"wechat_mini_open_id,omitempty"`
+	WeChatUnionID    string  `gorm:"column:wechat_union_id" json:"wechat_union_id,omitempty"`
+	WeChatNickname   string  `gorm:"column:wechat_nickname" json:"wechat_nickname,omitempty"`
+	WeChatAvatar     string  `gorm:"column:wechat_avatar" json:"wechat_avatar,omitempty"`
 
 	// Phone (nullable, unique when set)
 	Phone *string `gorm:"uniqueIndex" json:"phone,omitempty"`

@@ -2,7 +2,7 @@ const { request } = require('./api');
 
 function wechatLogin(code) {
   return request({
-    url: '/api/v1/auth/wechat/login',
+    url: '/api/v1/auth/wechat/miniprogram/login',
     method: 'POST',
     data: { code },
   });
@@ -13,8 +13,11 @@ function sendPhoneCode(phone) {
     url: '/api/v1/auth/phone/send-code',
     method: 'POST',
     data: { phone },
-    needAuth: true,
   });
+}
+
+function phoneLogin(phone, code) {
+  return request({ url: '/api/v1/auth/phone/login', method: 'POST', data: { phone, code } });
 }
 
 function bindPhone(phone, code) {
@@ -29,5 +32,6 @@ function bindPhone(phone, code) {
 module.exports = {
   wechatLogin,
   sendPhoneCode,
+  phoneLogin,
   bindPhone,
 };

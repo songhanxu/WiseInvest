@@ -143,8 +143,10 @@ func main() {
 	// ── Auth Services ──────────────────────────────────────────────────────────
 	jwtSvc := auth.NewJWTService(cfg.JWT.Secret, cfg.JWT.Expiration)
 	wechatSvc := auth.NewWeChatService(cfg.WeChat.AppID, cfg.WeChat.AppSecret)
+	wechatSvc.ConfigureMiniProgram(cfg.WeChat.MiniAppID, cfg.WeChat.MiniAppSecret)
 	smsSvc := auth.NewSMSService(redisClient)
-	authHandler := handler.NewAuthHandler(db, jwtSvc, wechatSvc, smsSvc, log)
+	emailSvc := auth.NewEmailCodeService(redisClient)
+	authHandler := handler.NewAuthHandler(db, jwtSvc, wechatSvc, smsSvc, emailSvc, log)
 	log.Info("Auth services initialized")
 
 	// ── Notification Services ───────────────────────────────────────────────
