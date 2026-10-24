@@ -24,6 +24,18 @@ const MARKETS = [
     welcomeMessage: 'Hi！我是你的美股投资分析助手。\n\n我可以帮你研究美股个股、解读财报、分析宏观经济数据以及美联储政策影响。\n\n想聊哪只股票？',
   },
   {
+    id: 'hk_stock',
+    mark: 'HK',
+    focus: '港股 · 财报 · 资金',
+    displayName: '港 股',
+    subtitle: '香港交易所',
+    description: '个股分析 · 南向资金 · 行业动态',
+    icon: '↗',
+    gradientStart: '#20534C',
+    gradientEnd: '#377C70',
+    welcomeMessage: '你好！我是你的港股投资分析助手。\n\n可以一起研究港股公司、财报、行业和资金动向。',
+  },
+  {
     id: 'crypto',
     mark: '₿',
     focus: '市场结构 · 链上数据 · 风险',

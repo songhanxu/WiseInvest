@@ -52,6 +52,8 @@ type filingMetricComparison struct {
 }
 
 var insightCodePattern = regexp.MustCompile(`^[A-Z][A-Z0-9.-]{0,11}$`)
+var errInsightNotOwned = errors.New("股票不在你的自选列表或实体账户持仓中")
+var errInsightInvalidCodes = errors.New("股票代码请求无效")
 
 func insightDay(now time.Time) string {
 	return now.In(time.FixedZone("Asia/Shanghai", 8*3600)).Format("2006-01-02")
@@ -78,6 +80,57 @@ func (h *StockHandler) insightWatchlist(ctx context.Context, userID uint) ([]str
 	}
 	sort.Strings(codes)
 	return codes, nil
+}
+
+func (h *StockHandler) insightSelectedCodes(ctx context.Context, userID uint, requested []string) ([]string, error) {
+	watchlist, err := h.insightWatchlist(ctx, userID)
+	if err != nil || len(requested) == 0 {
+		return watchlist, err
+	}
+	if len(requested) > 200 {
+		return nil, fmt.Errorf("%w：一次最多查询 200 只股票", errInsightInvalidCodes)
+	}
+	allowed := make(map[string]bool, len(watchlist))
+	for _, code := range watchlist {
+		allowed[code] = true
+	}
+	codes := make([]string, 0, len(requested))
+	missing := false
+	for _, raw := range requested {
+		code := strings.ToUpper(strings.TrimSpace(raw))
+		if !insightCodePattern.MatchString(code) {
+			return nil, fmt.Errorf("%w：股票代码格式不正确", errInsightInvalidCodes)
+		}
+		if !allowed[code] {
+			missing = true
+		}
+		codes = append(codes, code)
+	}
+	if missing && h.accountHandler != nil {
+		snapshot, err := h.accountHandler.allHoldings(ctx, userID)
+		if err != nil {
+			return nil, err
+		}
+		for _, holding := range snapshot.Holdings {
+			code := strings.ToUpper(strings.TrimSpace(holding.ID))
+			if holding.Market == "us_stock" && insightCodePattern.MatchString(code) {
+				allowed[code] = true
+			}
+		}
+	}
+	unique := make(map[string]bool, len(codes))
+	selected := make([]string, 0, len(codes))
+	for _, code := range codes {
+		if !allowed[code] {
+			return nil, errInsightNotOwned
+		}
+		if !unique[code] {
+			unique[code] = true
+			selected = append(selected, code)
+		}
+	}
+	sort.Strings(selected)
+	return selected, nil
 }
 
 func (h *StockHandler) insightStatus(ctx context.Context, userID uint, day, code string) (FilingInsight, error) {
@@ -147,9 +200,19 @@ func (h *StockHandler) saveInsight(insight FilingInsight, userID uint) {
 
 func (h *StockHandler) GetFilingInsights(c *gin.Context) {
 	userID := c.GetUint("userID")
-	codes, err := h.insightWatchlist(c.Request.Context(), userID)
+	var requested []string
+	if raw := c.Query("codes"); raw != "" {
+		requested = strings.Split(raw, ",")
+	}
+	codes, err := h.insightSelectedCodes(c.Request.Context(), userID, requested)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "自选列表读取失败"})
+		if errors.Is(err, errInsightInvalidCodes) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		} else if errors.Is(err, errInsightNotOwned) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		} else {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		}
 		return
 	}
 	day := insightDay(time.Now())
@@ -171,34 +234,34 @@ func (h *StockHandler) RefreshFilingInsights(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AI 解读未配置模型密钥"})
 		return
 	}
-	codes, err := h.insightWatchlist(c.Request.Context(), userID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "自选列表读取失败"})
-		return
-	}
 	var request struct {
-		Code      string `json:"code"`
-		Retry     bool   `json:"retry"`
-		Accession string `json:"accession"`
+		Code      string   `json:"code"`
+		Codes     []string `json:"codes"`
+		Retry     bool     `json:"retry"`
+		Accession string   `json:"accession"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式不正确"})
 		return
 	}
+	if request.Code != "" && len(request.Codes) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请使用单个或批量股票代码"})
+		return
+	}
+	requested := request.Codes
 	if request.Code != "" {
-		code := strings.ToUpper(strings.TrimSpace(request.Code))
-		found := false
-		for _, candidate := range codes {
-			if code == candidate {
-				found = true
-				break
-			}
+		requested = []string{request.Code}
+	}
+	codes, err := h.insightSelectedCodes(c.Request.Context(), userID, requested)
+	if err != nil {
+		if errors.Is(err, errInsightInvalidCodes) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		} else if errors.Is(err, errInsightNotOwned) {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		} else {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		}
-		if !found {
-			c.JSON(http.StatusForbidden, gin.H{"error": "该股票不在你的自选列表"})
-			return
-		}
-		codes = []string{code}
+		return
 	}
 	day := insightDay(time.Now())
 	if request.Retry && len(codes) == 1 {

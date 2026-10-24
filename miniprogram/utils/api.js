@@ -30,6 +30,10 @@ function request({ url, method = 'GET', data, needAuth = false }) {
           resolve(res.data);
           return;
         }
+        if ((res.header || {})['ngrok-error-code'] === 'ERR_NGROK_3200') {
+          reject(new Error('接口隧道当前离线，请启动 ngrok 后重试'));
+          return;
+        }
         const msg = (res.data && res.data.error) || `HTTP ${res.statusCode}`;
         reject(new Error(msg));
       },
@@ -79,6 +83,10 @@ function streamRequest({ url, data, onChunk, onDone, onError }) {
     responseType: 'arraybuffer',
     success: (res) => {
       if (res.statusCode < 200 || res.statusCode >= 300) {
+        if ((res.header || {})['ngrok-error-code'] === 'ERR_NGROK_3200') {
+          if (onError) onError(new Error('接口隧道当前离线，请启动 ngrok 后重试'));
+          return;
+        }
         const msg = res.data?.error || `HTTP ${res.statusCode}`;
         if (onError) onError(new Error(msg));
         return;
@@ -117,6 +125,7 @@ function streamRequest({ url, data, onChunk, onDone, onError }) {
             onChunk({
               type: json.type || 'content',
               content: json.content || '',
+              agent_id: json.agent_id || '',
             });
           }
         } catch (_) {}

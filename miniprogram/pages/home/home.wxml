@@ -14,6 +14,8 @@
       <view class="overview-item"><view class="overview-label">我的对话</view><view class="overview-value">{{conversationCount}}<text>次</text></view></view>
       <view class="overview-item"><view class="overview-label">研究方式</view><view class="overview-status">AI 辅助分析</view></view>
     </view>
+    <button class="invest-entry" bindtap="openInvest"><view><view class="invest-entry-title">我的投资</view><view class="invest-entry-note">自选、财报解读、持仓与价格提醒</view></view><text>›</text></button>
+    <button class="invest-entry roundtable-entry" bindtap="openRoundtable"><view><view class="invest-entry-title">慧投圆桌</view><view class="invest-entry-note">价值、趋势、量化多角度讨论</view></view><text>›</text></button>
     <view class="section-heading"><view class="section-title">市场研究</view><view class="section-note">选择市场开始</view></view>
     <view class="markets">
       <view wx:for="{{markets}}" wx:key="id" class="market-slot {{index === markets.length - 1 && markets.length % 2 ? 'market-slot-wide' : ''}}">

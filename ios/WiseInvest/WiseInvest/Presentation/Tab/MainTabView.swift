@@ -6,8 +6,9 @@ struct MainTabView: View {
 
     enum Tab: Int {
         case home = 0
-        case chat = 1
-        case profile = 2
+        case investment = 1
+        case chat = 2
+        case profile = 3
     }
 
     var body: some View {
@@ -17,6 +18,12 @@ struct MainTabView: View {
                     Label("首页", systemImage: selectedTab == .home ? "house.fill" : "house")
                 }
                 .tag(Tab.home)
+
+            InvestmentView()
+                .tabItem {
+                    Label("投资", systemImage: selectedTab == .investment ? "chart.bar.fill" : "chart.bar")
+                }
+                .tag(Tab.investment)
 
             ChatTabView(coordinator: coordinator)
                 .tabItem {

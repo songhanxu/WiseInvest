@@ -26,11 +26,12 @@ Component({
     conversation(v) {
       if (!v) return;
       const market = getMarketById(v.agentType || 'a_share');
+      const roundtable = v.agentType === 'group_chat';
       this.setData({
-        displayTitle: v.title || `${market.displayName} · 新对话`,
+        displayTitle: v.title || `${roundtable ? '慧投圆桌' : market.displayName} · 新对话`,
         timeText: timeAgo(v.updatedAt),
-        marketMark: market.mark,
-        marketName: market.displayName,
+        marketMark: roundtable ? '圆' : market.mark,
+        marketName: roundtable ? '慧投圆桌' : market.displayName,
       });
     },
   },

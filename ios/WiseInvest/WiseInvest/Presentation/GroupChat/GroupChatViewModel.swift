@@ -15,7 +15,6 @@ class GroupChatViewModel: ObservableObject {
 
     init() {
         appendWelcome()
-        initConversation()
     }
 
     // MARK: - Public
@@ -25,7 +24,8 @@ class GroupChatViewModel: ObservableObject {
         guard !text.isEmpty, !isProcessing else { return }
 
         guard let conversationId else {
-            errorMessage = "对话初始化中，请稍候再试"
+            isProcessing = true
+            initConversation()
             return
         }
 
@@ -132,7 +132,7 @@ class GroupChatViewModel: ObservableObject {
 
     func retryInit() {
         errorMessage = nil
-        initConversation()
+        if !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { sendMessage() }
     }
 
     private func initConversation() {
@@ -142,6 +142,7 @@ class GroupChatViewModel: ObservableObject {
             .sink(
                 receiveCompletion: { [weak self] completion in
                     if case .failure(let error) = completion {
+                        self?.isProcessing = false
                         if case APIError.httpError(401, _) = error {
                             AuthState.shared.signOut()
                             return
@@ -151,6 +152,8 @@ class GroupChatViewModel: ObservableObject {
                 },
                 receiveValue: { [weak self] id in
                     self?.conversationId = id
+                    self?.isProcessing = false
+                    self?.sendMessage()
                 }
             )
             .store(in: &cancellables)

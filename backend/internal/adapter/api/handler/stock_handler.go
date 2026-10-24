@@ -37,24 +37,25 @@ type watchlistRepository interface {
 
 // StockHandler provides real-time market data endpoints.
 type StockHandler struct {
-	bitget        *bitget.Client
-	fundamentals  *FundamentalsService
-	watchlistRepo watchlistRepository
-	logger        *logger.Logger
-	httpClient    *http.Client
-	cache         *cache.QuoteCache // Redis-backed quote cache (may be nil if cache is disabled)
-	stopTicker    context.CancelFunc
-	searcher      search.Searcher   // Web search for news (may be NoopSearcher)
-	llmClient     *llm.OpenAIClient // LLM client for AI summaries (may be nil)
-	llmSem        chan struct{}     // Semaphore to limit concurrent LLM requests (prevents DeepSeek overload)
-	insightSem    chan struct{}     // Limit automatic filing analysis work.
-	insightCtx    context.Context
-	stopInsights  context.CancelFunc
-	insightMu     sync.Mutex
-	insights      map[string]FilingInsight
-	filingConfig  config.FilingInsightConfig
-	wsHub         *WSHub           // WebSocket hub for real-time push (may be nil)
-	binanceWS     *BinanceWSClient // Binance WebSocket stream for real-time crypto data
+	bitget         *bitget.Client
+	fundamentals   *FundamentalsService
+	watchlistRepo  watchlistRepository
+	accountHandler *AccountHandler
+	logger         *logger.Logger
+	httpClient     *http.Client
+	cache          *cache.QuoteCache // Redis-backed quote cache (may be nil if cache is disabled)
+	stopTicker     context.CancelFunc
+	searcher       search.Searcher   // Web search for news (may be NoopSearcher)
+	llmClient      *llm.OpenAIClient // LLM client for AI summaries (may be nil)
+	llmSem         chan struct{}     // Semaphore to limit concurrent LLM requests (prevents DeepSeek overload)
+	insightSem     chan struct{}     // Limit automatic filing analysis work.
+	insightCtx     context.Context
+	stopInsights   context.CancelFunc
+	insightMu      sync.Mutex
+	insights       map[string]FilingInsight
+	filingConfig   config.FilingInsightConfig
+	wsHub          *WSHub           // WebSocket hub for real-time push (may be nil)
+	binanceWS      *BinanceWSClient // Binance WebSocket stream for real-time crypto data
 
 	// In-memory caches for slow-changing crypto data (sparklines, fear/greed index).
 	// Updated every 60 s by a dedicated goroutine in backgroundRefreshLoop.
@@ -62,6 +63,11 @@ type StockHandler struct {
 	cryptoBTCSparkline []float64
 	cryptoETHSparkline []float64
 	cryptoFearGreed    *IndexResponse // nil until first fetch
+}
+
+// SetAccountHandler lets filing insights cover stocks held in an account as well as the watchlist.
+func (h *StockHandler) SetAccountHandler(accountHandler *AccountHandler) {
+	h.accountHandler = accountHandler
 }
 
 // NewStockHandler creates a new StockHandler.

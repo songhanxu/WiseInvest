@@ -21,6 +21,7 @@ func NewRouter(
 	logger *logger.Logger,
 ) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
+	stockHandler.SetAccountHandler(accountHandler)
 
 	router := gin.New()
 	_ = router.SetTrustedProxies([]string{"127.0.0.1", "::1", "172.16.0.0/12"})

@@ -1,0 +1,21 @@
+<view class="invest safe-area-bottom">
+  <view class="intro"><view class="eyebrow">投资工作台</view><view class="title">我的投资</view><view class="subtitle">关注的公司、最新财报与账户持仓</view></view>
+  <view class="tabs"><button class="{{mode === 'watchlist' ? 'active' : ''}}" data-mode="watchlist" bindtap="setMode">自选研究</button><button class="{{mode === 'accounts' ? 'active' : ''}}" data-mode="accounts" bindtap="setMode">账户持仓</button></view>
+  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view wx:if="{{mode === 'watchlist'}}">
+    <view class="search card"><view class="label">添加自选</view><input value="{{query}}" bindinput="onQuery" placeholder="搜索名称或代码" /><picker range="{{searchMarkets}}" range-key="displayName" value="{{searchMarketIndex}}" bindchange="setSearchMarket"><view class="picker">市场：{{searchMarkets[searchMarketIndex].displayName}} ⌄</view></picker>
+      <view wx:for="{{results}}" wx:key="id" class="search-row"><view><view class="row-title">{{item.name}}</view><view class="muted">{{item.symbol}} · {{item.market}}</view></view><button data-index="{{index}}" bindtap="addStock">添加</button></view>
+    </view>
+    <scroll-view scroll-x class="filters"><view class="filter-inner"><button wx:for="{{markets}}" wx:key="id" data-market="{{item.id}}" bindtap="setFilter" class="filter {{filter === item.id ? 'selected' : ''}}">{{item.displayName}}</button></view></scroll-view>
+    <view wx:if="{{!visibleStocks.length && !busy}}" class="empty card">还没有自选标的，搜索后添加。</view>
+    <view wx:for="{{visibleStocks}}" wx:key="id" class="stock card"><view class="stock-head"><view bindtap="openResearch" data-key="{{item.market + ':' + item.id}}"><view class="row-title">{{item.name}} <text class="code">{{item.symbol}}</text></view><view class="muted">{{item.market}} · {{item.source || '行情'}}</view></view><button class="remove" data-key="{{item.market + ':' + item.id}}" bindtap="removeStock">移除</button></view><view class="stock-bottom" bindtap="openResearch" data-key="{{item.market + ':' + item.id}}"><view class="price">{{item.current_price || '—'}} <text>{{item.currency}}</text></view><view class="change {{item.change_percent >= 0 ? 'positive' : 'negative'}}">{{item.change_percent}}%</view><text class="arrow">›</text></view></view>
+  </view>
+  <view wx:else>
+    <view wx:for="{{equities}}" wx:key="account_id" class="equity card"><view class="muted">{{item.account_id}} · 账户资产</view><view class="price">{{item.amount}} {{item.currency}}</view></view>
+    <view wx:for="{{accounts}}" wx:key="id" class="account card"><view class="row-title">{{item.name}}</view><view class="muted">{{item.status === 'ready' ? '只读同步' : item.message}}</view></view>
+    <view wx:if="{{snapshotStale}}" class="error">持仓快照可能已过期，请下拉刷新。</view><view wx:for="{{warnings}}" wx:key="index" class="error">{{item}}</view>
+    <view wx:if="{{!holdings.length && !busy}}" class="empty card">暂无可展示的持仓</view>
+    <view wx:for="{{holdings}}" wx:key="holding_id" class="stock card"><view class="row-title">{{item.name || item.symbol}} <text class="code">{{item.symbol}}</text></view><view class="muted">{{item.account_name}} · {{item.side}} · {{item.quantity}} {{item.quantity_unit}}</view><view class="stock-bottom"><view class="price">{{item.market_value || item.current_price}} {{item.currency}}</view><view class="muted">盈亏 {{item.unrealized_pnl || '—'}}</view></view><view class="holding-alert"><input type="digit" value="{{item.targetPrice}}" data-id="{{item.holding_id}}" bindinput="onHoldingTarget" placeholder="目标价格" /><button data-id="{{item.holding_id}}" bindtap="saveHoldingAlert">保存提醒</button><button wx:if="{{item.hasAlert}}" data-id="{{item.holding_id}}" bindtap="removeHoldingAlert">删除</button></view></view>
+    <view class="settings card"><view class="label">价格提醒邮箱</view><input type="text" value="{{alertEmail}}" bindinput="onEmail" placeholder="输入接收提醒的邮箱" /><button bindtap="saveEmail">保存邮箱</button><view wx:if="{{!mailerConfigured}}" class="muted">邮件服务尚未配置，提醒暂不会发送。</view></view>
+  </view>
+</view>

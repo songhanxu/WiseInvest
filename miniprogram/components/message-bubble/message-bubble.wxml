@@ -4,7 +4,7 @@
       <view wx:if="{{message.role === 'assistant' && message.thinkingLines && message.thinkingLines.length}}" class="thinking-box">
         <view wx:for="{{message.thinkingLines}}" wx:key="index" class="thinking-line">{{item}}</view>
       </view>
-      <text class="content" selectable>{{message.content}}</text>
+      <rich-text class="content" nodes="{{renderedContent}}" selectable></rich-text>
       <view wx:if="{{message.isStreaming}}" class="streaming">
         <text class="dot">●</text>
         <text class="dot">●</text>

@@ -1,3 +1,5 @@
+const { renderMarkdown } = require('../../utils/markdown');
+
 Component({
   options: { styleIsolation: 'apply-shared' },
   properties: {
@@ -13,6 +15,7 @@ Component({
 
   observers: {
     message(v) {
+      this.setData({ renderedContent: renderMarkdown(v && v.content) });
       if (!v || !v.timestamp) return;
       const d = new Date(v.timestamp);
       const hh = String(d.getHours()).padStart(2, '0');
@@ -23,6 +26,7 @@ Component({
 
   data: {
     timeText: '',
+    renderedContent: '',
   },
 
   methods: {

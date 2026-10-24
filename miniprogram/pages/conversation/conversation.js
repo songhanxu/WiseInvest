@@ -1,5 +1,5 @@
 const { getMarketById } = require('../../utils/market');
-const { loadConversations, upsertConversation } = require('../../utils/storage');
+const { loadConversations, upsertConversation, removeConversationById } = require('../../utils/storage');
 const { createConversation, sendStreamMessage } = require('../../utils/conversation-service');
 
 function createId() {
@@ -87,11 +87,6 @@ Page({
         thinkingLines: [],
       };
       this.setData({ messages: [welcome], createdAt: nowISO() }, this.updateRegenerateAnchor);
-      this.persistConversation([welcome]);
-    }
-
-    if (!this.data.backendConversationId) {
-      await this.ensureBackendConversation();
     }
   },
 
@@ -115,7 +110,6 @@ Page({
       const resp = await createConversation(this.data.market.id, `${this.data.market.displayName} Conversation`);
       const backendId = Number(resp.id || 0);
       this.setData({ backendConversationId: backendId });
-      this.persistConversation(this.data.messages);
       return backendId;
     } catch (error) {
       this.setData({ errorMessage: error.message || '会话初始化失败' });
@@ -153,8 +147,9 @@ Page({
     const content = (this.data.inputText || '').trim();
     if (!content || this.data.isLoading) return;
 
+    this.setData({ isLoading: true, errorMessage: '' });
     const backendConversationId = await this.ensureBackendConversation();
-    if (!backendConversationId) return;
+    if (!backendConversationId) { this.setData({ isLoading: false }); return; }
 
     const userMessage = {
       id: createId(),
@@ -256,7 +251,7 @@ Page({
     this.currentStreamingId = '';
   },
 
-  onRegenerate() {
+  async onRegenerate() {
     if (this.data.isLoading) return;
 
     const messages = [...this.data.messages];
@@ -270,10 +265,21 @@ Page({
       }
     }
 
-    this.setData({ messages }, () => {
+    this.setData({ isLoading: true, errorMessage: '' });
+    const backendConversationId = await this.ensureBackendConversation();
+    if (!backendConversationId) { this.setData({ isLoading: false }); return; }
+    const streamingId = createId();
+    messages.push({ id: streamingId, role: 'assistant', content: '', timestamp: nowISO(), isStreaming: true, thinkingLines: [] });
+    this.currentStreamingId = streamingId;
+    this.setData({ messages, isLoading: true, errorMessage: '' }, () => {
       this.persistConversation(messages);
       this.updateRegenerateAnchor();
-      this.setData({ inputText: lastUser.content }, () => this.sendMessage());
+      this.scrollToBottom();
+    });
+    this.streamTask = sendStreamMessage(backendConversationId, lastUser.content, {
+      onChunk: (chunk) => this.handleStreamChunk(streamingId, chunk),
+      onDone: () => this.finishStreaming(streamingId),
+      onError: (error) => this.failStreaming(streamingId, error),
     });
   },
 
@@ -295,8 +301,8 @@ Page({
             isStreaming: false,
             thinkingLines: [],
           };
-          this.setData({ messages: [welcome], errorMessage: '' }, () => {
-            this.persistConversation([welcome]);
+          if (this.data.conversationId) removeConversationById(this.data.conversationId);
+          this.setData({ messages: [welcome], conversationId: '', backendConversationId: 0, createdAt: nowISO(), errorMessage: '' }, () => {
             this.updateRegenerateAnchor();
             this.scrollToBottom();
           });
@@ -319,6 +325,7 @@ Page({
   },
 
   persistConversation(messages) {
+    if (!messages.some((m) => m.role === 'user')) return;
     const id = this.data.conversationId || createId();
     const firstUser = messages.find((m) => m.role === 'user');
     const title = firstUser ? generateTitle(firstUser.content) : '';

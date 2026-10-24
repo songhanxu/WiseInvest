@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	openai "github.com/sashabaranov/go-openai"
 	"github.com/songhanxu/wiseinvest/internal/domain/model"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/config"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/llm"
 )
 
@@ -77,6 +79,27 @@ func TestFilingInsightRefreshRejectsUnownedSymbol(t *testing.T) {
 	h.RefreshFilingInsights(c)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("cross-user analysis request allowed: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestFilingInsightsAllowOwnedAccountHoldingWithoutLeakingItToOtherUsers(t *testing.T) {
+	repo := &alertWatchlistRepo{items: map[uint][]model.WatchlistItem{7: {{Market: "us_stock", StockCode: "AAPL"}}}}
+	account := &AccountHandler{
+		cfg: config.BitgetConfig{APIKey: "key", APISecret: "secret", Passphrase: "pass", OwnerUserID: 7, AccountName: "Bitget"},
+		loader: func(context.Context) (HoldingsSnapshot, error) {
+			return HoldingsSnapshot{AccountID: "bitget", Complete: true, AsOf: time.Now().Format(time.RFC3339), Holdings: []AccountHolding{{StockResponse: StockResponse{ID: "NVDA", Market: "us_stock"}}, {StockResponse: StockResponse{ID: "BTC", Market: "crypto"}}}}, nil
+		},
+	}
+	h := &StockHandler{watchlistRepo: repo, accountHandler: account}
+	codes, err := h.insightSelectedCodes(context.Background(), 7, []string{"NVDA", "AAPL", "NVDA"})
+	if err != nil || len(codes) != 2 || codes[0] != "AAPL" || codes[1] != "NVDA" {
+		t.Fatalf("owned watchlist and holding symbols were not selected: %v %v", codes, err)
+	}
+	if _, err := h.insightSelectedCodes(context.Background(), 8, []string{"NVDA"}); !errors.Is(err, errInsightNotOwned) {
+		t.Fatalf("another user accessed account insight: %v", err)
+	}
+	if _, err := h.insightSelectedCodes(context.Background(), 7, []string{"BTC"}); !errors.Is(err, errInsightNotOwned) {
+		t.Fatalf("non-stock holding accessed filing insight: %v", err)
 	}
 }
 

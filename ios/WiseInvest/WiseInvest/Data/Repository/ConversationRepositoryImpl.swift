@@ -45,10 +45,13 @@ class ConversationRepositoryImpl: ConversationRepository {
            let decoded = try? JSONDecoder().decode([Conversation].self, from: data) {
             conversations = decoded
         }
-        return conversations.sorted { $0.updatedAt > $1.updatedAt }
+        return conversations.filter { $0.messages.contains(where: { $0.role == .user }) }
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
     
     func saveConversation(_ conversation: Conversation) {
+        guard conversation.messages.contains(where: { $0.role == .user }) else { return }
+        loadConversations()
         if let index = conversations.firstIndex(where: { $0.id == conversation.id }) {
             conversations[index] = conversation
         } else {
@@ -58,8 +61,13 @@ class ConversationRepositoryImpl: ConversationRepository {
     }
     
     func deleteConversation(id: String) {
+        loadConversations()
         conversations.removeAll { $0.id == id }
         persistConversations()
+    }
+
+    func resetConversation(agentType: AgentType) {
+        conversationIdCache.removeValue(forKey: agentType)
     }
     
     // MARK: - Private Methods

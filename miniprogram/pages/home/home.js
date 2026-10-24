@@ -47,12 +47,24 @@ Page({
   onTapMarket(e) {
     const market = e.detail || {};
     wx.navigateTo({
-      url: `/pages/conversation/conversation?market=${market.id}`,
+      url: `/pages/market/market?market=${market.id}`,
     });
+  },
+
+  openInvest() {
+    wx.navigateTo({ url: '/pages/invest/invest' });
+  },
+
+  openRoundtable() {
+    wx.navigateTo({ url: '/pages/roundtable/roundtable' });
   },
 
   onTapRecentConversation(e) {
     const conversation = e.detail || {};
+    if (conversation.agentType === 'group_chat') {
+      wx.navigateTo({ url: `/pages/roundtable/roundtable?conversationId=${conversation.id}` });
+      return;
+    }
     wx.navigateTo({
       url: `/pages/conversation/conversation?market=${conversation.agentType}&conversationId=${conversation.id}`,
     });

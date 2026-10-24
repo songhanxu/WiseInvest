@@ -2,6 +2,10 @@
   "pages": [
     "pages/login/login",
     "pages/home/home",
+    "pages/invest/invest",
+    "pages/research/research",
+    "pages/roundtable/roundtable",
+    "pages/market/market",
     "pages/conversation/conversation",
     "pages/phone-binding/phone-binding"
   ],

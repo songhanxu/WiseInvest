@@ -55,37 +55,42 @@ class ConversationViewModel: ObservableObject {
             conversation.messages.append(welcomeMessage)
         }
 
-        // Get or create backend conversation
+        // Opening an agent only shows a welcome message. Create server history
+        // after the first actual user message.
+    }
+
+    func sendMessage() {
+        guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !isLoading else {
+            return
+        }
+        if let conversationId {
+            sendMessage(to: conversationId)
+            return
+        }
+
+        isLoading = true
         conversationRepository.getOrCreateConversation(agentType: agentType)
             .receive(on: DispatchQueue.main)
             .sink(
                 receiveCompletion: { [weak self] completion in
                     if case .failure(let error) = completion {
-                        // Auto sign-out on 401 (expired/invalid token)
+                        self?.isLoading = false
                         if case APIError.httpError(401, _) = error {
                             AuthState.shared.signOut()
-                            return
+                        } else {
+                            self?.errorMessage = error.localizedDescription
                         }
-                        self?.errorMessage = "Failed to initialize conversation: \(error.localizedDescription)"
                     }
                 },
                 receiveValue: { [weak self] id in
                     self?.conversationId = id
+                    self?.sendMessage(to: id)
                 }
             )
             .store(in: &cancellables)
     }
-    
-    func sendMessage() {
-        guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return
-        }
-        
-        guard let conversationId = conversationId else {
-            errorMessage = "Conversation not initialized"
-            return
-        }
-        
+
+    private func sendMessage(to conversationId: UInt) {
         let userMessage = Message(role: .user, content: inputText)
         messages.append(userMessage)
         conversation.messages.append(userMessage)
@@ -257,7 +262,9 @@ class ConversationViewModel: ObservableObject {
         )
         messages.append(welcomeMessage)
         conversation.messages.append(welcomeMessage)
-        conversationRepository.saveConversation(conversation)
+        conversationRepository.deleteConversation(id: conversation.id)
+        conversationId = nil
+        (conversationRepository as? ConversationRepositoryImpl)?.resetConversation(agentType: agentType)
     }
 
     // MARK: - Title Generation

@@ -1970,7 +1970,7 @@ p {
 .research-data-details summary { cursor:pointer; color:var(--blue); }
 .research-data-details { margin-top:8px; font-size:11px; color:var(--muted); }
 .research-data-details p { margin:8px 0; overflow-wrap:anywhere; line-height:1.6; }
-.hide-eps .col-eps, .hide-report .col-report, .hide-pe .col-pe, .hide-forward .col-forward, .hide-guidance .col-guidance, .hide-earnings .col-earnings { display:none; }
+.hide-eps .col-eps, .hide-report .col-report, .hide-pe .col-pe, .hide-guidance .col-guidance, .hide-earnings .col-earnings { display:none; }
 .connection-help { padding:18px; font-size:13px; line-height:1.8; }
 .connection-help ol { padding-left:22px; }
 @media (max-width:680px) {
@@ -1984,7 +1984,7 @@ p {
  .unified-watchlist-table td:first-child::before { display:none; }
  .unified-watchlist-table small { max-width:none; }
  .research-table-controls { gap:12px; }
- .hide-eps .col-eps, .hide-report .col-report, .hide-pe .col-pe, .hide-forward .col-forward, .hide-guidance .col-guidance, .hide-earnings .col-earnings { display:none; }
+ .hide-eps .col-eps, .hide-report .col-report, .hide-pe .col-pe, .hide-guidance .col-guidance, .hide-earnings .col-earnings { display:none; }
 }
 
 .account-provider-statuses { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px; }
@@ -2032,7 +2032,8 @@ p {
 }
 
 .sec-financial-reports { margin-top: 16px; border-top: 1px solid var(--border-color, #e5e7eb); padding-top: 12px; }
-.has-report .unified-watchlist-table { min-width: 1200px; }
+.has-report .unified-watchlist-table { min-width: 1110px; }
+.has-report.has-holdings .unified-watchlist-table { min-width: 1290px; }
 .research-report-col { width: 180px; }
 .has-report .col-report { min-width: 180px; }
 .filing-cell { display: grid; grid-template-columns: 22px minmax(0, 1fr) 22px; align-items: center; min-width: 0; }
@@ -2046,7 +2047,7 @@ p {
 .report-ai-button:hover { background: #e6f0e7; color: #2f5b38; }
 .filing-period-link:focus-visible, .report-ai-button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 @media (max-width: 680px) {
- .has-report .unified-watchlist-table { min-width: 0; }
+ .has-report .unified-watchlist-table, .has-report.has-holdings .unified-watchlist-table { min-width: 0; }
  .has-report .col-report { min-width: 0; width: auto; }
  .filing-cell { grid-template-columns: 20px minmax(0, 1fr) 20px; }
  .filing-period-link { font-size: 11px; }

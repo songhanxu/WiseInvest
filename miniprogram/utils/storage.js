@@ -1,7 +1,8 @@
 const CONVERSATIONS_KEY = 'conversations';
 
 function loadConversations() {
-  return wx.getStorageSync(CONVERSATIONS_KEY) || [];
+  const stored = wx.getStorageSync(CONVERSATIONS_KEY) || [];
+  return stored.filter((item) => Array.isArray(item.messages) && item.messages.some((message) => message.role === 'user'));
 }
 
 function saveConversations(list) {
