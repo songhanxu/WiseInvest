@@ -70,7 +70,7 @@ func (a *USStockAgent) GetSystemPrompt() string {
 func (a *USStockAgent) Process(ctx context.Context, req ProcessRequest) (*ProcessResponse, error) {
 	tools := buildSkillTools(a.skillRegistry)
 
-	if len(tools) > 0 && a.llmClient.SupportsToolCalling() {
+	if len(tools) > 0 && a.llmClient.SupportsToolCalling(ctx) {
 		messages := a.buildBaseMessages(req)
 		resp, err := a.llmClient.CreateChatCompletionWithToolLoop(
 			ctx,
@@ -110,7 +110,7 @@ func (a *USStockAgent) Process(ctx context.Context, req ProcessRequest) (*Proces
 func (a *USStockAgent) ProcessStream(ctx context.Context, req ProcessRequest, callback func(string) error) error {
 	tools := buildSkillTools(a.skillRegistry)
 
-	if len(tools) > 0 && a.llmClient.SupportsToolCalling() {
+	if len(tools) > 0 && a.llmClient.SupportsToolCalling(ctx) {
 		messages := a.buildBaseMessages(req)
 		return a.llmClient.StreamChatCompletionWithToolLoop(
 			ctx,

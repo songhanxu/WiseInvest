@@ -18,6 +18,8 @@ export type SavedConversation = {
   messages: Message[];
   backendId?: number;
   kind?: "roundtable";
+  chatModel?: "deepseek-flash" | "deepseek-v4-pro";
+  reasoningEffort?: "none" | "low" | "high" | "max";
 };
 
 export function hasUserMessage(conversation: SavedConversation): boolean {

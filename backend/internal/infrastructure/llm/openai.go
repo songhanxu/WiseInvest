@@ -55,10 +55,20 @@ func NewOpenAIClient(cfg config.OpenAIConfig) *OpenAIClient {
 
 // SupportsToolCalling returns true when the configured model supports OpenAI-style function calling.
 // Models like deepseek-reasoner and o1* do not support tool use.
-func (c *OpenAIClient) SupportsToolCalling() bool {
+func (c *OpenAIClient) SupportsToolCalling(ctx ...context.Context) bool {
+	model := c.model
+	if len(ctx) > 0 {
+		selected := chatSelection(ctx[0])
+		if selected.Model != "" && selected.Effort != "none" {
+			return false
+		}
+		if selected.Model != "" {
+			model = selected.Model
+		}
+	}
 	noToolModels := []string{"deepseek-reasoner", "o1-preview", "o1-mini", "o1"}
 	for _, m := range noToolModels {
-		if strings.Contains(c.model, m) {
+		if strings.Contains(model, m) {
 			return false
 		}
 	}
@@ -216,24 +226,13 @@ func (c *OpenAIClient) CreateChatCompletion(ctx context.Context, req ChatComplet
 		messages[i] = toOpenAIMessage(msg)
 	}
 
-	model := c.model
-	if req.Model != "" {
-		model = req.Model
-	}
-	if c.SupportsThinkingControl(model) {
-		if req.ThinkingMode == "disabled" || req.ThinkingMode == "enabled" {
-			ctx = context.WithValue(ctx, thinkingModeKey{}, req.ThinkingMode)
-		}
-		if req.ReasoningEffort == "low" || req.ReasoningEffort == "high" || req.ReasoningEffort == "max" {
-			ctx = context.WithValue(ctx, reasoningEffortKey{}, req.ReasoningEffort)
-		}
-	}
+	ctx, model, maxTokens := c.requestOptions(ctx, req.Model, req.MaxTokens, req.ThinkingMode, req.ReasoningEffort)
 
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{
 		Model:       model,
 		Messages:    messages,
 		Temperature: req.Temperature,
-		MaxTokens:   req.MaxTokens,
+		MaxTokens:   maxTokens,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create chat completion: %w", err)
@@ -262,11 +261,12 @@ func (c *OpenAIClient) CreateChatCompletionStream(ctx context.Context, req ChatC
 		messages[i] = toOpenAIMessage(msg)
 	}
 
+	ctx, model, maxTokens := c.requestOptions(ctx, req.Model, req.MaxTokens, req.ThinkingMode, req.ReasoningEffort)
 	stream, err := c.client.CreateChatCompletionStream(ctx, openai.ChatCompletionRequest{
-		Model:       c.model,
+		Model:       model,
 		Messages:    messages,
 		Temperature: req.Temperature,
-		MaxTokens:   req.MaxTokens,
+		MaxTokens:   maxTokens,
 		Stream:      true,
 	})
 	if err != nil {
@@ -314,6 +314,7 @@ func (c *OpenAIClient) CreateChatCompletionWithToolLoop(
 	handler ToolCallHandler,
 	maxSteps int,
 ) (*ChatCompletionResponse, error) {
+	ctx, model, maxTokens := c.requestOptions(ctx, req.Model, req.MaxTokens, req.ThinkingMode, req.ReasoningEffort)
 	if maxSteps <= 0 {
 		maxSteps = 5
 	}
@@ -326,10 +327,10 @@ func (c *OpenAIClient) CreateChatCompletionWithToolLoop(
 
 	for step := 0; step < maxSteps; step++ {
 		apiReq := openai.ChatCompletionRequest{
-			Model:       c.model,
+			Model:       model,
 			Messages:    messages,
 			Temperature: req.Temperature,
-			MaxTokens:   req.MaxTokens,
+			MaxTokens:   maxTokens,
 		}
 		if len(openaiTools) > 0 {
 			apiReq.Tools = openaiTools
@@ -402,6 +403,7 @@ func (c *OpenAIClient) StreamChatCompletionWithToolLoop(
 	maxSteps int,
 	callback func(string) error,
 ) error {
+	ctx, model, maxTokens := c.requestOptions(ctx, req.Model, req.MaxTokens, req.ThinkingMode, req.ReasoningEffort)
 	if maxSteps <= 0 {
 		maxSteps = 5
 	}
@@ -416,10 +418,10 @@ func (c *OpenAIClient) StreamChatCompletionWithToolLoop(
 
 	for step := 0; step < maxSteps; step++ {
 		apiReq := openai.ChatCompletionRequest{
-			Model:       c.model,
+			Model:       model,
 			Messages:    messages,
 			Temperature: req.Temperature,
-			MaxTokens:   req.MaxTokens,
+			MaxTokens:   maxTokens,
 		}
 		if len(openaiTools) > 0 {
 			apiReq.Tools = openaiTools

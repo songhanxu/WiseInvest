@@ -150,3 +150,69 @@ func TestProOverrideSendsMaxReasoningOnlyOnOfficialDeepSeek(t *testing.T) {
 		t.Fatalf("Pro options leaked to other requests: %+v", bodies)
 	}
 }
+
+func TestChatSelectionControlsStreamingModelAndReasoning(t *testing.T) {
+	var sent map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"回答\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	client := NewOpenAIClient(config.OpenAIConfig{APIKey: "test-only", BaseURL: server.URL, Model: "deepseek-flash", ModelPro: "deepseek-v4-pro"})
+	client.deepSeekEndpoint = true
+	for _, bad := range []ChatSelection{{Model: "unapproved-model", Effort: "max"}, {Model: "deepseek-v4-pro", Effort: "ultra"}} {
+		if _, err := client.ValidateChatSelection(bad.Model, bad.Effort); err == nil {
+			t.Fatalf("accepted invalid chat selection: %+v", bad)
+		}
+	}
+	selection, err := client.ValidateChatSelection("deepseek-v4-pro", "max")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithChatSelection(context.Background(), selection)
+	if client.SupportsToolCalling(ctx) {
+		t.Fatal("thinking mode entered a tool loop without reasoning context support")
+	}
+	stream, err := client.CreateChatCompletionStream(ctx, ChatCompletionRequest{Messages: []ChatMessage{{Role: "user", Content: "问题"}}, MaxTokens: 4000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var answer strings.Builder
+	if err := client.StreamResponse(stream, func(chunk string) error { answer.WriteString(chunk); return nil }); err != nil || answer.String() != "回答" {
+		t.Fatalf("streaming answer failed: %q %v", answer.String(), err)
+	}
+	if string(sent["model"]) != `"deepseek-v4-pro"` || string(sent["thinking"]) != `{"type":"enabled"}` || string(sent["reasoning_effort"]) != `"max"` || string(sent["max_tokens"]) != "32768" {
+		t.Fatalf("chat selection not sent to model: %+v", sent)
+	}
+}
+
+func TestChatSelectionWithoutThinkingKeepsToolCalls(t *testing.T) {
+	var sent map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&sent); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"完成"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+	client := NewOpenAIClient(config.OpenAIConfig{APIKey: "test-only", BaseURL: server.URL, Model: "deepseek-flash", ModelPro: "deepseek-v4-pro"})
+	client.deepSeekEndpoint = true
+	selection, err := client.ValidateChatSelection("deepseek-flash", "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithChatSelection(context.Background(), selection)
+	if !client.SupportsToolCalling(ctx) {
+		t.Fatal("non-thinking selection disabled tool calls")
+	}
+	if _, err := client.CreateChatCompletionWithToolLoop(ctx, ChatCompletionRequest{Messages: []ChatMessage{{Role: "user", Content: "问题"}}, MaxTokens: 4000}, nil, nil, 1); err != nil {
+		t.Fatal(err)
+	}
+	if string(sent["model"]) != `"deepseek-flash"` || string(sent["thinking"]) != `{"type":"disabled"}` || sent["reasoning_effort"] != nil {
+		t.Fatalf("non-thinking options were not applied: %+v", sent)
+	}
+}

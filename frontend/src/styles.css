@@ -1042,6 +1042,13 @@ p {
   background: #fff;
 }
 
+.chat-compose-area { border-top: 1px solid var(--line); background: #fff; }
+.chat-model-controls { display: flex; align-items: center; gap: 10px; padding: 10px 16px 0; flex-wrap: wrap; }
+.chat-model-controls label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.chat-model-controls select { border: 1px solid var(--line-strong); border-radius: 7px; padding: 6px 9px; background: var(--panel-2); color: var(--text); font: inherit; cursor: pointer; }
+.chat-model-controls select:disabled { opacity: .55; cursor: not-allowed; }
+.chat-compose-area .composer { border-top: 0; padding-top: 10px; }
+
 .composer textarea,
 .settings-card input,
 .settings-card textarea {

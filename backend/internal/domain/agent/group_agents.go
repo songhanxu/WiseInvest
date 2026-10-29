@@ -53,7 +53,7 @@ func NewGroupPersonaAgent(agentID string, llmClient *llm.OpenAIClient, registry 
 // AgentID returns the short persona ID (e.g. "value", "trend").
 func (g *GroupPersonaAgent) AgentID() string { return g.agentID }
 
-func (g *GroupPersonaAgent) GetType() string        { return TypeGroupChat + "_" + g.agentID }
+func (g *GroupPersonaAgent) GetType() string         { return TypeGroupChat + "_" + g.agentID }
 func (g *GroupPersonaAgent) GetSystemPrompt() string { return groupPersonaSystemPrompt(g.agentID) }
 
 // Process implements Agent (non-streaming).
@@ -61,7 +61,7 @@ func (g *GroupPersonaAgent) Process(ctx context.Context, req ProcessRequest) (*P
 	tools := buildSkillTools(g.registry)
 	messages := g.buildMessages(req)
 
-	if len(tools) > 0 && g.llm.SupportsToolCalling() {
+	if len(tools) > 0 && g.llm.SupportsToolCalling(ctx) {
 		resp, err := g.llm.CreateChatCompletionWithToolLoop(
 			ctx,
 			llm.ChatCompletionRequest{Messages: messages, Temperature: 0.7, MaxTokens: 2000},
@@ -93,7 +93,7 @@ func (g *GroupPersonaAgent) ProcessStream(ctx context.Context, req ProcessReques
 	tools := buildSkillTools(g.registry)
 	messages := g.buildMessages(req)
 
-	if len(tools) > 0 && g.llm.SupportsToolCalling() {
+	if len(tools) > 0 && g.llm.SupportsToolCalling(ctx) {
 		return g.llm.StreamChatCompletionWithToolLoop(
 			ctx,
 			llm.ChatCompletionRequest{Messages: messages, Temperature: 0.7, MaxTokens: 2000},

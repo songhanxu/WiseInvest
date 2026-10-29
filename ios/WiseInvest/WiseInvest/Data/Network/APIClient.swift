@@ -225,7 +225,9 @@ class APIClient {
     /// Send chat message with streaming response
     func sendChatMessage(
         conversationId: UInt,
-        message: String
+        message: String,
+        model: String,
+        reasoningEffort: String
     ) -> AnyPublisher<StreamChunk, Error> {
         let subject = PassthroughSubject<StreamChunk, Error>()
         
@@ -245,7 +247,9 @@ class APIClient {
         // Prepare request body
         let requestBody: [String: Any] = [
             "conversation_id": conversationId,
-            "content": message
+            "content": message,
+            "model": model,
+            "reasoning_effort": reasoningEffort
         ]
         
         do {

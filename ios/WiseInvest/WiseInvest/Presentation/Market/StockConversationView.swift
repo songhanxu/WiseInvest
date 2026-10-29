@@ -166,6 +166,8 @@ struct StockConversationView: View {
     // MARK: - Input
 
     private var inputSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+        ChatSelectionBar(model: $viewModel.selectedModel, effort: $viewModel.selectedEffort, disabled: viewModel.isLoading)
         HStack(spacing: 12) {
             TextField("向慧投提问关于\(stock.name)的问题...", text: $viewModel.inputText, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -192,6 +194,7 @@ struct StockConversationView: View {
                 }
             }
             .disabled(viewModel.inputText.isEmpty || viewModel.isLoading)
+        }
         }
         .padding()
         .background(Color.primaryBackground)

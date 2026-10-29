@@ -30,11 +30,15 @@ class ConversationRepositoryImpl: ConversationRepository {
     
     func sendMessage(
         conversationId: UInt,
-        message: String
+        message: String,
+        model: String,
+        reasoningEffort: String
     ) -> AnyPublisher<StreamChunk, Error> {
         return apiClient.sendChatMessage(
             conversationId: conversationId,
-            message: message
+            message: message,
+            model: model,
+            reasoningEffort: reasoningEffort
         )
     }
     

@@ -351,6 +351,8 @@ async function streamMessage(
   token: string,
   conversationId: number,
   content: string,
+  model: string,
+  reasoningEffort: string,
   onChunk: (chunk: { type?: string; content?: string; error?: string }) => void
 ) {
   const res = await fetch(`${apiBase}/api/v1/messages/stream`, {
@@ -360,7 +362,7 @@ async function streamMessage(
       Accept: "text/event-stream",
       Authorization: `Bearer ${token}`
     },
-    body: JSON.stringify({ conversation_id: conversationId, content })
+    body: JSON.stringify({ conversation_id: conversationId, content, model, reasoning_effort: reasoningEffort })
   });
 
   if (!res.ok || !res.body) {
@@ -1734,6 +1736,8 @@ function ConversationView({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const chatModel = conversation.chatModel ?? "deepseek-flash";
+  const reasoningEffort = conversation.reasoningEffort ?? "high";
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1774,7 +1778,7 @@ function ConversationView({
       next = { ...next, backendId };
       onUpdate(next);
 
-      await streamMessage(apiBase, token, backendId, text, (chunk) => {
+      await streamMessage(apiBase, token, backendId, text, chatModel, reasoningEffort, (chunk) => {
         if (chunk.error) throw new Error(chunk.error);
         next = {
           ...next,
@@ -1833,21 +1837,39 @@ function ConversationView({
 
       {error && <div className="error-banner">{error}</div>}
 
-      <form className="composer" onSubmit={send}>
-        <textarea
-          value={input}
-          onChange={(event) => {
-            setInput(event.target.value);
-            onDraftPromptChange(event.target.value);
-          }}
-          placeholder={`向 ${market.title} 提问，例如：${promptDeck[market.id][0]}`}
-          rows={1}
-          disabled={isLoading}
-        />
-        <button disabled={!input.trim() || isLoading}>
-          {isLoading ? <Loader2 className="spin" size={22} /> : <Send size={22} />}
-        </button>
-      </form>
+      <div className="chat-compose-area">
+        <div className="chat-model-controls" aria-label="聊天模型设置">
+          <label>模型
+            <select aria-label="选择聊天模型" value={chatModel} disabled={isLoading} onChange={(event) => onUpdate({ ...conversation, chatModel: event.target.value as SavedConversation["chatModel"] })}>
+              <option value="deepseek-flash">DeepSeek Flash</option>
+              <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+            </select>
+          </label>
+          <label>思考
+            <select aria-label="选择思考强度" value={reasoningEffort} disabled={isLoading} onChange={(event) => onUpdate({ ...conversation, reasoningEffort: event.target.value as SavedConversation["reasoningEffort"] })}>
+              <option value="none">关闭</option>
+              <option value="low">低</option>
+              <option value="high">高</option>
+              <option value="max">Max</option>
+            </select>
+          </label>
+        </div>
+        <form className="composer" onSubmit={send}>
+          <textarea
+            value={input}
+            onChange={(event) => {
+              setInput(event.target.value);
+              onDraftPromptChange(event.target.value);
+            }}
+            placeholder={`向 ${market.title} 提问，例如：${promptDeck[market.id][0]}`}
+            rows={1}
+            disabled={isLoading}
+          />
+          <button disabled={!input.trim() || isLoading}>
+            {isLoading ? <Loader2 className="spin" size={22} /> : <Send size={22} />}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

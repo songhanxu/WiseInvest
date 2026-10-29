@@ -50,12 +50,20 @@ Page({
     createdAt: '',
     keyboardHeight: 0,
     windowHeight: 812,
+    modelOptions: [{ id: 'deepseek-flash', label: 'DeepSeek Flash' }, { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }],
+    effortOptions: [{ id: 'none', label: '关闭思考' }, { id: 'low', label: '低' }, { id: 'high', label: '高' }, { id: 'max', label: 'Max' }],
+    modelIndex: 0,
+    effortIndex: 2,
   },
 
   streamTask: null,
   currentStreamingId: '',
 
   async onLoad(options) {
+    const savedSelection = (wx.getStorageSync ? wx.getStorageSync('chat_selection') : null) || {};
+    const modelIndex = this.data.modelOptions.findIndex((item) => item.id === savedSelection.model);
+    const effortIndex = this.data.effortOptions.findIndex((item) => item.id === savedSelection.reasoningEffort);
+    this.setData({ modelIndex: modelIndex < 0 ? 0 : modelIndex, effortIndex: effortIndex < 0 ? 2 : effortIndex });
     const windowInfo = wx.getWindowInfo ? wx.getWindowInfo() : { statusBarHeight: 20, windowHeight: 812 };
     const windowHeight = windowInfo.windowHeight || 812;
     const marketId = options.market || 'a_share';
@@ -126,6 +134,24 @@ Page({
     this.setData({ inputText: e.detail.value || '' });
   },
 
+  onModelChange(e) {
+    const modelIndex = Number(e.detail.value);
+    this.setData({ modelIndex }, () => this.saveChatSelection());
+  },
+
+  onEffortChange(e) {
+    const effortIndex = Number(e.detail.value);
+    this.setData({ effortIndex }, () => this.saveChatSelection());
+  },
+
+  chatSelection() {
+    return { model: this.data.modelOptions[this.data.modelIndex].id, reasoningEffort: this.data.effortOptions[this.data.effortIndex].id };
+  },
+
+  saveChatSelection() {
+    if (wx.setStorageSync) wx.setStorageSync('chat_selection', this.chatSelection());
+  },
+
   onKeyboardHeightChange(e) {
     const reportedHeight = Number(e && e.detail && e.detail.height);
     const rawHeight = Number.isFinite(reportedHeight) ? Math.max(0, reportedHeight) : 0;
@@ -185,6 +211,7 @@ Page({
     });
 
     this.streamTask = sendStreamMessage(backendConversationId, content, {
+      ...this.chatSelection(),
       onChunk: (chunk) => this.handleStreamChunk(streamingId, chunk),
       onDone: () => this.finishStreaming(streamingId),
       onError: (error) => this.failStreaming(streamingId, error),
@@ -277,6 +304,7 @@ Page({
       this.scrollToBottom();
     });
     this.streamTask = sendStreamMessage(backendConversationId, lastUser.content, {
+      ...this.chatSelection(),
       onChunk: (chunk) => this.handleStreamChunk(streamingId, chunk),
       onDone: () => this.finishStreaming(streamingId),
       onError: (error) => this.failStreaming(streamingId, error),

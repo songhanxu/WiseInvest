@@ -86,6 +86,10 @@ func (f *Factory) CreateGroupChatAgents(participants []string) []*GroupPersonaAg
 	return agents
 }
 
+func (f *Factory) ValidateChatSelection(model, effort string) (llm.ChatSelection, error) {
+	return f.llmClient.ValidateChatSelection(model, effort)
+}
+
 // GetAvailableAgents returns the market modules available to users
 func (f *Factory) GetAvailableAgents() []AgentInfo {
 	return []AgentInfo{

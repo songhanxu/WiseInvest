@@ -18,6 +18,8 @@ function sendStreamMessage(conversationId, content, handlers = {}) {
     data: {
       conversation_id: conversationId,
       content,
+      model: handlers.model,
+      reasoning_effort: handlers.reasoningEffort,
     },
     onChunk: handlers.onChunk,
     onDone: handlers.onDone,

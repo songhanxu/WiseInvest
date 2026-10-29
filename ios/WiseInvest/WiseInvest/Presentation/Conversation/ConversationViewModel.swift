@@ -7,6 +7,12 @@ class ConversationViewModel: ObservableObject {
     @Published var inputText: String = ""
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
+    @Published var selectedModel: String = "deepseek-flash" {
+        didSet { UserDefaults.standard.set(selectedModel, forKey: "chat.model") }
+    }
+    @Published var selectedEffort: String = "high" {
+        didSet { UserDefaults.standard.set(selectedEffort, forKey: "chat.reasoningEffort") }
+    }
 
     private let agentType: AgentType
     private let market: Market?
@@ -30,6 +36,10 @@ class ConversationViewModel: ObservableObject {
         self.market = market
         self.conversationRepository = conversationRepository
         self.stockContext = stockContext
+        let savedModel = UserDefaults.standard.string(forKey: "chat.model") ?? "deepseek-flash"
+        selectedModel = ["deepseek-flash", "deepseek-v4-pro"].contains(savedModel) ? savedModel : "deepseek-flash"
+        let savedEffort = UserDefaults.standard.string(forKey: "chat.reasoningEffort") ?? "high"
+        selectedEffort = ["none", "low", "high", "max"].contains(savedEffort) ? savedEffort : "high"
 
         if let existing = existingConversation, !existing.messages.isEmpty {
             // Restore saved conversation messages
@@ -120,7 +130,9 @@ class ConversationViewModel: ObservableObject {
         // Send message to backend
         conversationRepository.sendMessage(
             conversationId: conversationId,
-            message: messageText
+            message: messageText,
+            model: selectedModel,
+            reasoningEffort: selectedEffort
         )
         .receive(on: DispatchQueue.main)
         .sink(
@@ -207,7 +219,7 @@ class ConversationViewModel: ObservableObject {
         let streamingMessage = Message(id: assistantMessageId, role: .assistant, content: "", isStreaming: true)
         messages.append(streamingMessage)
 
-        conversationRepository.sendMessage(conversationId: conversationId, message: lastUserContent)
+        conversationRepository.sendMessage(conversationId: conversationId, message: lastUserContent, model: selectedModel, reasoningEffort: selectedEffort)
             .receive(on: DispatchQueue.main)
             .sink(
                 receiveCompletion: { [weak self] completion in

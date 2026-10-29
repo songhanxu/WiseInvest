@@ -140,6 +140,8 @@ struct ConversationView: View {
     }
     
     private var inputSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+        ChatSelectionBar(model: $viewModel.selectedModel, effort: $viewModel.selectedEffort, disabled: viewModel.isLoading)
         HStack(spacing: 12) {
             TextField("Type your message...", text: $viewModel.inputText, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -167,6 +169,7 @@ struct ConversationView: View {
                 }
             }
             .disabled(viewModel.inputText.isEmpty || viewModel.isLoading)
+        }
         }
         .padding()
         .background(Color.primaryBackground)
@@ -198,5 +201,30 @@ struct ConversationView: View {
         .background(Color.red.opacity(0.2))
         .cornerRadius(8)
         .padding(.horizontal)
+    }
+}
+
+struct ChatSelectionBar: View {
+    @Binding var model: String
+    @Binding var effort: String
+    let disabled: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Picker("模型", selection: $model) {
+                Text("DeepSeek Flash").tag("deepseek-flash")
+                Text("DeepSeek V4 Pro").tag("deepseek-v4-pro")
+            }
+            Picker("思考", selection: $effort) {
+                Text("关闭").tag("none")
+                Text("低").tag("low")
+                Text("高").tag("high")
+                Text("Max").tag("max")
+            }
+            Spacer(minLength: 0)
+        }
+        .pickerStyle(.menu)
+        .font(.system(size: 12))
+        .disabled(disabled)
     }
 }

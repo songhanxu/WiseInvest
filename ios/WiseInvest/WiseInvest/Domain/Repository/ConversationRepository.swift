@@ -36,7 +36,9 @@ protocol ConversationRepository {
     /// Send a message and receive streaming response
     func sendMessage(
         conversationId: UInt,
-        message: String
+        message: String,
+        model: String,
+        reasoningEffort: String
     ) -> AnyPublisher<StreamChunk, Error>
     
     /// Get conversation history
@@ -47,4 +49,10 @@ protocol ConversationRepository {
     
     /// Delete conversation
     func deleteConversation(id: String)
+}
+
+extension ConversationRepository {
+    func sendMessage(conversationId: UInt, message: String) -> AnyPublisher<StreamChunk, Error> {
+        sendMessage(conversationId: conversationId, message: message, model: "", reasoningEffort: "")
+    }
 }

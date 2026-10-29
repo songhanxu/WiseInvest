@@ -120,8 +120,10 @@ func (h *ConversationHandler) DeleteConversation(c *gin.Context) {
 
 // SendMessageRequest represents a request to send a message
 type SendMessageRequest struct {
-	ConversationID uint   `json:"conversation_id" binding:"required"`
-	Content        string `json:"content" binding:"required"`
+	ConversationID  uint   `json:"conversation_id" binding:"required"`
+	Content         string `json:"content" binding:"required"`
+	Model           string `json:"model"`
+	ReasoningEffort string `json:"reasoning_effort"`
 }
 
 // SendMessage handles POST /api/v1/messages
@@ -131,14 +133,20 @@ func (h *ConversationHandler) SendMessage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if _, err := h.service.ValidateChatSelection(req.Model, req.ReasoningEffort); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	if !checkConversationOwner(c, h.service, req.ConversationID) {
 		return
 	}
 	resp, err := h.service.SendMessage(c.Request.Context(), service.SendMessageRequest{
-		ConversationID: req.ConversationID,
-		Content:        req.Content,
-		Stream:         false,
+		ConversationID:  req.ConversationID,
+		Content:         req.Content,
+		Stream:          false,
+		Model:           req.Model,
+		ReasoningEffort: req.ReasoningEffort,
 	})
 	if err != nil {
 		h.logger.WithField("error", err).Error("Failed to send message")
@@ -156,6 +164,10 @@ func (h *ConversationHandler) SendMessage(c *gin.Context) {
 func (h *ConversationHandler) SendMessageStream(c *gin.Context) {
 	var req SendMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if _, err := h.service.ValidateChatSelection(req.Model, req.ReasoningEffort); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -228,9 +240,11 @@ func (h *ConversationHandler) SendMessageStream(c *gin.Context) {
 
 	// Send message with streaming
 	_, err := h.service.SendMessageStream(c.Request.Context(), service.SendMessageRequest{
-		ConversationID: req.ConversationID,
-		Content:        req.Content,
-		Stream:         true,
+		ConversationID:  req.ConversationID,
+		Content:         req.Content,
+		Stream:          true,
+		Model:           req.Model,
+		ReasoningEffort: req.ReasoningEffort,
 	}, callback)
 
 	close(heartbeatDone)

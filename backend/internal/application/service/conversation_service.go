@@ -72,9 +72,15 @@ func (s *ConversationService) CreateConversation(ctx context.Context, req Create
 
 // SendMessageRequest represents a request to send a message
 type SendMessageRequest struct {
-	ConversationID uint
-	Content        string
-	Stream         bool
+	ConversationID  uint
+	Content         string
+	Stream          bool
+	Model           string
+	ReasoningEffort string
+}
+
+func (s *ConversationService) ValidateChatSelection(model, effort string) (llm.ChatSelection, error) {
+	return s.agentFactory.ValidateChatSelection(model, effort)
 }
 
 // SendMessageResponse represents a response to sending a message
@@ -85,6 +91,11 @@ type SendMessageResponse struct {
 
 // SendMessage sends a message in a conversation
 func (s *ConversationService) SendMessage(ctx context.Context, req SendMessageRequest) (*SendMessageResponse, error) {
+	selection, err := s.ValidateChatSelection(req.Model, req.ReasoningEffort)
+	if err != nil {
+		return nil, err
+	}
+	ctx = llm.WithChatSelection(ctx, selection)
 	// Get conversation
 	conversation, err := s.conversationRepo.GetByID(ctx, req.ConversationID)
 	if err != nil {
@@ -209,6 +220,11 @@ type StreamMessageCallback func(content string) error
 
 // SendMessageStream sends a message with streaming response
 func (s *ConversationService) SendMessageStream(ctx context.Context, req SendMessageRequest, callback StreamMessageCallback) (*model.Message, error) {
+	selection, err := s.ValidateChatSelection(req.Model, req.ReasoningEffort)
+	if err != nil {
+		return nil, err
+	}
+	ctx = llm.WithChatSelection(ctx, selection)
 	// Get conversation
 	conversation, err := s.conversationRepo.GetByID(ctx, req.ConversationID)
 	if err != nil {

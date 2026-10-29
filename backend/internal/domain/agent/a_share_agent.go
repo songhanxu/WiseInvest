@@ -96,7 +96,7 @@ func (a *AShareAgent) GetSystemPrompt() string {
 func (a *AShareAgent) Process(ctx context.Context, req ProcessRequest) (*ProcessResponse, error) {
 	tools := buildSkillTools(a.skillRegistry)
 
-	if len(tools) > 0 && a.llmClient.SupportsToolCalling() {
+	if len(tools) > 0 && a.llmClient.SupportsToolCalling(ctx) {
 		// Path A: LLM-driven tool calling (requires a tool-capable model like deepseek-chat)
 		messages := a.buildBaseMessages(req)
 		resp, err := a.llmClient.CreateChatCompletionWithToolLoop(
@@ -148,7 +148,7 @@ func (a *AShareAgent) Process(ctx context.Context, req ProcessRequest) (*Process
 func (a *AShareAgent) ProcessStream(ctx context.Context, req ProcessRequest, callback func(string) error) error {
 	tools := buildSkillTools(a.skillRegistry)
 
-	if len(tools) > 0 && a.llmClient.SupportsToolCalling() {
+	if len(tools) > 0 && a.llmClient.SupportsToolCalling(ctx) {
 		// Path A: tool calling loop, then stream final answer
 		messages := a.buildBaseMessages(req)
 		return a.llmClient.StreamChatCompletionWithToolLoop(
@@ -577,7 +577,7 @@ var commonStockDict = map[string]string{
 	"海康威视": "sz002415", "海康": "sz002415",
 	"大华股份": "sz002236",
 	"顺丰控股": "sz002352", "顺丰": "sz002352",
-	"京东方A":  "sz000725", "京东方": "sz000725",
+	"京东方A": "sz000725", "京东方": "sz000725",
 	"长江电力": "sh600900",
 	"中国联通": "sh600050",
 	"中国电信": "sh601728",

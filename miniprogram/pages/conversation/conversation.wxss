@@ -11,6 +11,8 @@
 .conversation-note { margin-bottom: 32rpx; color: #87937b; font-size: 20rpx; text-align: center; }
 .bottom-anchor { height: 8rpx; }
 .error-banner { flex-shrink: 0; margin: 8rpx 28rpx; padding: 16rpx 20rpx; border-radius: 12rpx; background: #f8edeb; color: #a15d4e; font-size: 24rpx; line-height: 1.6; }
+.chat-selection { display: flex; gap: 12rpx; padding: 14rpx 24rpx 0; background: #fff; }
+.selection-pill { border: 1rpx solid #dce5d6; border-radius: 12rpx; padding: 10rpx 16rpx; color: #48623f; background: #f4f7f0; font-size: 22rpx; }
 .input-wrap { flex-shrink: 0; display: flex; align-items: flex-end; gap: 14rpx; padding: 16rpx 24rpx 20rpx; padding-bottom: calc(20rpx + env(safe-area-inset-bottom)); background: #fff; }
 .keyboard-open .input-wrap { padding-bottom: 16rpx; }
 .input-box { flex: 1; min-width: 0; }
