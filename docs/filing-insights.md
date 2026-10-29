@@ -10,17 +10,20 @@
 SEC_FUNDAMENTALS_ENABLED=true
 SEC_USER_AGENT=WiseInvest your-contact@example.com
 OPENAI_API_KEY=your-model-key
-OPENAI_BASE_URL=https://your-openai-compatible-endpoint/v1
-OPENAI_MODEL=your-model-name
-FILING_INSIGHT_MAX_TOKENS=8192
-FILING_INSIGHT_RETRY_MAX_TOKENS=16384
-FILING_INSIGHT_TIMEOUT=180s
-FILING_INSIGHT_THINKING=auto
+OPENAI_BASE_URL=https://api.deepseek.com/v1
+OPENAI_MODEL=deepseek-flash
+OPENAI_MODEL_PRO=deepseek-v4-pro
+# 可选：若想覆盖 Pro 默认值，再设置以下三项
+# FILING_INSIGHT_MAX_TOKENS=32768
+# FILING_INSIGHT_RETRY_MAX_TOKENS=65536
+# FILING_INSIGHT_TIMEOUT=10m
 ```
 
 `SEC_USER_AGENT` 必须填写实际项目名和联系邮箱。模型密钥只放在后端 `backend/.env.production` 或服务器环境变量里，绝不放进前端。`docker-compose.yml` 已通过 `env_file` 读取该文件。使用官方 DeepSeek API 地址和有效模型密钥时，新闻搜索优先调用 DeepSeek Search；可继续配置 `SEARCH_PROVIDER=serper` / `brave` 和 `SEARCH_API_KEY` 作为失败或无结果时的备选。其他模型服务商仍使用原来的搜索配置。
 
-财报解读只在模型返回非空正文且 `finish_reason=stop` 时标记成功。若首次返回 `length`，会用同一份资料和更紧凑的输出要求重试一次；第二次仍截断则记为失败，绝不保存截断内容。上述令牌数是请求上限，应按实际模型支持范围调整；`FILING_INSIGHT_RETRY_MAX_TOKENS` 不得小于首次上限。`FILING_INSIGHT_TIMEOUT` 是两次尝试共享的总时限。`FILING_INSIGHT_THINKING=auto` 对官方 DeepSeek V4/Flash 的这类财报解读请求关闭思考模式，对其他模型不增加 DeepSeek 专用参数；普通聊天不受此设置影响。
+财报解读只在模型返回非空正文且 `finish_reason=stop` 时标记成功。若首次返回 `length`，会用同一份资料和更紧凑的输出要求重试一次；第二次仍截断则记为失败，绝不保存截断内容。设置 `OPENAI_MODEL_PRO=deepseek-v4-pro` 且使用官方 DeepSeek 地址时，财报解读单独调用 Pro 模型，发送 `thinking.enabled` 和 `reasoning_effort=max`；普通聊天继续使用 `OPENAI_MODEL`。此时未显式配置的财报请求上限为 32768 / 65536 token，共享超时 10 分钟；已有的 `FILING_INSIGHT_*` 配置仍会覆盖这些默认值。较高的思考强度和上限可能增加耗时及费用。没有配置 Pro 模型时，仍使用 `OPENAI_MODEL` 和原有的 8192 / 16384 token、180 秒默认值；`FILING_INSIGHT_THINKING=auto` 对官方 DeepSeek V4/Flash 的财报请求关闭思考模式。
+
+切换到 Pro 后，当天由旧模型生成的解读会被视为过期，并在下一次进入自选或实体账户时重新生成。若服务器配置文件已有 `FILING_INSIGHT_MAX_TOKENS=8192`、`FILING_INSIGHT_RETRY_MAX_TOKENS=16384` 或 `FILING_INSIGHT_TIMEOUT=180s`，应删除这些行或改为所需的 Pro 上限；否则它们会继续覆盖新的默认值。
 
 生成时先从 SEC Submissions 确认最新 10-K、10-Q、20-F 或 40-F，再取该申报的 Company Facts、尝试读取 SEC 原文，并对照腾讯美股与标普 500 日线。SEC 原文无法读取时，解读会标注正文缺失，避免把结构化摘要写成完整财报。历史行情若不覆盖财报提交前一日，不能计算财报后累计涨跌；新闻搜索结果只作为可能原因的线索。AI 被要求区分事实、推断和不确定性，比较同口径期间，给出未来情景及有条件的买入、持有、减仓或卖出倾向。解读是研究意见，生成后行情与公告会变化。
 

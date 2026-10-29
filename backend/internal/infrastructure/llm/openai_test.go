@@ -117,3 +117,36 @@ func TestThinkingControlOnlySupportsKnownOfficialModels(t *testing.T) {
 		}
 	}
 }
+
+func TestProOverrideSendsMaxReasoningOnlyOnOfficialDeepSeek(t *testing.T) {
+	var bodies []map[string]json.RawMessage
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"解读"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+	client := NewOpenAIClient(config.OpenAIConfig{APIKey: "test-only", BaseURL: server.URL, Model: "deepseek-flash", ModelPro: "deepseek-v4-pro"})
+	client.deepSeekEndpoint = true
+	request := ChatCompletionRequest{Model: client.ProModel(), Messages: []ChatMessage{{Role: "user", Content: "财报"}}, ThinkingMode: "enabled", ReasoningEffort: "max", MaxTokens: 32768}
+	if _, err := client.CreateChatCompletion(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.CreateChatCompletion(context.Background(), ChatCompletionRequest{Messages: []ChatMessage{{Role: "user", Content: "普通聊天"}}}); err != nil {
+		t.Fatal(err)
+	}
+	client.deepSeekEndpoint = false
+	if _, err := client.CreateChatCompletion(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 3 || string(bodies[0]["model"]) != `"deepseek-v4-pro"` || string(bodies[0]["reasoning_effort"]) != `"max"` || string(bodies[0]["thinking"]) != `{"type":"enabled"}` || string(bodies[0]["max_tokens"]) != "32768" {
+		t.Fatalf("Pro request options missing: %+v", bodies)
+	}
+	if string(bodies[1]["model"]) != `"deepseek-flash"` || bodies[1]["reasoning_effort"] != nil || bodies[1]["thinking"] != nil || bodies[2]["reasoning_effort"] != nil || bodies[2]["thinking"] != nil {
+		t.Fatalf("Pro options leaked to other requests: %+v", bodies)
+	}
+}

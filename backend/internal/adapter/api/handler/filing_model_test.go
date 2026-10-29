@@ -119,6 +119,31 @@ func TestFilingCanceledJobDoesNotCallModel(t *testing.T) {
 	}
 }
 
+func TestFilingUsesProModelWithMaxThinking(t *testing.T) {
+	h := &StockHandler{llmClient: llm.NewOpenAIClient(config.OpenAIConfig{BaseURL: "https://api.deepseek.com/v1", Model: "deepseek-flash", ModelPro: "deepseek-v4-pro"})}
+	model, thinking, effort := h.filingModelOptions(config.DefaultFilingInsightConfig())
+	if model != "deepseek-v4-pro" || thinking != "enabled" || effort != "max" {
+		t.Fatalf("wrong Pro filing options: model=%q thinking=%q effort=%q", model, thinking, effort)
+	}
+	var sentModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Error(err)
+		}
+		sentModel = req.Model
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"完整解读"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+	h.llmClient = llm.NewOpenAIClient(config.OpenAIConfig{APIKey: "test-only", BaseURL: server.URL, Model: "deepseek-flash", ModelPro: "deepseek-v4-pro"})
+	if _, err := h.requestFilingInsight(context.Background(), "TEST", []byte(`{}`)); err != nil || sentModel != "deepseek-v4-pro" {
+		t.Fatalf("filing model override was not sent: model=%q err=%v", sentModel, err)
+	}
+}
+
 type filingTestTransport func(*http.Request) (*http.Response, error)
 
 func (f filingTestTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

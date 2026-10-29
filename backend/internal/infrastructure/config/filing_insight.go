@@ -20,6 +20,11 @@ func DefaultFilingInsightConfig() FilingInsightConfig {
 
 func loadFilingInsightConfig() (FilingInsightConfig, error) {
 	cfg := DefaultFilingInsightConfig()
+	if strings.EqualFold(strings.TrimSpace(getEnv("OPENAI_MODEL_PRO", "")), "deepseek-v4-pro") {
+		cfg.MaxTokens = 32768
+		cfg.RetryMaxTokens = 65536
+		cfg.Timeout = 10 * time.Minute
+	}
 	for _, item := range []struct {
 		name  string
 		value *int

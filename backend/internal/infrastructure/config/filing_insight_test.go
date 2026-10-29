@@ -8,8 +8,24 @@ import (
 
 func clearFilingEnvironment(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"FILING_INSIGHT_MAX_TOKENS", "FILING_INSIGHT_RETRY_MAX_TOKENS", "FILING_INSIGHT_TIMEOUT", "FILING_INSIGHT_THINKING"} {
+	for _, key := range []string{"OPENAI_MODEL_PRO", "FILING_INSIGHT_MAX_TOKENS", "FILING_INSIGHT_RETRY_MAX_TOKENS", "FILING_INSIGHT_TIMEOUT", "FILING_INSIGHT_THINKING"} {
 		t.Setenv(key, "")
+	}
+}
+
+func TestProFilingDefaultsAndExplicitBudget(t *testing.T) {
+	clearFilingEnvironment(t)
+	t.Setenv("OPENAI_MODEL_PRO", "deepseek-v4-pro")
+	cfg, err := Load()
+	if err != nil || cfg.OpenAI.ModelPro != "deepseek-v4-pro" || cfg.FilingInsight.MaxTokens != 32768 || cfg.FilingInsight.RetryMaxTokens != 65536 || cfg.FilingInsight.Timeout != 10*time.Minute {
+		t.Fatalf("wrong Pro defaults: %+v %v", cfg, err)
+	}
+	t.Setenv("FILING_INSIGHT_MAX_TOKENS", "4096")
+	t.Setenv("FILING_INSIGHT_RETRY_MAX_TOKENS", "8192")
+	t.Setenv("FILING_INSIGHT_TIMEOUT", "4m")
+	cfg, err = Load()
+	if err != nil || cfg.FilingInsight.MaxTokens != 4096 || cfg.FilingInsight.RetryMaxTokens != 8192 || cfg.FilingInsight.Timeout != 4*time.Minute {
+		t.Fatalf("explicit Pro budgets ignored: %+v %v", cfg, err)
 	}
 }
 

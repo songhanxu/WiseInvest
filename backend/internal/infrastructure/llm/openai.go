@@ -16,6 +16,7 @@ import (
 type OpenAIClient struct {
 	client           *openai.Client
 	model            string
+	proModel         string
 	deepSeekEndpoint bool
 }
 
@@ -47,6 +48,7 @@ func NewOpenAIClient(cfg config.OpenAIConfig) *OpenAIClient {
 	return &OpenAIClient{
 		client:           openai.NewClientWithConfig(clientConfig),
 		model:            cfg.Model,
+		proModel:         cfg.ModelPro,
 		deepSeekEndpoint: endpoint != nil && strings.EqualFold(endpoint.Hostname(), "api.deepseek.com"),
 	}
 }
@@ -78,12 +80,13 @@ type ChatMessage struct {
 
 // ChatCompletionRequest represents a chat completion request
 type ChatCompletionRequest struct {
-	Messages     []ChatMessage
-	Temperature  float32
-	MaxTokens    int
-	Stream       bool
-	Model        string // Optional: override the default model for this request
-	ThinkingMode string // enabled/disabled; only applied to supported official DeepSeek models.
+	Messages        []ChatMessage
+	Temperature     float32
+	MaxTokens       int
+	Stream          bool
+	Model           string // Optional: override the default model for this request
+	ThinkingMode    string // enabled/disabled; only applied to supported official DeepSeek models.
+	ReasoningEffort string // low/high/max; only applied to supported official DeepSeek models.
 }
 
 // ChatCompletionResponse represents a chat completion response
@@ -217,8 +220,13 @@ func (c *OpenAIClient) CreateChatCompletion(ctx context.Context, req ChatComplet
 	if req.Model != "" {
 		model = req.Model
 	}
-	if (req.ThinkingMode == "disabled" || req.ThinkingMode == "enabled") && req.Model == "" && c.SupportsThinkingControl() {
-		ctx = context.WithValue(ctx, thinkingModeKey{}, req.ThinkingMode)
+	if c.SupportsThinkingControl(model) {
+		if req.ThinkingMode == "disabled" || req.ThinkingMode == "enabled" {
+			ctx = context.WithValue(ctx, thinkingModeKey{}, req.ThinkingMode)
+		}
+		if req.ReasoningEffort == "low" || req.ReasoningEffort == "high" || req.ReasoningEffort == "max" {
+			ctx = context.WithValue(ctx, reasoningEffortKey{}, req.ReasoningEffort)
+		}
 	}
 
 	resp, err := c.client.CreateChatCompletion(ctx, openai.ChatCompletionRequest{

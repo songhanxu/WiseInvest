@@ -67,6 +67,22 @@ func TestFilingInsightsAreScopedToOwnedUSWatchlistAndDay(t *testing.T) {
 	}
 }
 
+func TestFilingInsightRegeneratesAfterProModelChange(t *testing.T) {
+	h := &StockHandler{insights: make(map[string]FilingInsight), llmClient: llm.NewOpenAIClient(config.OpenAIConfig{ModelPro: "deepseek-v4-pro"})}
+	day := "2026-10-29"
+	h.insights[insightKey(7, day, "AAPL")] = FilingInsight{Code: "AAPL", Day: day, Status: "ready", Content: "旧模型解读"}
+	if row, err := h.insightStatus(context.Background(), 7, day, "AAPL"); err != nil || row.Status != "unavailable" {
+		t.Fatalf("old model result stayed visible: %+v %v", row, err)
+	}
+	if claimed, err := h.claimInsight(context.Background(), 7, day, "AAPL"); err != nil || !claimed {
+		t.Fatalf("Pro model refresh was not claimed: %v %v", claimed, err)
+	}
+	h.saveInsight(FilingInsight{Code: "AAPL", Day: day, Model: "deepseek-v4-pro", Status: "ready", Content: "新模型解读"}, 7)
+	if row, err := h.insightStatus(context.Background(), 7, day, "AAPL"); err != nil || row.Content != "新模型解读" {
+		t.Fatalf("Pro model result was not visible: %+v %v", row, err)
+	}
+}
+
 func TestFilingInsightRefreshRejectsUnownedSymbol(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	repo := &alertWatchlistRepo{items: map[uint][]model.WatchlistItem{7: {{Market: "us_stock", StockCode: "AAPL"}}, 8: {{Market: "us_stock", StockCode: "NVDA"}}}}

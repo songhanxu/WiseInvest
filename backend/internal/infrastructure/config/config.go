@@ -86,9 +86,10 @@ type RedisConfig struct {
 
 // OpenAIConfig holds OpenAI configuration
 type OpenAIConfig struct {
-	APIKey  string
-	Model   string
-	BaseURL string
+	APIKey   string
+	Model    string
+	ModelPro string
+	BaseURL  string
 }
 
 // JWTConfig holds JWT configuration
@@ -169,9 +170,10 @@ func Load() (*Config, error) {
 			DB:       redisDB,
 		},
 		OpenAI: OpenAIConfig{
-			APIKey:  getEnv("OPENAI_API_KEY", ""),
-			Model:   getEnv("OPENAI_MODEL", "gpt-4-turbo-preview"),
-			BaseURL: getEnv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+			APIKey:   getEnv("OPENAI_API_KEY", ""),
+			Model:    getEnv("OPENAI_MODEL", "gpt-4-turbo-preview"),
+			ModelPro: getEnv("OPENAI_MODEL_PRO", ""),
+			BaseURL:  getEnv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
 		},
 		Search: SearchConfig{
 			Provider: getEnv("SEARCH_PROVIDER", ""),
