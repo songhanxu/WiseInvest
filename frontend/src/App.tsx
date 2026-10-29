@@ -1737,7 +1737,7 @@ function ConversationView({
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const chatModel = conversation.chatModel ?? "deepseek-flash";
-  const reasoningEffort = conversation.reasoningEffort ?? "high";
+  const reasoningEffort = conversation.reasoningEffort ?? "none";
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });

@@ -43,7 +43,7 @@ func (c *OpenAIClient) ValidateChatSelection(model, effort string) (ChatSelectio
 		return ChatSelection{}, fmt.Errorf("unsupported chat model")
 	}
 	if effort == "" {
-		effort = "high"
+		effort = "none"
 	}
 	switch effort {
 	case "none", "low", "high", "max":

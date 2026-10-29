@@ -10,7 +10,7 @@ class ConversationViewModel: ObservableObject {
     @Published var selectedModel: String = "deepseek-flash" {
         didSet { UserDefaults.standard.set(selectedModel, forKey: "chat.model") }
     }
-    @Published var selectedEffort: String = "high" {
+    @Published var selectedEffort: String = "none" {
         didSet { UserDefaults.standard.set(selectedEffort, forKey: "chat.reasoningEffort") }
     }
 
@@ -38,8 +38,8 @@ class ConversationViewModel: ObservableObject {
         self.stockContext = stockContext
         let savedModel = UserDefaults.standard.string(forKey: "chat.model") ?? "deepseek-flash"
         selectedModel = ["deepseek-flash", "deepseek-v4-pro"].contains(savedModel) ? savedModel : "deepseek-flash"
-        let savedEffort = UserDefaults.standard.string(forKey: "chat.reasoningEffort") ?? "high"
-        selectedEffort = ["none", "low", "high", "max"].contains(savedEffort) ? savedEffort : "high"
+        let savedEffort = UserDefaults.standard.string(forKey: "chat.reasoningEffort") ?? "none"
+        selectedEffort = ["none", "low", "high", "max"].contains(savedEffort) ? savedEffort : "none"
 
         if let existing = existingConversation, !existing.messages.isEmpty {
             // Restore saved conversation messages

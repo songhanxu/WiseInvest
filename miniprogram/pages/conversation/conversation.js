@@ -53,7 +53,7 @@ Page({
     modelOptions: [{ id: 'deepseek-flash', label: 'DeepSeek Flash' }, { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' }],
     effortOptions: [{ id: 'none', label: '关闭思考' }, { id: 'low', label: '低' }, { id: 'high', label: '高' }, { id: 'max', label: 'Max' }],
     modelIndex: 0,
-    effortIndex: 2,
+    effortIndex: 0,
   },
 
   streamTask: null,
@@ -63,7 +63,7 @@ Page({
     const savedSelection = (wx.getStorageSync ? wx.getStorageSync('chat_selection') : null) || {};
     const modelIndex = this.data.modelOptions.findIndex((item) => item.id === savedSelection.model);
     const effortIndex = this.data.effortOptions.findIndex((item) => item.id === savedSelection.reasoningEffort);
-    this.setData({ modelIndex: modelIndex < 0 ? 0 : modelIndex, effortIndex: effortIndex < 0 ? 2 : effortIndex });
+    this.setData({ modelIndex: modelIndex < 0 ? 0 : modelIndex, effortIndex: effortIndex < 0 ? 0 : effortIndex });
     const windowInfo = wx.getWindowInfo ? wx.getWindowInfo() : { statusBarHeight: 20, windowHeight: 812 };
     const windowHeight = windowInfo.windowHeight || 812;
     const marketId = options.market || 'a_share';
