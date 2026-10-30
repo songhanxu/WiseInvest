@@ -226,6 +226,7 @@ private struct ResearchInsightText: View {
                         .font(.body)
                         .lineSpacing(4)
                         .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 6)
                 case .heading:
                     Text(LocalizedStringKey(block.text))
                         .font(.subheadline.weight(.semibold))
