@@ -1155,7 +1155,7 @@ struct ComprehensiveAnalysisView: View {
                         }
 
                         Rectangle()
-                            .fill(Color.white.opacity(0.08))
+                            .fill(Color.textPrimary.opacity(0.08))
                             .frame(height: 1)
 
                         // AI Detailed Analysis (Markdown rendered)
@@ -1173,12 +1173,12 @@ struct ComprehensiveAnalysisView: View {
                                 VStack(alignment: .leading, spacing: 10) {
                                     ForEach(0..<10, id: \.self) { _ in
                                         RoundedRectangle(cornerRadius: 4)
-                                            .fill(Color.white.opacity(0.06))
+                                            .fill(Color.skeleton)
                                             .frame(height: 14)
                                             .shimmer()
                                     }
                                     RoundedRectangle(cornerRadius: 4)
-                                        .fill(Color.white.opacity(0.06))
+                                        .fill(Color.skeleton)
                                         .frame(width: 180, height: 14)
                                         .shimmer()
                                 }
@@ -1518,7 +1518,7 @@ private struct AnalysisMarkdownLine: View {
                 .padding(.vertical, 2)
             } else if t.hasPrefix("---") || t.hasPrefix("***") {
                 Rectangle()
-                    .fill(Color.white.opacity(0.1))
+                    .fill(Color.textPrimary.opacity(0.1))
                     .frame(height: 1)
                     .padding(.vertical, 6)
             } else {
@@ -1698,7 +1698,7 @@ struct NewsDetailView: View {
 
                         // Divider
                         Rectangle()
-                            .fill(Color.white.opacity(0.08))
+                            .fill(Color.textPrimary.opacity(0.08))
                             .frame(height: 1)
 
                         // AI Summary section
@@ -1718,12 +1718,12 @@ struct NewsDetailView: View {
                                     // Skeleton for AI Summary text (3 lines)
                                     ForEach(0..<3, id: \.self) { _ in
                                         RoundedRectangle(cornerRadius: 4)
-                                            .fill(Color.white.opacity(0.06))
+                                            .fill(Color.skeleton)
                                             .frame(height: 14)
                                             .shimmer()
                                     }
                                     RoundedRectangle(cornerRadius: 4)
-                                        .fill(Color.white.opacity(0.06))
+                                        .fill(Color.skeleton)
                                         .frame(width: 180, height: 14)
                                         .shimmer()
 
@@ -1736,11 +1736,11 @@ struct NewsDetailView: View {
                                     // Skeleton for 深度分析 header
                                     HStack(spacing: 6) {
                                         RoundedRectangle(cornerRadius: 3)
-                                            .fill(Color.white.opacity(0.06))
+                                            .fill(Color.skeleton)
                                             .frame(width: 14, height: 14)
                                             .shimmer()
                                         RoundedRectangle(cornerRadius: 3)
-                                            .fill(Color.white.opacity(0.06))
+                                            .fill(Color.skeleton)
                                             .frame(width: 64, height: 14)
                                             .shimmer()
                                     }
@@ -1748,12 +1748,12 @@ struct NewsDetailView: View {
                                     // Skeleton for analysis text (5 lines)
                                     ForEach(0..<5, id: \.self) { _ in
                                         RoundedRectangle(cornerRadius: 4)
-                                            .fill(Color.white.opacity(0.06))
+                                            .fill(Color.skeleton)
                                             .frame(height: 13)
                                             .shimmer()
                                     }
                                     RoundedRectangle(cornerRadius: 4)
-                                        .fill(Color.white.opacity(0.06))
+                                        .fill(Color.skeleton)
                                         .frame(width: 140, height: 13)
                                         .shimmer()
                                 }

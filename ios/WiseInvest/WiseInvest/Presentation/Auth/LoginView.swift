@@ -2,341 +2,227 @@ import SwiftUI
 import Combine
 
 struct LoginView: View {
-    @EnvironmentObject var authState: AuthState
+    @EnvironmentObject private var authState: AuthState
+    @AppStorage("appearance") private var appearance = "dark"
     @StateObject private var viewModel = LoginViewModel()
-    @State private var usePhoneLogin = false
+    @State private var showsPassword = false
+    @FocusState private var focusedField: Field?
+
+    private enum Field {
+        case identifier
+        case password
+    }
 
     var body: some View {
-        ZStack {
-            // 全屏背景图（底部用渐变遮住 AI 水印）
-            GeometryReader { geo in
-                Image("Images/Login/Background")
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    .clipped()
-                    // 底部渐变遮罩，既隐藏水印又让登录卡片区域更易读
-                    .overlay(
-                        LinearGradient(
-                            stops: [
-                                .init(color: .clear,                       location: 0.0),
-                                .init(color: .clear,                       location: 0.55),
-                                .init(color: Color(hex: "#0A0E1A").opacity(0.85), location: 0.78),
-                                .init(color: Color(hex: "#0A0E1A"),        location: 1.0),
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    header
+                    Spacer(minLength: 64)
+                    Text("WISEINVEST ACCOUNT")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .tracking(2.2)
+                        .foregroundStyle(Color.accentBlue)
+                    Text("欢迎回来")
+                        .font(.system(size: 36, weight: .bold))
+                        .foregroundStyle(Color.textPrimary)
+                        .padding(.top, 12)
+                    Text("把市场信息，整理成自己的判断。")
+                        .font(.system(size: 15))
+                        .foregroundStyle(Color.textSecondary)
+                        .padding(.top, 8)
+                    loginCard.padding(.top, 32)
+                    Text("账户用于同步你的自选与研究记录")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.textTertiary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 24)
+                    Spacer(minLength: 48)
+                }
+                .frame(maxWidth: 430)
+                .frame(minHeight: geometry.size.height, alignment: .top)
+                .padding(.horizontal, 24)
+                .frame(maxWidth: .infinity)
             }
-            .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                Spacer()
-
-                // Logo & tagline
-                logoSection
-
-                Spacer()
-
-                // Login card
-                loginCard
-
-                Spacer().frame(height: 48)
-            }
-            .padding(.horizontal, 24)
+            .scrollDismissesKeyboard(.interactively)
         }
-        .sheet(isPresented: $viewModel.showPhoneBinding) {
-            PhoneBindingView(onComplete: {
-                viewModel.showPhoneBinding = false
-            })
-            .environmentObject(authState)
-        }
-        .alert("登录失败", isPresented: $viewModel.showError) {
-            Button("确定", role: .cancel) {}
-        } message: {
-            Text(viewModel.errorMessage)
-        }
+        .background(Color.primaryBackground.ignoresSafeArea())
     }
 
-    // MARK: - Logo Section
-
-    private var logoSection: some View {
-        VStack(spacing: 20) {
-            // 品牌图标
-            Image("Images/Login/LoginBackground")
-                .resizable()
-                .scaledToFill()
-                .frame(width: 120, height: 120)
-                // 用 UnevenRoundedRectangle 做上圆下直裁剪，或直接用 clipped + offset
-                .clipShape(
-                    CropBottomShape(cropFraction: 0.12)
-                )
-                .clipShape(Circle())
-                .shadow(color: Color(hex: "#3B82F6").opacity(0.35), radius: 24, x: 0, y: 8)
-
-            // 书法 slogan
-            Image("Images/Login/slogan")
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: 280)
-                .frame(height: 72)
-                .clipped()
-                // 向上偏移让内容居中，底部超出的部分被 clipped 截掉
-                .clipShape(CropBottomShape(cropFraction: 0.15))
+    private var header: some View {
+        HStack(spacing: 11) {
+            Image(systemName: "chart.bar.xaxis")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 38)
+                .background(Color.accentBlue, in: RoundedRectangle(cornerRadius: 11))
+            Text("慧投")
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundStyle(Color.textPrimary)
+            Text("WiseInvest")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color.textTertiary)
+            Spacer()
+            Button {
+                appearance = appearance == "dark" ? "light" : "dark"
+            } label: {
+                Image(systemName: appearance == "dark" ? "sun.max" : "moon")
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(Color.textSecondary)
+                    .frame(width: 40, height: 40)
+                    .background(Color.secondaryBackground, in: Circle())
+            }
+            .accessibilityLabel(appearance == "dark" ? "切换到浅色模式" : "切换到深色模式")
         }
+        .padding(.top, 20)
     }
-
-    // MARK: - Login Card
 
     private var loginCard: some View {
-        VStack(spacing: 20) {
-            if usePhoneLogin {
-                phoneLoginForm
-            } else {
-            // WeChat login button
-            Button(action: { viewModel.loginWithWeChat(authState: authState) }) {
-                HStack(spacing: 12) {
-                    if viewModel.isLoading {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            .frame(width: 24, height: 24)
+        VStack(alignment: .leading, spacing: 0) {
+            Text("登录账户")
+                .font(.system(size: 21, weight: .semibold))
+                .foregroundStyle(Color.textPrimary)
+            Text("使用与网页端相同的账号和密码")
+                .font(.system(size: 13))
+                .foregroundStyle(Color.textSecondary)
+                .padding(.top, 6)
+
+            Text("账号 / 邮箱 / 手机号")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Color.textPrimary)
+                .padding(.top, 28)
+            HStack(spacing: 12) {
+                Image(systemName: "person")
+                    .frame(width: 18)
+                    .foregroundStyle(Color.textTertiary)
+                TextField("输入账号名、邮箱或手机号", text: $viewModel.identifier)
+                    .textContentType(.username)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.emailAddress)
+                    .submitLabel(.next)
+                    .focused($focusedField, equals: .identifier)
+                    .onSubmit { focusedField = .password }
+                    .foregroundStyle(Color.textPrimary)
+            }
+            .modifier(LoginFieldStyle())
+            .padding(.top, 10)
+
+            Text("密码")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Color.textPrimary)
+                .padding(.top, 20)
+            HStack(spacing: 12) {
+                Image(systemName: "lock")
+                    .frame(width: 18)
+                    .foregroundStyle(Color.textTertiary)
+                Group {
+                    if showsPassword {
+                        TextField("输入密码", text: $viewModel.password)
                     } else {
-                        // WeChat logo (green chat bubble icon)
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.white.opacity(0.15))
-                                .frame(width: 28, height: 28)
-                            Image(systemName: "ellipsis.bubble.fill")
-                                .font(.system(size: 18))
-                                .foregroundColor(.white)
-                        }
+                        SecureField("输入密码", text: $viewModel.password)
                     }
-                    Text(viewModel.isLoading ? "正在打开微信..." : "微信登录")
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundColor(.white)
                 }
-                .frame(maxWidth: .infinity)
-                .frame(height: 54)
-                .background(
-                    LinearGradient(
-                        colors: viewModel.isLoading
-                            ? [Color(hex: "#4CAF50").opacity(0.6), Color(hex: "#2E7D32").opacity(0.6)]
-                            : [Color(hex: "#4CAF50"), Color(hex: "#2E7D32")],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .cornerRadius(16)
-                .shadow(color: Color(hex: "#4CAF50").opacity(0.3), radius: 12, x: 0, y: 4)
-            }
-            .disabled(viewModel.isLoading || !WeChatManager.shared.isReady)
-            .buttonStyle(ScaleButtonStyle())
-
-            // Show a notice if WeChat is not installed
-            if !WeChatManager.shared.isReady || !WeChatManager.shared.isWeChatInstalled {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.circle")
-                        .font(.system(size: 12))
-                    Text("微信登录待完成平台配置，请使用手机号登录")
-                        .font(.system(size: 12))
+                .textContentType(.password)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.go)
+                .focused($focusedField, equals: .password)
+                .onSubmit(submit)
+                .foregroundStyle(Color.textPrimary)
+                Button {
+                    showsPassword.toggle()
+                } label: {
+                    Image(systemName: showsPassword ? "eye.slash" : "eye")
+                        .font(.system(size: 16))
+                        .foregroundStyle(Color.textSecondary)
                 }
-                .foregroundColor(Color(hex: "#94A3B8"))
+                .accessibilityLabel(showsPassword ? "隐藏密码" : "显示密码")
             }
-            }
+            .modifier(LoginFieldStyle())
+            .padding(.top, 10)
 
-            Button(usePhoneLogin ? "返回微信登录" : "使用手机号登录") {
-                usePhoneLogin.toggle()
+            if !viewModel.errorMessage.isEmpty {
+                Text(viewModel.errorMessage)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.red)
+                    .padding(.top, 14)
             }
-            .font(.system(size: 14, weight: .medium))
-            .foregroundColor(Color(hex: "#9CC7A5"))
-
-            // Divider
-            HStack {
-                Rectangle().fill(Color(hex: "#1E293B")).frame(height: 1)
-                Text("安全登录")
-                    .font(.system(size: 12))
-                    .foregroundColor(Color(hex: "#475569"))
-                    .padding(.horizontal, 12)
-                Rectangle().fill(Color(hex: "#1E293B")).frame(height: 1)
+            Button(action: submit) {
+                HStack(spacing: 8) {
+                    Spacer()
+                    if viewModel.isLoading { ProgressView().tint(.white) }
+                    Text(viewModel.isLoading ? "正在登录" : "登录账户")
+                        .font(.system(size: 16, weight: .semibold))
+                    if !viewModel.isLoading {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 15, weight: .semibold))
+                    }
+                    Spacer()
+                }
+                .foregroundStyle(.white)
+                .frame(height: 52)
+                .background(Color.accentBlue, in: RoundedRectangle(cornerRadius: 13))
             }
-
-            // Feature hints
-            HStack(spacing: 24) {
-                featureHint(icon: "lock.shield.fill", text: "数据安全")
-                featureHint(icon: "chart.bar.fill", text: "实时行情")
-                featureHint(icon: "brain.filled.head.profile", text: "AI 分析")
-            }
+            .disabled(!viewModel.canSubmit)
+            .opacity(viewModel.canSubmit ? 1 : 0.65)
+            .padding(.top, 26)
         }
         .padding(24)
-        .background(Color(hex: "#111827").opacity(0.8))
-        .cornerRadius(24)
-        .overlay(
-            RoundedRectangle(cornerRadius: 24)
-                .stroke(Color(hex: "#1E293B"), lineWidth: 1)
-        )
+        .background(Color.secondaryBackground, in: RoundedRectangle(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(Color.textTertiary.opacity(0.13), lineWidth: 1)
+        }
     }
 
-    private var phoneLoginForm: some View {
-        VStack(spacing: 12) {
-            TextField("中国大陆手机号", text: $viewModel.phone)
-                .keyboardType(.phonePad)
-                .textContentType(.telephoneNumber)
-                .padding(14)
-                .background(Color(hex: "#1E293B"))
-                .cornerRadius(10)
-            HStack(spacing: 10) {
-                TextField("6 位验证码", text: $viewModel.code)
-                    .keyboardType(.numberPad)
-                    .textContentType(.oneTimeCode)
-                    .padding(14)
-                    .background(Color(hex: "#1E293B"))
-                    .cornerRadius(10)
-                Button(viewModel.resendCountdown > 0 ? "\(viewModel.resendCountdown) 秒" : viewModel.codeSent ? "重新发送" : "获取验证码") {
-                    viewModel.sendPhoneCode()
-                }
-                .disabled(viewModel.isLoading || viewModel.phone.count != 11 || viewModel.resendCountdown > 0)
-                .font(.system(size: 13))
-                .foregroundColor(Color(hex: "#9CC7A5"))
-            }
-            Button(viewModel.isLoading ? "请稍候…" : "手机号登录") {
-                viewModel.loginWithPhone(authState: authState)
-            }
-            .disabled(viewModel.isLoading || viewModel.phone.count != 11 || viewModel.code.count != 6)
-            .frame(maxWidth: .infinity)
-            .frame(height: 52)
-            .background(Color(hex: "#36543C"))
-            .foregroundColor(.white)
-            .cornerRadius(12)
-        }
-        .foregroundColor(.white)
-    }
-
-    private func featureHint(icon: String, text: String) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 20))
-                .foregroundColor(Color(hex: "#3B82F6"))
-            Text(text)
-                .font(.system(size: 11))
-                .foregroundColor(Color(hex: "#64748B"))
-        }
-        .frame(maxWidth: .infinity)
+    private func submit() {
+        focusedField = nil
+        viewModel.login(authState: authState)
     }
 }
 
-// MARK: - LoginViewModel
+private struct LoginFieldStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.system(size: 15))
+            .frame(height: 52)
+            .padding(.horizontal, 15)
+            .background(Color.subtleBackground, in: RoundedRectangle(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.textTertiary.opacity(0.16), lineWidth: 1)
+            }
+    }
+}
 
 final class LoginViewModel: ObservableObject {
+    @Published var identifier = ""
+    @Published var password = ""
     @Published var isLoading = false
-    @Published var showPhoneBinding = false
-    @Published var showError = false
     @Published var errorMessage = ""
-    @Published var phone = ""
-    @Published var code = ""
-    @Published var codeSent = false
-    @Published var resendCountdown = 0
 
     private var cancellables = Set<AnyCancellable>()
-    private var resendTimer: AnyCancellable?
 
-    func sendPhoneCode() {
-        guard !isLoading else { return }
-        isLoading = true
-        AuthService.shared.sendPhoneCode(phone: phone)
-            .sink(receiveCompletion: { [weak self] completion in
-                self?.isLoading = false
-                if case .failure(let error) = completion {
-                    self?.errorMessage = error.localizedDescription
-                    self?.showError = true
-                }
-            }, receiveValue: { [weak self] in
-                self?.codeSent = true
-                self?.resendCountdown = 60
-                self?.resendTimer?.cancel()
-                self?.resendTimer = Timer.publish(every: 1, on: .main, in: .common)
-                    .autoconnect()
-                    .sink { [weak self] _ in
-                        guard let self = self else { return }
-                        self.resendCountdown -= 1
-                        if self.resendCountdown <= 0 { self.resendTimer?.cancel() }
-                    }
-            })
-            .store(in: &cancellables)
+    var canSubmit: Bool {
+        !isLoading && !identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !password.isEmpty
     }
 
-    func loginWithPhone(authState: AuthState) {
-        guard !isLoading else { return }
+    func login(authState: AuthState) {
+        guard canSubmit else { return }
         isLoading = true
-        AuthService.shared.phoneLogin(phone: phone, code: code)
+        errorMessage = ""
+        let account = identifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        AuthService.shared.accountLogin(identifier: account, password: password)
             .sink(receiveCompletion: { [weak self] completion in
                 self?.isLoading = false
                 if case .failure(let error) = completion {
                     self?.errorMessage = error.localizedDescription
-                    self?.showError = true
                 }
-            }, receiveValue: { response in
+            }, receiveValue: { [weak self] response in
+                self?.password = ""
                 authState.signIn(token: response.token, user: response.user)
             })
             .store(in: &cancellables)
     }
-
-    /// Triggers the WeChat OAuth flow via WeChatManager.
-    /// When the real SDK is integrated, this will jump to the WeChat app for authorization.
-    /// Until then, a mock code is used automatically.
-    func loginWithWeChat(authState: AuthState) {
-        isLoading = true
-
-        // Set up callbacks before calling sendAuthRequest
-        WeChatManager.shared.onLoginCode = { [weak self] code in
-            self?.performLogin(code: code, authState: authState)
-        }
-        WeChatManager.shared.onLoginError = { [weak self] message in
-            DispatchQueue.main.async {
-                self?.isLoading = false
-                self?.errorMessage = message
-                self?.showError = true
-            }
-        }
-
-        WeChatManager.shared.sendAuthRequest()
-    }
-
-    func performLogin(code: String, authState: AuthState) {
-        AuthService.shared.wechatLogin(code: code)
-            .sink(receiveCompletion: { [weak self] completion in
-                DispatchQueue.main.async {
-                    self?.isLoading = false
-                    if case .failure(let error) = completion {
-                        self?.errorMessage = error.localizedDescription
-                        self?.showError = true
-                    }
-                }
-            }, receiveValue: { [weak self] response in
-                DispatchQueue.main.async {
-                    authState.signIn(token: response.token, user: response.user)
-                    if response.needsPhoneBinding {
-                        self?.showPhoneBinding = true
-                    }
-                }
-            })
-            .store(in: &cancellables)
-    }
 }
-
-// MARK: - CropBottomShape
-// 裁掉图片底部一定比例，用于去除 AI 生成水印
-
-private struct CropBottomShape: Shape {
-    /// 从底部裁掉的比例，0.12 = 裁掉 12%
-    let cropFraction: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let croppedHeight = rect.height * (1 - cropFraction)
-        path.addRect(CGRect(x: rect.minX, y: rect.minY,
-                            width: rect.width, height: croppedHeight))
-        return path
-    }
-}
-

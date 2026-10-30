@@ -11,6 +11,66 @@ class AuthService {
         self.baseURL = APIConfig.baseURL
     }
 
+    // MARK: - Account Password Login
+
+    struct AccountLoginResponse: Codable {
+        let token: String
+        let user: User
+    }
+
+    private struct AuthErrorResponse: Decodable {
+        let error: String?
+    }
+
+    private enum AccountLoginError: LocalizedError {
+        case message(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .message(let text): return text
+            }
+        }
+    }
+
+    func accountLogin(identifier: String, password: String) -> AnyPublisher<AccountLoginResponse, Error> {
+        guard let url = URL(string: "\(baseURL)/api/v1/auth/login") else {
+            return Fail(error: APIError.invalidURL).eraseToAnyPublisher()
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // Match the web payload and keep username compatible with older servers.
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "identifier": identifier,
+            "username": identifier,
+            "password": password
+        ])
+
+        return URLSession.shared.dataTaskPublisher(for: request)
+            .tryMap { data, response in
+                guard let http = response as? HTTPURLResponse else {
+                    throw AccountLoginError.message("无法连接服务，请检查网络后重试")
+                }
+                guard http.statusCode == 200 else {
+                    let serverMessage = try? JSONDecoder().decode(AuthErrorResponse.self, from: data).error
+                    throw AccountLoginError.message(serverMessage ?? "登录失败，请稍后重试")
+                }
+                return data
+            }
+            .decode(type: AccountLoginResponse.self, decoder: JSONDecoder())
+            .mapError { error in
+                if error is URLError {
+                    return AccountLoginError.message("无法连接服务，请检查网络后重试") as Error
+                }
+                if error is DecodingError {
+                    return AccountLoginError.message("服务返回了无效的登录结果") as Error
+                }
+                return error
+            }
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+
     // MARK: - WeChat Login
 
     struct WeChatLoginResponse: Codable {

@@ -10,7 +10,7 @@ struct PhoneBindingView: View {
     var body: some View {
         NavigationView {
             ZStack {
-                Color(hex: "#0A0E1A").ignoresSafeArea()
+                Color.primaryBackground.ignoresSafeArea()
 
                 ScrollView {
                     VStack(spacing: 32) {
@@ -18,18 +18,18 @@ struct PhoneBindingView: View {
                         VStack(spacing: 12) {
                             ZStack {
                                 Circle()
-                                    .fill(Color(hex: "#1E3A5F"))
+                                    .fill(Color.marketIconBackground)
                                     .frame(width: 72, height: 72)
                                 Image(systemName: "phone.fill")
                                     .font(.system(size: 32))
-                                    .foregroundColor(Color(hex: "#3B82F6"))
+                                    .foregroundColor(.accentBlue)
                             }
                             Text("绑定手机号")
                                 .font(.system(size: 24, weight: .bold))
-                                .foregroundColor(.white)
+                                .foregroundColor(.textPrimary)
                             Text("绑定手机号后可用于账号安全验证")
                                 .font(.system(size: 14))
-                                .foregroundColor(Color(hex: "#64748B"))
+                                .foregroundColor(.textSecondary)
                                 .multilineTextAlignment(.center)
                         }
                         .padding(.top, 32)
@@ -40,24 +40,24 @@ struct PhoneBindingView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("手机号")
                                     .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(Color(hex: "#94A3B8"))
+                                    .foregroundColor(.textSecondary)
 
                                 HStack(spacing: 12) {
                                     Text("+86")
                                         .font(.system(size: 16, weight: .medium))
-                                        .foregroundColor(Color(hex: "#94A3B8"))
+                                        .foregroundColor(.textSecondary)
                                         .padding(.horizontal, 12)
                                         .padding(.vertical, 14)
-                                        .background(Color(hex: "#1E293B"))
+                                        .background(Color.subtleBackground)
                                         .cornerRadius(12)
 
                                     TextField("请输入手机号", text: $viewModel.phone)
                                         .keyboardType(.phonePad)
                                         .font(.system(size: 16))
-                                        .foregroundColor(.white)
+                                        .foregroundColor(.textPrimary)
                                         .padding(.horizontal, 16)
                                         .padding(.vertical, 14)
-                                        .background(Color(hex: "#1E293B"))
+                                        .background(Color.subtleBackground)
                                         .cornerRadius(12)
                                 }
                             }
@@ -67,25 +67,25 @@ struct PhoneBindingView: View {
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text("验证码")
                                         .font(.system(size: 13, weight: .medium))
-                                        .foregroundColor(Color(hex: "#94A3B8"))
+                                        .foregroundColor(.textSecondary)
 
                                     HStack(spacing: 12) {
                                         TextField("请输入验证码", text: $viewModel.code)
                                             .keyboardType(.numberPad)
                                             .font(.system(size: 16))
-                                            .foregroundColor(.white)
+                                            .foregroundColor(.textPrimary)
                                             .padding(.horizontal, 16)
                                             .padding(.vertical, 14)
-                                            .background(Color(hex: "#1E293B"))
+                                            .background(Color.subtleBackground)
                                             .cornerRadius(12)
 
                                         Button(action: { viewModel.sendCode() }) {
                                             Text(viewModel.countdown > 0 ? "\(viewModel.countdown)s" : "重新发送")
                                                 .font(.system(size: 14, weight: .medium))
-                                                .foregroundColor(viewModel.countdown > 0 ? Color(hex: "#475569") : Color(hex: "#3B82F6"))
+                                                .foregroundColor(viewModel.countdown > 0 ? .textTertiary : .accentBlue)
                                                 .frame(width: 88)
                                                 .padding(.vertical, 14)
-                                                .background(Color(hex: "#1E293B"))
+                                                .background(Color.subtleBackground)
                                                 .cornerRadius(12)
                                         }
                                         .disabled(viewModel.countdown > 0)
@@ -116,7 +116,7 @@ struct PhoneBindingView: View {
                                 .frame(height: 54)
                                 .background(
                                     LinearGradient(
-                                        colors: [Color(hex: "#3B82F6"), Color(hex: "#1D4ED8")],
+                                        colors: [Color.accentBlue, Color.accentBlue.opacity(0.8)],
                                         startPoint: .leading,
                                         endPoint: .trailing
                                     )
@@ -133,7 +133,7 @@ struct PhoneBindingView: View {
                         Button(action: onComplete) {
                             Text("暂时跳过")
                                 .font(.system(size: 14))
-                                .foregroundColor(Color(hex: "#475569"))
+                                .foregroundColor(.textTertiary)
                         }
                     }
                 }

@@ -195,7 +195,9 @@ struct InvestmentResearchView: View {
 private struct InvestmentResearchCard: ViewModifier {
     func body(content: Content) -> some View {
         content.frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16).background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+            .padding(16)
+            .foregroundStyle(Color.textPrimary)
+            .background(Color.secondaryBackground, in: RoundedRectangle(cornerRadius: 12))
     }
 }
 private extension View {

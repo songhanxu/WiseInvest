@@ -1107,7 +1107,7 @@ struct KLineChartView: View {
                 var path = Path()
                 path.move(to: CGPoint(x: 0, y: y))
                 path.addLine(to: CGPoint(x: width, y: y))
-                context.stroke(path, with: .color(.white.opacity(0.06)), lineWidth: 0.5)
+                context.stroke(path, with: .color(Color.textTertiary.opacity(0.25)), lineWidth: 0.5)
             }
         }
     }
@@ -1350,14 +1350,14 @@ struct KLineChartView: View {
                     path.move(to: CGPoint(x: centerX, y: 0))
                     path.addLine(to: CGPoint(x: centerX, y: height))
                 }
-                .stroke(Color.white.opacity(0.5), style: StrokeStyle(lineWidth: 0.5, dash: [4, 3]))
+                .stroke(Color.textPrimary.opacity(0.5), style: StrokeStyle(lineWidth: 0.5, dash: [4, 3]))
 
                 // Horizontal line
                 Path { path in
                     path.move(to: CGPoint(x: 0, y: closeY))
                     path.addLine(to: CGPoint(x: chartWidth, y: closeY))
                 }
-                .stroke(Color.white.opacity(0.5), style: StrokeStyle(lineWidth: 0.5, dash: [4, 3]))
+                .stroke(Color.textPrimary.opacity(0.5), style: StrokeStyle(lineWidth: 0.5, dash: [4, 3]))
 
                 // Price label on left
                 Text(formatPrice(point.close))
@@ -1371,7 +1371,7 @@ struct KLineChartView: View {
 
                 // Dot at crosshair intersection
                 Circle()
-                    .fill(Color.white)
+                    .fill(Color.textPrimary)
                     .frame(width: 6, height: 6)
                     .shadow(color: accentColor, radius: 3)
                     .position(x: centerX, y: closeY)

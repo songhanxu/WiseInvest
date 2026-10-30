@@ -14,6 +14,7 @@ extension Color {
     static let textPrimary = themed(light: "202522", dark: "FFFFFF")
     static let textSecondary = themed(light: "727B72", dark: "A0A0A0")
     static let textTertiary = themed(light: "879187", dark: "888FA8")
+    static let skeleton = textPrimary.opacity(0.10)
 
     static let userMessageBg = themed(light: "35664B", dark: "4A90E2")
     static let assistantMessageBg = themed(light: "EDF1EC", dark: "2C3E50")

@@ -41,6 +41,9 @@ struct MainTabView: View {
                 .tag(Tab.profile)
         }
         .tint(.accentBlue)
+        .toolbarBackground(Color.secondaryBackground, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
+        .id(appearance)
         .onAppear { configureTabBar() }
         .onChange(of: appearance) { _, _ in configureTabBar() }
     }

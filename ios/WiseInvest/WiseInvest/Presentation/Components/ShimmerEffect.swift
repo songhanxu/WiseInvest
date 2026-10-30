@@ -12,11 +12,11 @@ struct ShimmerModifier: ViewModifier {
                 GeometryReader { geometry in
                     LinearGradient(
                         gradient: Gradient(stops: [
-                            .init(color: Color.white.opacity(0), location: 0),
-                            .init(color: Color.white.opacity(0.15), location: 0.3),
-                            .init(color: Color.white.opacity(0.35), location: 0.5),
-                            .init(color: Color.white.opacity(0.15), location: 0.7),
-                            .init(color: Color.white.opacity(0), location: 1.0),
+                            .init(color: Color.textPrimary.opacity(0), location: 0),
+                            .init(color: Color.textPrimary.opacity(0.15), location: 0.3),
+                            .init(color: Color.textPrimary.opacity(0.35), location: 0.5),
+                            .init(color: Color.textPrimary.opacity(0.15), location: 0.7),
+                            .init(color: Color.textPrimary.opacity(0), location: 1.0),
                         ]),
                         startPoint: .leading,
                         endPoint: .trailing
@@ -75,7 +75,7 @@ struct SkeletonBox: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius)
-            .fill(Color.white.opacity(0.12))
+            .fill(Color.skeleton)
             .frame(width: width, height: height)
             .shimmer()
             .pulse()
@@ -152,7 +152,7 @@ struct KLineChartSkeleton: View {
                     let heights: [CGFloat] = [90, 110, 75, 130, 95, 120, 85, 140, 100, 70,
                                               115, 80, 125, 105, 65, 135, 88, 110, 98, 72]
                     RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Color.white.opacity(0.12))
+                        .fill(Color.skeleton)
                         .frame(height: heights[i % heights.count])
                         .shimmer()
                         .pulse()
@@ -218,7 +218,7 @@ struct NewsCardSkeleton: View {
                 SkeletonBox(width: UIScreen.main.bounds.width * 0.5, height: 12, cornerRadius: 4)
             }
             .padding(10)
-            .background(Color.white.opacity(0.04))
+            .background(Color.textPrimary.opacity(0.04))
             .cornerRadius(8)
 
             // Bottom hint
