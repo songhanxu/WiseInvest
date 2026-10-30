@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, BarChart3, Eye, EyeOff, Loader2, LockKeyhole, Mail, Phone, UserRound } from "lucide-react";
+import { ArrowLeft, ArrowRight, BarChart3, Eye, EyeOff, Loader2, LockKeyhole, Mail, Moon, Phone, Sun, UserRound } from "lucide-react";
 
 export type AuthUser = { id: number; username?: string; email?: string; phone?: string; display_name: string; avatar?: string };
 type AuthResponse = { token: string; user: AuthUser };
@@ -13,8 +13,10 @@ function contactKind(value: string): Contact | null {
   return null;
 }
 
-export function LoginPage({ apiBase, onSuccess, onBack }: {
+export function LoginPage({ apiBase, theme, onToggleTheme, onSuccess, onBack }: {
   apiBase: string;
+  theme: "light" | "dark";
+  onToggleTheme: () => void;
   onSuccess: (result: AuthResponse) => void;
   onBack: () => void;
 }) {
@@ -143,7 +145,10 @@ export function LoginPage({ apiBase, onSuccess, onBack }: {
         </section>
 
         <section className="login-content">
-          <button type="button" className="login-back" onClick={onBack}><ArrowLeft size={16} /> 返回工作台</button>
+          <div className="login-header-actions">
+            <button type="button" className="login-theme-toggle" onClick={onToggleTheme} aria-label={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"} title={theme === "dark" ? "浅色模式" : "深色模式"}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}</button>
+            <button type="button" className="login-back" onClick={onBack}><ArrowLeft size={16} /> 返回工作台</button>
+          </div>
           <div className="login-card">
             <p className="login-kicker">WISEINVEST ACCOUNT</p>
             <h2>{mode === "register" ? "创建账户" : "欢迎回来"}</h2>

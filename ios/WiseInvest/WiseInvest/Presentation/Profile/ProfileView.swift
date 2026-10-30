@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ProfileView: View {
     @EnvironmentObject var authState: AuthState
+    @AppStorage("appearance") private var appearance = "dark"
     @State private var showSignOutConfirmation = false
 
     var body: some View {
@@ -105,6 +106,21 @@ struct ProfileView: View {
 
     private var settingsSection: some View {
         VStack(spacing: 0) {
+            Toggle(isOn: Binding(
+                get: { appearance == "dark" },
+                set: { appearance = $0 ? "dark" : "light" }
+            )) {
+                Label("深色模式", systemImage: "moon.stars")
+                    .font(.system(size: 15))
+                    .foregroundColor(.textPrimary)
+            }
+            .tint(.accentBlue)
+            .padding(16)
+            .background(Color.secondaryBackground)
+            .cornerRadius(16)
+
+            Spacer().frame(height: 16)
+
             settingsGroup(items: [
                 SettingsItem(icon: "person.crop.circle", iconColor: .accentBlue, title: "账号信息"),
                 SettingsItem(icon: "bell", iconColor: .accentGreen, title: "消息通知"),

@@ -68,7 +68,7 @@ struct GroupMessageBubble: View {
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(Color(hex: "1E2540"))
+                    .background(Color.secondaryBackground)
                     .clipShape(BubbleShape(isFromUser: false))
 
                     if !message.isStreaming {

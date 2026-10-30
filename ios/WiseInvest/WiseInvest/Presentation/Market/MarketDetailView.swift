@@ -116,17 +116,13 @@ struct MarketDetailView: View {
             }
 
             ZStack {
-                LinearGradient(
-                    colors: market.gradientColors,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .frame(width: 38, height: 38)
-                .cornerRadius(10)
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.marketIconBackground)
+                    .frame(width: 38, height: 38)
 
                 Image(systemName: market.icon)
                     .font(.system(size: 18))
-                    .foregroundColor(.white)
+                    .foregroundColor(.accentBlue)
             }
 
             VStack(alignment: .leading, spacing: 1) {

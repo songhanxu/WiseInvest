@@ -81,7 +81,7 @@ struct ChatTabView: View {
     private var groupAvatarView: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 14)
-                .fill(Color(hex: "1A1F3A"))
+                .fill(Color.marketIconBackground)
 
             LazyVGrid(
                 columns: [GridItem(.fixed(21)), GridItem(.fixed(21))],
@@ -151,17 +151,13 @@ struct ChatTabView: View {
             HStack(spacing: 14) {
                 // Market icon
                 ZStack {
-                    LinearGradient(
-                        colors: market.gradientColors,
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    .frame(width: 52, height: 52)
-                    .cornerRadius(14)
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(Color.marketIconBackground)
+                        .frame(width: 52, height: 52)
 
                     Image(systemName: market.icon)
                         .font(.system(size: 22))
-                        .foregroundColor(.white)
+                        .foregroundColor(.accentBlue)
                 }
 
                 VStack(alignment: .leading, spacing: 4) {

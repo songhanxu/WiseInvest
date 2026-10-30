@@ -9,44 +9,35 @@ struct MarketCard: View {
 
     var body: some View {
         Button(action: onTap) {
-            ZStack(alignment: .bottomLeading) {
-                // Background gradient
-                LinearGradient(
-                    colors: market.gradientColors,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-
-                // Decorative large icon (top right)
+            HStack(alignment: .center, spacing: 16) {
                 Image(systemName: market.icon)
-                    .font(.system(size: 80, weight: .ultraLight))
-                    .foregroundColor(.white.opacity(0.12))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                    .padding(.top, 16)
-                    .padding(.trailing, 20)
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundColor(.accentBlue)
+                    .frame(width: 48, height: 48)
+                    .background(Color.marketIconBackground, in: RoundedRectangle(cornerRadius: 12))
 
-                // Content (bottom left)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(market.displayName)
-                        .font(.system(size: 28, weight: .bold))
-                        .foregroundColor(.white)
+                        .font(.system(size: 19, weight: .semibold))
+                        .foregroundColor(.textPrimary)
 
                     Text(market.subtitle)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.white.opacity(0.75))
-
-                    Spacer().frame(height: 4)
+                        .font(.system(size: 12))
+                        .foregroundColor(.textSecondary)
 
                     Text(market.description)
-                        .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.85))
+                        .font(.system(size: 12))
+                        .foregroundColor(.textTertiary)
                         .lineLimit(1)
                 }
-                .padding(20)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.textTertiary)
             }
-            .frame(height: 140)
-            .cornerRadius(20)
-            .shadow(color: market.gradientColors[0].opacity(0.4), radius: 12, x: 0, y: 6)
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.secondaryBackground, in: RoundedRectangle(cornerRadius: 16))
         }
         .buttonStyle(ScaleButtonStyle())
     }

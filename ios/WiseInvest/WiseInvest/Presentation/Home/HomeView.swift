@@ -69,7 +69,7 @@ struct HomeView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("慧投")
                 .font(.system(size: 32, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundColor(.textPrimary)
             Text("WiseInvest")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.textSecondary)
@@ -183,7 +183,7 @@ private struct SectionHeader: View {
         HStack(alignment: .lastTextBaseline, spacing: 8) {
             Text(title)
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(.textPrimary)
             if let subtitle = subtitle {
                 Text(subtitle)
                     .font(.system(size: 13))

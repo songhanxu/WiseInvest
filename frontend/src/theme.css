@@ -1,0 +1,210 @@
+/* Light keeps the existing web palette. Dark follows the iOS navy surfaces. */
+.theme-toggle,
+.login-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.theme-toggle:hover,
+.login-theme-toggle:hover { background: var(--panel-3); }
+.login-header-actions { display: flex; align-items: center; align-self: flex-end; gap: 14px; }
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  color: #f2f5fc;
+  background: #0a0e27;
+  --bg: #0a0e27;
+  --panel: #1a1f3a;
+  --panel-2: #232a47;
+  --panel-3: #2b3554;
+  --line: #303954;
+  --line-strong: #45516d;
+  --text: #f2f5fc;
+  --muted: #a8b2c9;
+  --faint: #8792aa;
+  --blue: #83b4f6;
+  --green: #77d6a0;
+  --red: #f18d91;
+  --amber: #e8bb78;
+  --accent-soft: #24364b;
+}
+:root[data-theme="dark"] body { color: var(--text); }
+:root[data-theme="dark"] .sidebar,
+:root[data-theme="dark"] .topbar,
+:root[data-theme="dark"] .mobile-tabs,
+:root[data-theme="dark"] .surface-card,
+:root[data-theme="dark"] .market-desk-card,
+:root[data-theme="dark"] .watch-panel,
+:root[data-theme="dark"] .settings-card,
+:root[data-theme="dark"] .decision-card,
+:root[data-theme="dark"] .conversation-rail,
+:root[data-theme="dark"] .context-panel,
+:root[data-theme="dark"] .chat-main,
+:root[data-theme="dark"] .index-card,
+:root[data-theme="dark"] .price-panel,
+:root[data-theme="dark"] .kline-stage,
+:root[data-theme="dark"] .kline-hover-card,
+:root[data-theme="dark"] .kline-crosshair-label,
+:root[data-theme="dark"] .composer,
+:root[data-theme="dark"] .chat-compose-area,
+:root[data-theme="dark"] .search-results,
+:root[data-theme="dark"] .watchlist-search-dropdown,
+:root[data-theme="dark"] .watchlist-search-controls,
+:root[data-theme="dark"] .research-table-controls,
+:root[data-theme="dark"] .research-control-popover,
+:root[data-theme="dark"] .kline-tooltip,
+:root[data-theme="dark"] .kline-latest-button,
+:root[data-theme="dark"] .ghost-button,
+:root[data-theme="dark"] .account-selector select,
+:root[data-theme="dark"] .watchlist-search-controls select,
+:root[data-theme="dark"] .research-table-controls select {
+  background: var(--panel);
+  color: var(--text);
+  border-color: var(--line);
+}
+:root[data-theme="dark"] .sidebar,
+:root[data-theme="dark"] .topbar { background: #111831; }
+:root[data-theme="dark"] .brand-mark,
+:root[data-theme="dark"] .primary-action,
+:root[data-theme="dark"] .settings-card .account-submit,
+:root[data-theme="dark"] .auth-callout button { background: #416eab; color: #fff; }
+:root[data-theme="dark"] .nav-list button.active,
+:root[data-theme="dark"] .mobile-tabs button.active { background: #263755; color: #a9ceff; }
+:root[data-theme="dark"] .nav-list button:not(.active):hover,
+:root[data-theme="dark"] .home-workspace .market-desk-card:hover,
+:root[data-theme="dark"] .home-workspace .recent-list button:hover,
+:root[data-theme="dark"] .home-workspace .prompt-stack button:hover,
+:root[data-theme="dark"] .watch-panel .watch-preview-row:hover,
+:root[data-theme="dark"] .watch-panel .watch-preview-row:focus-visible,
+:root[data-theme="dark"] .research-control-button:hover,
+:root[data-theme="dark"] .research-control-button[aria-expanded="true"],
+:root[data-theme="dark"] .research-sort-options button:hover,
+:root[data-theme="dark"] .research-sort-options button[aria-pressed="true"],
+:root[data-theme="dark"] .research-column-options label:hover,
+:root[data-theme="dark"] .watchlist-search-result:hover { background: var(--panel-2); color: var(--text); border-color: var(--line-strong); }
+:root[data-theme="dark"] .search-box,
+:root[data-theme="dark"] .search-box:focus-within,
+:root[data-theme="dark"] .quote-empty,
+:root[data-theme="dark"] .rail-empty,
+:root[data-theme="dark"] .empty-state,
+:root[data-theme="dark"] .decision-grid div,
+:root[data-theme="dark"] .conversation-header,
+:root[data-theme="dark"] .message.assistant,
+:root[data-theme="dark"] .message.user,
+:root[data-theme="dark"] .deep-analysis-report,
+:root[data-theme="dark"] .research-expanded-row,
+:root[data-theme="dark"] .research-expanded-row td,
+:root[data-theme="dark"] .account-connect-note,
+:root[data-theme="dark"] .account-profile,
+:root[data-theme="dark"] .account-form input,
+:root[data-theme="dark"] .account-form input:focus,
+:root[data-theme="dark"] .chat-markdown pre,
+:root[data-theme="dark"] .chat-markdown code,
+:root[data-theme="dark"] .chat-markdown th,
+:root[data-theme="dark"] .chat-markdown tbody tr:nth-child(even) { background: var(--panel-2); color: var(--text); border-color: var(--line); }
+:root[data-theme="dark"] .market-icon { color: #accdf6; background: #283552; }
+:root[data-theme="dark"] .watchlist-filters button.active { color: var(--blue); border-bottom-color: var(--blue); }
+:root[data-theme="dark"] .watchlist-filters button span,
+:root[data-theme="dark"] .watchlist-update-button,
+:root[data-theme="dark"] .watchlist-search-controls .watchlist-search-scope select,
+:root[data-theme="dark"] .watchlist-search-scope svg,
+:root[data-theme="dark"] .research-control-button,
+:root[data-theme="dark"] .research-sort-options button,
+:root[data-theme="dark"] .research-column-options label,
+:root[data-theme="dark"] .research-columns-reset,
+:root[data-theme="dark"] .unified-watchlist-table th,
+:root[data-theme="dark"] .source-toggle,
+:root[data-theme="dark"] .holding-cell strong span { color: var(--muted); }
+:root[data-theme="dark"] .watchlist-filters button.active span,
+:root[data-theme="dark"] .watchlist-update-button:hover:not(:disabled),
+:root[data-theme="dark"] .research-provenance b,
+:root[data-theme="dark"] .chat-markdown a,
+:root[data-theme="dark"] .settings-card .account-profile-actions button,
+:root[data-theme="dark"] .settings-card .account-tabs button[aria-selected="true"],
+:root[data-theme="dark"] .alert-text-button,
+:root[data-theme="dark"] .report-ai-button { color: var(--blue); }
+:root[data-theme="dark"] .watchlist-update-button:hover:not(:disabled),
+:root[data-theme="dark"] .target-price-action:hover:not(:disabled),
+:root[data-theme="dark"] .report-ai-button:hover,
+:root[data-theme="dark"] .watchlist-search-controls:focus-within,
+:root[data-theme="dark"] .target-price-input:focus-within { background: var(--panel-2); }
+:root[data-theme="dark"] .surface-card.watchlist-table-container { border-color: var(--line); }
+:root[data-theme="dark"] .filing-form,
+:root[data-theme="dark"] .alert-confirm { background: var(--accent-soft); color: var(--blue); border-color: var(--line); }
+:root[data-theme="dark"] .target-price-action,
+:root[data-theme="dark"] .target-price-action.confirm,
+:root[data-theme="dark"] .target-price-action.active { color: var(--blue); }
+:root[data-theme="dark"] .watch-panel .watch-preview-row::after { background: var(--line); }
+:root[data-theme="dark"] .unified-watchlist-table tbody tr:nth-child(even):not(.research-expanded-row) > td,
+:root[data-theme="dark"] .unified-watchlist-table tbody tr:nth-child(even):not(.research-expanded-row),
+:root[data-theme="dark"] .unified-watchlist-table tbody tr:not(.research-expanded-row):hover > td,
+:root[data-theme="dark"] .unified-watchlist-table tbody tr:not(.research-expanded-row):hover { background: var(--panel-2); }
+:root[data-theme="dark"] .badge.green,
+:root[data-theme="dark"] .change-pill.positive,
+:root[data-theme="dark"] .account-connection-status.ready { background: #1d4038; color: var(--green); }
+:root[data-theme="dark"] .badge.red,
+:root[data-theme="dark"] .change-pill.negative,
+:root[data-theme="dark"] .account-connection-status.failed { background: #49303e; color: var(--red); }
+:root[data-theme="dark"] .account-connection-status,
+:root[data-theme="dark"] .badge.blue,
+:root[data-theme="dark"] .auth-callout,
+:root[data-theme="dark"] .message.user,
+:root[data-theme="dark"] .stock-watchlist-button.is-watched { background: var(--accent-soft); color: var(--blue); border-color: var(--line); }
+:root[data-theme="dark"] .thinking,
+:root[data-theme="dark"] .research-text-button,
+:root[data-theme="dark"] .roundtable-participants button[aria-pressed="true"] { color: var(--blue); }
+:root[data-theme="dark"] .roundtable.selected,
+:root[data-theme="dark"] .roundtable-participants button[aria-pressed="true"],
+:root[data-theme="dark"] .roundtable-mentions button[aria-selected="true"],
+:root[data-theme="dark"] .roundtable-mentions button:hover,
+:root[data-theme="dark"] .roundtable-speaker > span,
+:root[data-theme="dark"] .roundtable-mentions button > span,
+:root[data-theme="dark"] .roundtable-role-list > div > span { background: var(--accent-soft); border-color: var(--line); color: var(--blue); }
+:root[data-theme="dark"] .skeleton-block { background-image: linear-gradient(90deg, #293350, #394562, #293350); }
+:root[data-theme="dark"] .decision-verdict p { color: var(--muted); }
+:root[data-theme="dark"] .kline-canvas .grid-line,
+:root[data-theme="dark"] .kline-canvas .volume-separator { stroke: var(--line); }
+:root[data-theme="dark"] .kline-axis span { color: var(--faint); }
+
+/* Login uses the same selected palette even before the workspace opens. */
+:root[data-theme="dark"] .login-page,
+:root[data-theme="dark"] .login-content { background: var(--bg); color: var(--text); }
+:root[data-theme="dark"] .login-intro { background: #151c37; }
+:root[data-theme="dark"] .login-brand,
+:root[data-theme="dark"] .login-form label { color: var(--text); }
+:root[data-theme="dark"] .login-kicker,
+:root[data-theme="dark"] .login-switch button,
+:root[data-theme="dark"] .login-method-inline button.active,
+:root[data-theme="dark"] .login-code-input button { color: var(--blue); }
+:root[data-theme="dark"] .login-brand small,
+:root[data-theme="dark"] .login-description,
+:root[data-theme="dark"] .login-intro-copy > p:last-child,
+:root[data-theme="dark"] .login-intro-foot,
+:root[data-theme="dark"] .login-back,
+:root[data-theme="dark"] .login-footnote,
+:root[data-theme="dark"] .login-switch,
+:root[data-theme="dark"] .login-helper { color: var(--muted); }
+:root[data-theme="dark"] .login-input,
+:root[data-theme="dark"] .login-methods,
+:root[data-theme="dark"] .login-methods button.active { background: var(--panel); border-color: var(--line); color: var(--text); }
+:root[data-theme="dark"] .login-input input { color: var(--text); }
+:root[data-theme="dark"] .login-input input::placeholder { color: var(--faint); }
+:root[data-theme="dark"] .login-method-inline { border-color: var(--line); }
+:root[data-theme="dark"] .login-methods button:not(.active),
+:root[data-theme="dark"] .login-method-inline button:not(.active) { color: var(--muted); }
+:root[data-theme="dark"] .login-submit,
+:root[data-theme="dark"] .login-brand-mark { background: #416eab; }
+:root[data-theme="dark"] .login-notice { background: var(--panel-2); color: var(--amber); border-color: var(--line); }
+:root[data-theme="dark"] .login-error { background: #49303e; color: var(--red); }
+@media (max-width: 920px) {
+  .theme-toggle { width: 38px; height: 38px; }
+  :root[data-theme="dark"] .mobile-tabs { background: #151c37; }
+}

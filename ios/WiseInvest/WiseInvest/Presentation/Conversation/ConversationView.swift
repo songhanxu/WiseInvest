@@ -98,19 +98,15 @@ struct ConversationView: View {
                     .foregroundColor(.textPrimary)
             }
 
-            // Market icon with gradient background
+            // One quiet icon treatment across all markets.
             ZStack {
-                LinearGradient(
-                    colors: market?.gradientColors ?? [.accentBlue, .accentBlue],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .frame(width: 38, height: 38)
-                .cornerRadius(10)
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.marketIconBackground)
+                    .frame(width: 38, height: 38)
 
                 Image(systemName: market?.icon ?? agentType.icon)
                     .font(.system(size: 18))
-                    .foregroundColor(.white)
+                    .foregroundColor(.accentBlue)
             }
 
             VStack(alignment: .leading, spacing: 1) {

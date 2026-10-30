@@ -39,6 +39,7 @@ import {
   Layers3,
   Loader2,
   MessageCircle,
+  Moon,
   Newspaper,
   Radio,
   Search,
@@ -46,6 +47,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Sun,
   Trash2,
   TrendingDown,
   TrendingUp,
@@ -70,7 +72,6 @@ export type Market = {
   description: string;
   scope: string[];
   welcome: string;
-  colors: [string, string];
   icon: LucideIcon;
   featured: string[];
 };
@@ -174,7 +175,6 @@ const markets: Market[] = [
     scope: ["个股拆解", "行业轮动", "政策解读", "技术形态"],
     welcome:
       "你好！我是你的 A 股投资分析助手。\n\n我可以帮你分析个股、行业趋势、技术形态、基本面数据以及政策影响。\n\n有什么想聊的？",
-    colors: ["#E95555", "#FF8A8A"],
     icon: BarChart3,
     featured: ["600519", "300750", "000858"]
   },
@@ -187,7 +187,6 @@ const markets: Market[] = [
     scope: ["财报解读", "宏观因子", "成长股", "估值比较"],
     welcome:
       "Hi！我是你的美股投资分析助手。\n\n我可以帮你研究美股个股、解读财报、分析宏观经济数据以及美联储政策影响。\n\n想聊哪只股票？",
-    colors: ["#4A90E2", "#7BB7FF"],
     icon: CircleDollarSign,
     featured: ["AAPL", "NVDA", "TSLA"]
   },
@@ -199,7 +198,6 @@ const markets: Market[] = [
     description: "跟踪港股行情，结合公司财报与估值研究。",
     scope: ["港股研究", "财报解读", "行情跟踪", "估值比较"],
     welcome: "你好！我是你的港股投资分析助手。可以帮你研究香港上市公司、公司财报与宏观风险。行情来自 Bitget，按接口返回的币种报价。",
-    colors: ["#8B5CF6", "#C4B5FD"],
     icon: Building2,
     featured: ["00700", "01810", "00992"]
   },
@@ -212,7 +210,6 @@ const markets: Market[] = [
     scope: ["趋势结构", "链上数据", "DeFi", "风险控制"],
     welcome:
       "你好！我是你的加密货币分析助手。\n\n我可以分析 BTC/ETH 走势、合约机会、链上数据、DeFi 协议以及加密市场结构。\n\n有什么想分析的？",
-    colors: ["#F59E0B", "#F97316"],
     icon: Bitcoin,
     featured: ["BTC", "ETH", "SOL"]
   }
@@ -227,7 +224,8 @@ const promptDeck: Record<MarketId, string[]> = {
 
 const storage = {
   apiBase: "wiseinvest.apiBase",
-  token: "wiseinvest.token"
+  token: "wiseinvest.token",
+  theme: "wiseinvest.theme"
 
 };
 
@@ -655,6 +653,7 @@ function usePreventPageZoom() {
 }
 
 export function App() {
+  const [theme, setTheme] = useState<"light" | "dark">(() => localStorage.getItem(storage.theme) === "dark" ? "dark" : "light");
   const [view, setView] = useState<View>("home");
   const [watchlistVisited, setWatchlistVisited] = useState(false);
   const [visitedMarkets, setVisitedMarkets] = useState<MarketId[]>([]);
@@ -687,6 +686,11 @@ export function App() {
     : activeMarket;
 
   usePreventPageZoom();
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem(storage.theme, theme);
+  }, [theme]);
 
   useLayoutEffect(() => {
     window.scrollTo(0, restoreScroll.current ?? 0); restoreScroll.current = null;
@@ -799,7 +803,7 @@ export function App() {
   };
 
   if (view === "login") {
-    return <LoginPage apiBase={apiBase} onBack={() => setView(afterLoginView)} onSuccess={(result) => {
+    return <LoginPage apiBase={apiBase} theme={theme} onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")} onBack={() => setView(afterLoginView)} onSuccess={(result) => {
       setConversationDraft(null);
       setActiveId(null);
       setUser(result.user);
@@ -853,6 +857,8 @@ export function App() {
           apiBase={apiBase}
           isOnline={isOnline}
           token={token}
+          theme={theme}
+          onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
           onOpenAccount={() => token ? setView("profile") : openLogin()}
           onOpenSettings={() => setView("profile")}
           onOpenStock={openStock}
@@ -976,6 +982,8 @@ function TopBar({
   apiBase,
   isOnline,
   token,
+  theme,
+  onToggleTheme,
   onOpenAccount,
   onOpenSettings,
   onOpenStock
@@ -984,6 +992,8 @@ function TopBar({
   apiBase: string;
   isOnline: boolean | null;
   token: string;
+  theme: "light" | "dark";
+  onToggleTheme: () => void;
   onOpenAccount: () => void;
   onOpenSettings: () => void;
   onOpenStock: (market: Market, stock: StockQuote) => void;
@@ -1090,6 +1100,7 @@ function TopBar({
       </form>
       <div className="topbar-actions">
         <span className={`connection-indicator ${isOnline ? "online" : ""}`}><i />{isOnline === null ? "连接中" : isOnline ? "数据已连接" : "连接待恢复"}</span>
+        <button type="button" className="theme-toggle" onClick={onToggleTheme} aria-label={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"} title={theme === "dark" ? "浅色模式" : "深色模式"}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}</button>
         <button className="topbar-account" aria-label={token ? "我的账户" : "登录账户"} onClick={onOpenAccount}><UserCircle size={18}/><span>{token ? "我的账户" : "登录账户"}</span></button>
         <button className="icon-button" onClick={onOpenSettings} aria-label="打开设置">
           <Settings size={18} />
@@ -2275,13 +2286,7 @@ function NavButton({
 function MarketIcon({ market, small = false, mini = false }: { market: Market; small?: boolean; mini?: boolean }) {
   const Icon = market.icon;
   return (
-    <div
-      className={`market-icon ${small ? "small" : ""} ${mini ? "mini" : ""}`}
-      style={{
-        "--c1": market.colors[0],
-        "--c2": market.colors[1]
-      } as React.CSSProperties}
-    >
+    <div className={`market-icon ${small ? "small" : ""} ${mini ? "mini" : ""}`}>
       <Icon size={mini ? 14 : small ? 18 : 22} />
     </div>
   );

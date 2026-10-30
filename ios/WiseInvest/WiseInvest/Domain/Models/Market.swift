@@ -46,15 +46,10 @@ enum Market: String, Codable, CaseIterable, Identifiable {
     }
 
     var gradientColors: [Color] {
-        switch self {
-        case .aShare:  return [Color(hex: "B71C1C"), Color(hex: "E53935")]
-        case .usStock: return [Color(hex: "0D47A1"), Color(hex: "1976D2")]
-        case .hkStock: return [Color(hex: "7C3AED"), Color(hex: "A78BFA")]
-        case .crypto:  return [Color(hex: "E65100"), Color(hex: "FF9800")]
-        }
+        [.accentBlue, .accentBlue]
     }
 
-    var accentColor: Color { gradientColors[0] }
+    var accentColor: Color { .accentBlue }
 
     /// Maps to the backend agent_type string
     var agentType: String { rawValue }

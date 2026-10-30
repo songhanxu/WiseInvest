@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MainTabView: View {
     @ObservedObject var coordinator: AppCoordinator
+    @AppStorage("appearance") private var appearance = "dark"
     @State private var selectedTab: Tab = .home
 
     enum Tab: Int {
@@ -41,6 +42,7 @@ struct MainTabView: View {
         }
         .tint(.accentBlue)
         .onAppear { configureTabBar() }
+        .onChange(of: appearance) { _, _ in configureTabBar() }
     }
 
     private func configureTabBar() {

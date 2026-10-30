@@ -79,7 +79,7 @@ struct GroupChatView: View {
     private var groupAvatarStack: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color(hex: "0A0E27"))
+                .fill(Color.marketIconBackground)
                 .frame(width: 44, height: 44)
 
             LazyVGrid(
@@ -132,7 +132,7 @@ struct GroupChatView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 12)
         }
-        .background(Color(hex: "141830"))
+        .background(Color.subtleBackground)
     }
 
     // MARK: - Messages Area
