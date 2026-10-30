@@ -73,6 +73,29 @@ func TestHoldingsFailureRetainsCompleteSnapshotAndBacksOff(t *testing.T) {
 	if reader.calls.Load() != 1 {
 		t.Fatal("failure backoff did not prevent repeated requests")
 	}
+	if h.failureBackoff != time.Minute || time.Until(h.retryAt) < 50*time.Second {
+		t.Fatalf("first failure retry interval: %s", h.failureBackoff)
+	}
+	h.mu.Lock()
+	h.retryAt = time.Time{}
+	h.mu.Unlock()
+	if _, err := h.holdings(context.Background()); err != nil || reader.calls.Load() != 2 || h.failureBackoff != 2*time.Minute {
+		t.Fatalf("consecutive failure did not back off: %v calls=%d backoff=%s", err, reader.calls.Load(), h.failureBackoff)
+	}
+	h.mu.Lock()
+	h.retryAt = time.Time{}
+	h.failureBackoff = 4 * time.Minute
+	h.mu.Unlock()
+	if _, err := h.holdings(context.Background()); err != nil || h.failureBackoff != 5*time.Minute {
+		t.Fatalf("failure backoff cap lost: %v backoff=%s", err, h.failureBackoff)
+	}
+	reader.assetErr = nil
+	h.mu.Lock()
+	h.retryAt = time.Time{}
+	h.mu.Unlock()
+	if data, err := h.holdings(context.Background()); err != nil || data.Stale || h.failureBackoff != 0 {
+		t.Fatalf("successful retry did not reset backoff: %+v %v", data, err)
+	}
 }
 
 func TestFundamentalFlightCacheAndCurrencyProvenance(t *testing.T) {

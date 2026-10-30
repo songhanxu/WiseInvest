@@ -73,6 +73,9 @@ type Client struct {
 	HTTPClient *http.Client
 	mu         sync.Mutex
 	markets    map[string]*cachedMarket
+	failureMu  sync.Mutex
+	retryAt    time.Time
+	backoff    time.Duration
 }
 
 func NewClient(baseURL string) *Client {
@@ -83,16 +86,26 @@ func NewClient(baseURL string) *Client {
 }
 
 func (c *Client) get(ctx context.Context, path string, params url.Values, target interface{}) error {
+	c.failureMu.Lock()
+	deferred := time.Now().Before(c.retryAt)
+	c.failureMu.Unlock()
+	if deferred {
+		return fmt.Errorf("Bitget temporarily unavailable")
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path+"?"+params.Encode(), nil)
 	if err != nil {
 		return err
 	}
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
+		if ctx.Err() != context.Canceled {
+			c.deferRetry()
+		}
 		return fmt.Errorf("Bitget request failed")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		c.deferRetry()
 		return fmt.Errorf("Bitget HTTP %d", resp.StatusCode)
 	}
 	var result struct {
@@ -100,12 +113,36 @@ func (c *Client) get(ctx context.Context, path string, params url.Values, target
 		Data json.RawMessage `json:"data"`
 	}
 	if err = json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&result); err != nil {
+		c.deferRetry()
 		return fmt.Errorf("invalid Bitget response")
 	}
 	if result.Code != "00000" {
+		c.deferRetry()
 		return fmt.Errorf("Bitget error %s", result.Code)
 	}
-	return json.Unmarshal(result.Data, target)
+	if err := json.Unmarshal(result.Data, target); err != nil {
+		c.deferRetry()
+		return err
+	}
+	c.failureMu.Lock()
+	c.retryAt = time.Time{}
+	c.backoff = 0
+	c.failureMu.Unlock()
+	return nil
+}
+
+func (c *Client) deferRetry() {
+	c.failureMu.Lock()
+	defer c.failureMu.Unlock()
+	if c.backoff == 0 {
+		c.backoff = 30 * time.Second
+	} else {
+		c.backoff *= 2
+		if c.backoff > 5*time.Minute {
+			c.backoff = 5 * time.Minute
+		}
+	}
+	c.retryAt = time.Now().Add(c.backoff)
 }
 
 func category(market string) string {

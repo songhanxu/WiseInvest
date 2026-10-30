@@ -80,6 +80,7 @@ type AccountHandler struct {
 	latest          *HoldingsSnapshot
 	lastErr         error
 	retryAt         time.Time
+	failureBackoff  time.Duration
 	automationReads authLimit
 }
 
@@ -199,8 +200,20 @@ func (h *AccountHandler) syncHoldings() {
 		h.snapshot, h.latest = &data, &data
 		h.cachedAt = time.Now()
 		h.retryAt = time.Time{}
+		h.failureBackoff = 0
 	} else {
-		h.retryAt = time.Now().Add(15 * time.Second)
+		// An upstream outage must not produce another two Bitget requests every
+		// fifteen seconds. The account view refreshes once a minute, so start at
+		// one minute and back off to five while keeping any last good snapshot.
+		if h.failureBackoff == 0 {
+			h.failureBackoff = time.Minute
+		} else {
+			h.failureBackoff *= 2
+			if h.failureBackoff > 5*time.Minute {
+				h.failureBackoff = 5 * time.Minute
+			}
+		}
+		h.retryAt = time.Now().Add(h.failureBackoff)
 		if h.snapshot != nil {
 			stale := *h.snapshot
 			stale.Stale, stale.Complete = true, false
