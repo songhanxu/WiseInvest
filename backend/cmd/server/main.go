@@ -177,6 +177,7 @@ func main() {
 	// Initialize quote cache for high-frequency market data
 	quoteCache := cache.NewQuoteCache(redisClient, log)
 	stockHandler := handler.NewStockHandler(watchlistRepo, log, quoteCache, searcher, llmClient, cfg.FilingInsight)
+	stockHandler.SetFundamentalsStore(db)
 	accountHandler := handler.NewAccountHandler(cfg.Bitget)
 	accountHandler.AddExchange(cfg.BinanceAccount)
 	accountHandler.AddExchange(cfg.GateAccount)

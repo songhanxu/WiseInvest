@@ -87,7 +87,7 @@ func (s *FundamentalsService) fetchSources(ctx context.Context, market, code str
 			defer wg.Done()
 			secCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 			defer cancel()
-			sec = s.SEC.fetch(secCtx, code)
+			sec = s.secResult(secCtx, code)
 		}()
 	}
 	if s.Yahoo != nil {
@@ -96,12 +96,17 @@ func (s *FundamentalsService) fetchSources(ctx context.Context, market, code str
 			defer wg.Done()
 			yahooCtx, cancel := context.WithTimeout(ctx, 6*time.Second)
 			defer cancel()
-			yahoo = s.Yahoo.fetch(yahooCtx, market, code)
+			yahoo = s.sourceResult(yahooCtx, "yahoo:"+market+":"+code, market+":"+code, 6*time.Hour,
+				func(fetchCtx context.Context) FundamentalsResponse { return s.Yahoo.fetch(fetchCtx, market, code) })
 		}()
 	}
 	if s.FinnhubAPIKey != "" && market == "us_stock" {
 		wg.Add(1)
-		go func() { defer wg.Done(); finnhub = s.fetchFinnhubCalendar(ctx, code) }()
+		go func() {
+			defer wg.Done()
+			finnhub = s.sourceResult(ctx, "finnhub:"+market+":"+code, market+":"+code, time.Hour,
+				func(fetchCtx context.Context) FundamentalsResponse { return s.fetchFinnhubCalendar(fetchCtx, code) })
+		}()
 	}
 	wg.Wait()
 	if yahoo.Status == "not_applicable" && !hasFundamentalData(sec) {

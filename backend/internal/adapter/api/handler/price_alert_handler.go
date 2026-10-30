@@ -148,7 +148,7 @@ func (h *StockHandler) WatchlistPriceAlertQuotes(ctx context.Context, user uint)
 			HoldingID: fmt.Sprintf("watchlist:%s:%s", stock.Market, canonicalWatchCode(stock.Market, stock.ID, stock.Symbol)),
 			AssetKey:  alertAssetKey(stock.Market, stock.ID, stock.Symbol),
 			AccountID: "watchlist", Name: stock.Name, Code: stock.ID, Currency: currency, Price: stock.CurrentPrice,
-			Fresh: (stock.QuoteAvailable == nil || *stock.QuoteAvailable) && alertQuoteTimeFresh(stock.QuoteTime),
+			Fresh: !stock.QuoteStale && (stock.QuoteAvailable == nil || *stock.QuoteAvailable) && alertQuoteTimeFresh(stock.QuoteTime),
 		})
 	}
 	return quotes, nil

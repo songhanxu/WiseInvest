@@ -25,6 +25,7 @@ import (
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/search"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/transform"
+	"gorm.io/gorm"
 )
 
 type watchlistRepository interface {
@@ -37,25 +38,27 @@ type watchlistRepository interface {
 
 // StockHandler provides real-time market data endpoints.
 type StockHandler struct {
-	bitget         *bitget.Client
-	fundamentals   *FundamentalsService
-	watchlistRepo  watchlistRepository
-	accountHandler *AccountHandler
-	logger         *logger.Logger
-	httpClient     *http.Client
-	cache          *cache.QuoteCache // Redis-backed quote cache (may be nil if cache is disabled)
-	stopTicker     context.CancelFunc
-	searcher       search.Searcher   // Web search for news (may be NoopSearcher)
-	llmClient      *llm.OpenAIClient // LLM client for AI summaries (may be nil)
-	llmSem         chan struct{}     // Semaphore to limit concurrent LLM requests (prevents DeepSeek overload)
-	insightSem     chan struct{}     // Limit automatic filing analysis work.
-	insightCtx     context.Context
-	stopInsights   context.CancelFunc
-	insightMu      sync.Mutex
-	insights       map[string]FilingInsight
-	filingConfig   config.FilingInsightConfig
-	wsHub          *WSHub           // WebSocket hub for real-time push (may be nil)
-	binanceWS      *BinanceWSClient // Binance WebSocket stream for real-time crypto data
+	bitget          *bitget.Client
+	fundamentals    *FundamentalsService
+	watchlistRepo   watchlistRepository
+	accountHandler  *AccountHandler
+	logger          *logger.Logger
+	httpClient      *http.Client
+	cache           *cache.QuoteCache // Redis-backed quote cache (may be nil if cache is disabled)
+	quoteLocks      sync.Map          // one in-flight cache fill per market
+	quoteRefreshing sync.Map          // stale batches already refreshing in background
+	stopTicker      context.CancelFunc
+	searcher        search.Searcher   // Web search for news (may be NoopSearcher)
+	llmClient       *llm.OpenAIClient // LLM client for AI summaries (may be nil)
+	llmSem          chan struct{}     // Semaphore to limit concurrent LLM requests (prevents DeepSeek overload)
+	insightSem      chan struct{}     // Limit automatic filing analysis work.
+	insightCtx      context.Context
+	stopInsights    context.CancelFunc
+	insightMu       sync.Mutex
+	insights        map[string]FilingInsight
+	filingConfig    config.FilingInsightConfig
+	wsHub           *WSHub           // WebSocket hub for real-time push (may be nil)
+	binanceWS       *BinanceWSClient // Binance WebSocket stream for real-time crypto data
 
 	// In-memory caches for slow-changing crypto data (sparklines, fear/greed index).
 	// Updated every 60 s by a dedicated goroutine in backgroundRefreshLoop.
@@ -68,6 +71,46 @@ type StockHandler struct {
 // SetAccountHandler lets filing insights cover stocks held in an account as well as the watchlist.
 func (h *StockHandler) SetAccountHandler(accountHandler *AccountHandler) {
 	h.accountHandler = accountHandler
+}
+
+// SetFundamentalsStore enables durable SEC snapshots and periodic refreshes of
+// companies currently present in a user's watchlist.
+func (h *StockHandler) SetFundamentalsStore(db *gorm.DB) {
+	if db == nil || h.fundamentals == nil {
+		return
+	}
+	h.fundamentals.store = postgresSECSnapshotStore{db: db}
+	if h.fundamentals.SEC != nil {
+		go h.refreshWatchedSEC(h.insightCtx)
+	}
+}
+
+func (h *StockHandler) refreshWatchedSEC(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			codes, err := h.fundamentals.store.WatchedCodes(ctx)
+			if err != nil {
+				h.logger.WithField("error", err).Warn("Could not list watched SEC companies")
+				continue
+			}
+			for _, code := range codes {
+				if code == "" {
+					continue
+				}
+				h.fundamentals.secResult(ctx, code)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Second):
+				}
+			}
+		}
+	}
 }
 
 // NewStockHandler creates a new StockHandler.
@@ -940,6 +983,7 @@ type StockResponse struct {
 	QuoteTime      string  `json:"quote_time,omitempty"`
 	QuoteSession   string  `json:"quote_session,omitempty"`
 	QuoteAvailable *bool   `json:"quote_available,omitempty"`
+	QuoteStale     bool    `json:"quote_stale,omitempty"`
 }
 
 func (h *StockHandler) SearchStocks(c *gin.Context) {
@@ -1394,157 +1438,31 @@ func (h *StockHandler) fetchBitgetCryptoStocks(ctx context.Context, symbols []st
 func (h *StockHandler) GetWatchlist(c *gin.Context) {
 	userID := c.GetUint("userID")
 	market := c.DefaultQuery("market", "a_share")
-
+	if !validStockMarket(market) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid market type"})
+		return
+	}
 	items, err := h.watchlistRepo.GetByUserAndMarket(userID, market)
 	if err != nil {
 		h.logger.WithField("error", err).Error("Failed to get watchlist")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get watchlist"})
 		return
 	}
-
 	if len(items) == 0 {
 		c.JSON(http.StatusOK, []StockResponse{})
 		return
 	}
-
-	// Fetch real-time prices for all watchlist stocks
+	codes := make([]string, 0, len(items))
+	for _, item := range items {
+		codes = append(codes, canonicalWatchCode(market, item.StockCode, item.Symbol))
+	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
-
-	var stocks []StockResponse
-
-	switch market {
-	case "a_share":
-		var codes []string
-		for _, item := range items {
-			code := strings.TrimSpace(item.StockCode)
-			// If stock_code already has sh/sz prefix (e.g. "sh000001"), use as-is
-			if strings.HasPrefix(strings.ToLower(code), "sh") || strings.HasPrefix(strings.ToLower(code), "sz") {
-				codes = append(codes, strings.ToLower(code))
-			} else {
-				// Prefer extracting prefix from the stored Symbol field (e.g. "SH000001" → "sh")
-				// This avoids ambiguity for codes like 000001 which is both SH (上证指数) and SZ (平安银行)
-				prefix := ""
-				sym := strings.ToLower(strings.TrimSpace(item.Symbol))
-				if strings.HasPrefix(sym, "sh") {
-					prefix = "sh"
-				} else if strings.HasPrefix(sym, "sz") {
-					prefix = "sz"
-				} else {
-					// Fallback: guess from code digits
-					prefix = "sh"
-					if strings.HasPrefix(code, "0") || strings.HasPrefix(code, "3") {
-						prefix = "sz"
-					}
-				}
-				codes = append(codes, prefix+code)
-			}
-		}
-		stocks, _ = h.fetchAShareStocksByCode(ctx, strings.Join(codes, ","))
-	case "us_stock":
-		var symbols []string
-		for _, item := range items {
-			symbols = append(symbols, item.StockCode)
-		}
-		stocks, _ = h.fetchUSStocksBySymbol(ctx, strings.Join(symbols, ","))
-	case "hk_stock":
-		var symbols []string
-		for _, item := range items {
-			symbols = append(symbols, item.StockCode)
-		}
-		stocks, _ = h.fetchHKStocksByCode(ctx, symbols)
-	case "crypto":
-		// Collect base symbols and accept only Bitget cache entries.
-		type cryptoItem struct {
-			base string
-			name string
-		}
-		var allItems []cryptoItem
-		seen := make(map[string]bool)
-		for _, item := range items {
-			code := strings.TrimSpace(item.StockCode)
-			if mapped, ok := cryptoIndexToSymbol[strings.ToLower(code)]; ok {
-				code = mapped
-			}
-			if strings.EqualFold(code, "fear_greed") {
-				continue
-			}
-			base := strings.ToUpper(code)
-			if !seen[base] {
-				allItems = append(allItems, cryptoItem{base: base, name: item.Name})
-				seen[base] = true
-			}
-		}
-
-		// Phase 1: Try to read from Redis cache (populated by background ticker)
-		var uncachedSymbols []string
-		cachedStocks := make(map[string]StockResponse)
-		if h.cache != nil {
-			for _, ci := range allItems {
-				var cached StockResponse
-				if hit, _ := h.cache.GetJSON(ctx, cache.StockQuoteKey("crypto", ci.base), &cached); hit && cached.CurrentPrice > 0 && quoteCacheSourceAllowed(market, cached.Source) {
-					cachedStocks[ci.base] = cached
-				} else {
-					sym := ci.base
-					if !strings.HasSuffix(sym, "USDT") {
-						sym = sym + "USDT"
-					}
-					uncachedSymbols = append(uncachedSymbols, sym)
-				}
-			}
-		} else {
-			for _, ci := range allItems {
-				sym := ci.base
-				if !strings.HasSuffix(sym, "USDT") {
-					sym = sym + "USDT"
-				}
-				uncachedSymbols = append(uncachedSymbols, sym)
-			}
-		}
-
-		// Phase 2: Fetch only uncached symbols from Bitget
-		var freshStocks []StockResponse
-		if len(uncachedSymbols) > 0 {
-			var fetchErr error
-			freshStocks, fetchErr = h.fetchBitgetCryptoStocks(ctx, uncachedSymbols)
-			if fetchErr != nil {
-				h.logger.WithField("error", fetchErr).Warn("Bitget API failed for crypto watchlist")
-			}
-			// Cache the fresh results
-			if h.cache != nil {
-				for _, s := range freshStocks {
-					_ = h.cache.SetJSON(ctx, cache.StockQuoteKey("crypto", s.ID), s, 15*time.Second)
-				}
-			}
-		}
-
-		// Phase 3: Merge cached + fresh results in the original order
-		freshMap := make(map[string]StockResponse, len(freshStocks))
-		for _, s := range freshStocks {
-			freshMap[strings.ToUpper(s.ID)] = s
-		}
-		for _, ci := range allItems {
-			if s, ok := cachedStocks[ci.base]; ok {
-				stocks = append(stocks, s)
-			} else if s, ok := freshMap[ci.base]; ok {
-				stocks = append(stocks, s)
-			} else {
-				// Fallback placeholder
-				stocks = append(stocks, StockResponse{
-					ID:     ci.base,
-					Symbol: ci.base + "/USDT",
-					Name:   ci.name,
-					Market: "crypto",
-				})
-			}
-		}
+	quotes, err := h.watchlistQuotes(ctx, market, codes)
+	if err != nil {
+		h.logger.WithField("market", market).WithField("error", err).Warn("Watchlist quote refresh failed")
 	}
-
-	// Ensure we never return null — always return [] for JSON
-	if stocks == nil {
-		stocks = []StockResponse{}
-	}
-	c.JSON(http.StatusOK, mergeWatchlistQuotes(items, stocks))
+	c.JSON(http.StatusOK, mergeWatchlistQuotes(items, quotes))
 }
 
 type AddWatchlistRequest struct {
@@ -1686,7 +1604,7 @@ func (h *StockHandler) GetStockQuote(c *gin.Context) {
 
 	// ── Try cache first ──────────────────────────────────────────────────
 	if h.cache != nil {
-		cacheKey := cache.StockQuoteKey(market, code)
+		cacheKey := cache.StockQuoteKey(market, canonicalWatchCode(market, code, code))
 		var cached StockResponse
 		if hit, _ := h.cache.GetJSON(c.Request.Context(), cacheKey, &cached); hit && cached.ID != "" && (market == "a_share" || quoteCacheSourceAllowed(market, cached.Source)) {
 			c.JSON(http.StatusOK, cached)
@@ -1732,6 +1650,15 @@ func (h *StockHandler) GetStockQuote(c *gin.Context) {
 	}
 
 	if err != nil {
+		if h.cache != nil {
+			var previous StockResponse
+			key := lastQuoteKey(market, canonicalWatchCode(market, code, code))
+			if hit, _ := h.cache.GetJSON(c.Request.Context(), key, &previous); hit && previous.CurrentPrice > 0 && quoteCacheSourceAllowed(market, previous.Source) {
+				previous.QuoteStale = true
+				c.JSON(http.StatusOK, previous)
+				return
+			}
+		}
 		c.JSON(http.StatusBadGateway, gin.H{"error": "行情源暂不可用，请稍后重试"})
 		return
 	}
@@ -1740,10 +1667,7 @@ func (h *StockHandler) GetStockQuote(c *gin.Context) {
 		return
 	}
 
-	// Write to cache (short TTL — individual stock quote)
-	if h.cache != nil {
-		_ = h.cache.SetJSON(c.Request.Context(), cache.StockQuoteKey(market, code), stocks[0], 2*time.Second)
-	}
+	h.cacheFreshQuotes(c.Request.Context(), market, stocks[:1])
 
 	// Push to WebSocket subscribers
 	if h.wsHub != nil {

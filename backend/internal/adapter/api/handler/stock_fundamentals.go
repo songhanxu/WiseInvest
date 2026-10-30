@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/songhanxu/wiseinvest/internal/infrastructure/bitget"
+	"github.com/songhanxu/wiseinvest/internal/infrastructure/cache"
 )
 
 // Nullable values distinguish missing data from zero EPS. Guidance is sourced
@@ -76,10 +77,13 @@ type FundamentalsService struct {
 	cache                         map[string]fundamentalsCache
 	sem                           chan struct{}
 	pending                       map[string]chan struct{}
+	sourceCache                   map[string]sourceCacheEntry
+	sourcePending                 map[string]chan struct{}
+	store                         secSnapshotStore
 }
 
 func NewFundamentalsService(file string) *FundamentalsService {
-	s := &FundamentalsService{File: file, HTTPClient: &http.Client{Timeout: 5 * time.Second}, cache: make(map[string]fundamentalsCache), sem: make(chan struct{}, 4), pending: make(map[string]chan struct{}), FinnhubAPIKey: os.Getenv("FINNHUB_API_KEY"), FinnhubBaseURL: "https://finnhub.io/api/v1"}
+	s := &FundamentalsService{File: file, HTTPClient: &http.Client{Timeout: 5 * time.Second}, cache: make(map[string]fundamentalsCache), sem: make(chan struct{}, 4), pending: make(map[string]chan struct{}), sourceCache: make(map[string]sourceCacheEntry), sourcePending: make(map[string]chan struct{}), FinnhubAPIKey: os.Getenv("FINNHUB_API_KEY"), FinnhubBaseURL: "https://finnhub.io/api/v1"}
 	if !strings.EqualFold(os.Getenv("SEC_FUNDAMENTALS_ENABLED"), "false") {
 		s.SEC = newSECFundamentalsClient(os.Getenv("SEC_USER_AGENT"))
 	}
@@ -218,18 +222,40 @@ func (h *StockHandler) GetFundamentals(c *gin.Context) {
 	row := h.fundamentals.Fetch(ctx, market, code)
 	if market == "us_stock" && row.PE == nil && row.TrailingEPS != nil && *row.TrailingEPS > 0 {
 		quoteCtx, quoteCancel := context.WithTimeout(ctx, 3*time.Second)
-		quotes, err := h.fetchTencentUSStocksBySymbol(quoteCtx, code)
+		quote, err := h.tencentPEQuote(quoteCtx, code)
 		quoteCancel()
 		if err == nil {
-			for _, quote := range quotes {
-				if strings.EqualFold(quote.ID, code) {
-					setSECTrailingPE(&row, quote, time.Now())
-					break
-				}
-			}
+			setSECTrailingPE(&row, quote, time.Now())
 		}
 	}
 	c.JSON(http.StatusOK, row)
+}
+
+func (h *StockHandler) tencentPEQuote(ctx context.Context, code string) (StockResponse, error) {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	key := cache.StockQuoteKey("tencent_pe", code)
+	lock := h.marketQuoteLock("tencent_pe:" + code)
+	lock.Lock()
+	defer lock.Unlock()
+	if h.cache != nil {
+		var row StockResponse
+		if hit, _ := h.cache.GetJSON(ctx, key, &row); hit && row.ID == code && row.Source == "tencent" && row.CurrentPrice > 0 {
+			return row, nil
+		}
+	}
+	quotes, err := h.fetchTencentUSStocksBySymbol(ctx, code)
+	if err != nil || len(quotes) == 0 {
+		return StockResponse{}, err
+	}
+	for _, row := range quotes {
+		if strings.EqualFold(row.ID, code) && row.Source == "tencent" && row.CurrentPrice > 0 {
+			if h.cache != nil {
+				_ = h.cache.SetJSON(ctx, key, row, quoteFreshTTL("us_stock", row))
+			}
+			return row, nil
+		}
+	}
+	return StockResponse{}, nil
 }
 
 func setSECTrailingPE(row *FundamentalsResponse, quote StockResponse, now time.Time) {
@@ -249,11 +275,11 @@ func (s *FundamentalsService) cachedFetch(ctx context.Context, market, code stri
 	key := market + ":" + code
 	for {
 		s.mu.Lock()
-		ttl := 6 * time.Hour
+		ttl := 5 * time.Minute
 		if market == "us_stock" {
-			// Earnings releases can precede a 10-Q by days; refresh the SEC
-			// filing list often enough for a newly announced quarter to appear.
-			ttl = 30 * time.Minute
+			// Source caches have their own lifetimes. Recombine them regularly
+			// so a newly refreshed SEC filing appears without extra upstream IO.
+			ttl = time.Minute
 		}
 		if entry, ok := s.cache[key]; ok && time.Since(entry.Time) < ttl {
 			s.mu.Unlock()
@@ -285,9 +311,8 @@ func (s *FundamentalsService) cachedFetch(ctx context.Context, market, code stri
 			case <-taskCtx.Done():
 			}
 			stamp := time.Now()
-			// Partial results retry after a minute, using the market's cache TTL.
-			if row.Status == "unavailable" || (row.Status == "available" && (row.EPS == nil || row.ForwardPE == nil || row.NextEarningsDate == "")) {
-				stamp = stamp.Add(-ttl + time.Minute)
+			if row.Status == "unavailable" {
+				stamp = stamp.Add(-ttl + 30*time.Second)
 			}
 			s.mu.Lock()
 			for len(s.cache) >= 512 {

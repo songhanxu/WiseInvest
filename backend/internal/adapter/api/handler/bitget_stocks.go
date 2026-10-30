@@ -309,27 +309,7 @@ func (h *StockHandler) readWatchlist(parent context.Context, user uint) ([]Stock
 		wg.Add(1)
 		go func(market string, codes []string) {
 			defer wg.Done()
-			var rows []StockResponse
-			switch market {
-			case "a_share":
-				rows, _ = h.fetchAShareStocksByCode(ctx, strings.Join(codes, ","))
-			case "us_stock":
-				rows, _ = h.fetchUSStocksBySymbol(ctx, strings.Join(codes, ","))
-			case "hk_stock":
-				rows, _ = h.fetchHKStocksByCode(ctx, codes)
-			case "crypto":
-				var symbols []string
-				for _, code := range codes {
-					if mapped, ok := cryptoIndexToSymbol[strings.ToLower(code)]; ok {
-						code = mapped
-					}
-					if !strings.HasSuffix(strings.ToUpper(code), "USDT") {
-						code += "USDT"
-					}
-					symbols = append(symbols, strings.ToUpper(code))
-				}
-				rows, _ = h.fetchBitgetCryptoStocks(ctx, symbols)
-			}
+			rows, _ := h.watchlistQuotes(ctx, market, codes)
 			mu.Lock()
 			quotes = append(quotes, rows...)
 			mu.Unlock()

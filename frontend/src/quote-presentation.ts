@@ -9,7 +9,7 @@ export function mergeQuoteRows<T extends Row>(previous: T[], incoming: T[]): T[]
     if ((row.quote_available === false || !(row.current_price > 0)) && old && old.current_price > 0) {
       return { ...old, name: row.name || old.name, quote_stale: true };
     }
-    return { ...row, quote_stale: false };
+    return { ...row, quote_stale: row.quote_stale === true };
   });
 }
 
