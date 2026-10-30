@@ -67,19 +67,20 @@ type AccountEquity struct {
 }
 
 type AccountHandler struct {
-	others         map[string]*AccountHandler
-	exchangeConfig *config.ExchangeAccountConfig
-	loader         func(context.Context) (HoldingsSnapshot, error)
-	cfg            config.BitgetConfig
-	private        accountReader
-	market         *bitget.Client
-	mu             sync.Mutex
-	snapshot       *HoldingsSnapshot
-	cachedAt       time.Time
-	flight         chan struct{}
-	latest         *HoldingsSnapshot
-	lastErr        error
-	retryAt        time.Time
+	others          map[string]*AccountHandler
+	exchangeConfig  *config.ExchangeAccountConfig
+	loader          func(context.Context) (HoldingsSnapshot, error)
+	cfg             config.BitgetConfig
+	private         accountReader
+	market          *bitget.Client
+	mu              sync.Mutex
+	snapshot        *HoldingsSnapshot
+	cachedAt        time.Time
+	flight          chan struct{}
+	latest          *HoldingsSnapshot
+	lastErr         error
+	retryAt         time.Time
+	automationReads authLimit
 }
 
 func NewAccountHandler(cfg config.BitgetConfig) *AccountHandler {
