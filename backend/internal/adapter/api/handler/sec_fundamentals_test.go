@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -167,6 +168,40 @@ func TestSECReportsPreserveCashFlowYTDAndFilingIdentity(t *testing.T) {
 	submissions.Filings.Recent.ReportDate = nil
 	if reports = buildSECReports(facts, submissions, "0000000123", now); len(reports) != 0 {
 		t.Fatal("malformed filing accepted")
+	}
+}
+
+func TestSECEarningsReleasePrecedesOlderQuarterlyReport(t *testing.T) {
+	now := time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
+	_, submissions := secExampleData(now)
+	recent := &submissions.Filings.Recent
+	recent.Accession = append([]string{"0000000123-26-000080", "0000000123-26-000079"}, recent.Accession...)
+	recent.Form = append([]string{"8-K", "8-K"}, recent.Form...)
+	recent.Filed = append([]string{"2026-10-28", "2026-10-27"}, recent.Filed...)
+	recent.ReportDate = append([]string{"2026-10-28", "2026-10-27"}, recent.ReportDate...)
+	recent.Document = append([]string{"release.htm", "other-event.htm"}, recent.Document...)
+	recent.Items = []string{"2.02,9.01", "8.01,9.01", ""}
+	release, ok := latestSECEarningsRelease(submissions, "0000000123", now)
+	if !ok || release.Accession != "0000000123-26-000080" || release.ReportDate != "" {
+		t.Fatalf("earnings 8-K not distinguished from unrelated 8-K: %+v", release)
+	}
+	primary := `<html><body><p>Item 2.02. Results of Operations and Financial Condition.</p><p>Results for the quarter ended September 30, 2026.</p><a href="earnings-exhibit.htm">Press release dated October 28, 2026</a></body></html>`
+	s := newSECFundamentalsClient("WiseInvest test contact@example.com")
+	s.client.Transport = filingTestTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "www.sec.gov" || !strings.HasSuffix(r.URL.Path, "/release.htm") {
+			t.Fatalf("unexpected SEC request: %s", r.URL)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/html"}}, Body: io.NopCloser(strings.NewReader(primary)), Request: r}, nil
+	})
+	resolved, ok := s.resolveEarningsRelease(context.Background(), "0000000123", release)
+	if !ok || resolved.ReportDate != "2026-09-30" || !strings.HasSuffix(resolved.SourceURL, "/earnings-exhibit.htm") || resolved.Kind != "earnings_release" {
+		t.Fatalf("earnings period or official exhibit lost: %+v", resolved)
+	}
+	if got := earningsPeriodEnd("quarter ended March 31, 2025", "2026-10-28"); got != "" {
+		t.Fatalf("stale period accepted: %s", got)
+	}
+	if got := earningsExhibitDocument([]byte(`<a href="https://evil.example/report.htm">Press release</a>`)); got != "" {
+		t.Fatalf("external exhibit accepted: %s", got)
 	}
 }
 
@@ -350,4 +385,22 @@ func TestSECLiveClient(t *testing.T) {
 		t.Fatalf("official SEC client failed: status=%s diagnostic=%s", row.Status, row.Message)
 	}
 	t.Logf("live SEC client verified: CIK=%s, EPS period=%s to %s, basis=%s, trailing EPS=%v for %s to %s, reports=%d, latest=%s", row.SECCIK, row.EPSPeriodStart, row.EPSPeriodEnd, row.EPSBasis, *row.TrailingEPS, row.TrailingEPSStart, row.TrailingEPSEnd, len(row.FinancialReports), row.FinancialReports[0].SourceURL)
+}
+
+func TestSECLiveAlphabetLatestRelease(t *testing.T) {
+	if os.Getenv("SEC_LIVE_CHECK") != "1" {
+		t.Skip("set SEC_LIVE_CHECK=1 for official network verification")
+	}
+	client := newSECFundamentalsClient(os.Getenv("SEC_USER_AGENT"))
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	row := client.fetch(ctx, "GOOGL")
+	if row.Status != "available" || len(row.FinancialReports) == 0 || row.FinancialReports[0].ReportDate < "2026-09-30" {
+		t.Fatalf("latest Alphabet earnings not found: status=%s diagnostic=%s reports=%+v", row.Status, row.Message, row.FinancialReports)
+	}
+	excerpt, err := client.filingExcerpt(ctx, row.FinancialReports[0])
+	if err != nil || !strings.Contains(excerpt, "CONSOLIDATED STATEMENTS OF INCOME") || !strings.Contains(excerpt, "CONSOLIDATED STATEMENTS OF CASH FLOWS") {
+		t.Fatalf("Alphabet earnings exhibit was not read with financial statements: length=%d err=%v", len(excerpt), err)
+	}
+	t.Logf("Alphabet latest SEC report: form=%s kind=%s period=%s filed=%s source=%s", row.FinancialReports[0].Form, row.FinancialReports[0].Kind, row.FinancialReports[0].ReportDate, row.FinancialReports[0].FiledDate, row.FinancialReports[0].SourceURL)
 }

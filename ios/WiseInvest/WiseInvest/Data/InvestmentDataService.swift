@@ -30,14 +30,16 @@ struct InvestmentMetric: Codable {
 
 struct InvestmentReport: Codable, Identifiable {
     let form: String
+    let kind: String?
     let filedDate: String
     let reportDate: String
     let accession: String
     let sourceURL: String
     let metrics: [String: InvestmentMetric]?
     var id: String { accession }
+    var displayForm: String { kind == "earnings_release" ? "8-K 业绩公告" : form }
     enum CodingKeys: String, CodingKey {
-        case form, accession, metrics
+        case form, kind, accession, metrics
         case filedDate = "filed_date", reportDate = "report_date", sourceURL = "source_url"
     }
 }

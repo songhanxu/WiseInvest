@@ -23,7 +23,7 @@ export type Fundamentals = {
   pe_price_time?: string;
   sec_cik?: string;
   financial_reports?: {
-    form: string; filed_date: string; report_date: string; source_url: string; accession: string;
+    form: string; kind?: "earnings_release"; filed_date: string; report_date: string; source_url: string; accession: string;
     metrics?: Record<string, { value: number; unit: string; period_start?: string; period_end: string; tag: string }>;
   }[];
   pe: number | null;
@@ -48,6 +48,7 @@ export type Fundamentals = {
   message?: string;
 };
 export type SECReport = NonNullable<Fundamentals["financial_reports"]>[number];
+export const reportLabel = (report: SECReport) => report.kind === "earnings_release" ? "8-K 业绩公告" : report.form;
 
 export const stockKey = (stock: StockQuote) => `${stock.market}:${stock.id}`;
 export const numeric = (value?: number | null) => value == null || !Number.isFinite(value) ? "—" : new Intl.NumberFormat("zh-CN", { maximumFractionDigits: value !== 0 && Math.abs(value) < 1 ? 12 : 2 }).format(value);
@@ -191,7 +192,7 @@ export function StockResearchTable<T extends StockQuote>({ stocks, markets, fund
           <td data-label="价格" className="mono"><span className="quote-amount">{stock.quote_available === false || stock.current_price <= 0 ? "—" : numeric(stock.current_price)}<span className="quote-currency">{quoteCurrency(stock)}</span></span><small className="quote-source-label" title={quoteTimeLabel(stock)}>{quoteStatusLabel(stock)}</small></td>
           {renderHolding && <td data-label="持仓详情" className="holding-detail-cell">{renderHolding(stock)}</td>}{renderTarget && <td data-label="期望价格" className="target-price-column">{renderTarget(stock)}</td>}
           <td data-label="EPS" className="mono col-eps" title={[financialHint, f?.eps_period_start && `${f.eps_period_start} 至 ${f.eps_period_end}`, f?.eps_filed_date && `提交于 ${f.eps_filed_date}`].filter(Boolean).join(" · ")}>{f?.eps != null ? numeric(f.eps) : empty}{f?.eps != null && <><small>{[f.metrics?.eps?.currency || f.currency, f.eps_basis].filter(Boolean).join(" · ")}</small>{f.eps_period_end && <small>截至 {f.eps_period_end}</small>}</>}</td>
-          <td data-label="当前最新财报" className="col-report">{latestReport ? <div className="filing-cell"><div className="filing-cell-copy"><button type="button" className="filing-period-link" aria-label={`${code} ${latestReport.form} 财报，报告期末 ${latestReport.report_date}，查看详情`} onClick={() => onOpenReport(stock)}><time dateTime={latestReport.report_date}>{latestReport.report_date}</time></button><div className="filing-cell-meta"><span className="filing-form">{latestReport.form}</span><span className="filing-filed" title={`SEC 提交于 ${latestReport.filed_date}`}>提交 <time dateTime={latestReport.filed_date}>{latestReport.filed_date.slice(0, 4) === latestReport.report_date.slice(0, 4) ? latestReport.filed_date.slice(5) : latestReport.filed_date}</time></span></div></div><button type="button" className="report-ai-button" aria-label={`${code} 财报 AI 解读`} title="查看 AI 财报解读" onClick={() => onOpenInsight(stock)}>{insightStatus?.[stock.id.toUpperCase()] === "pending" ? <Loader2 size={12} className="spin" /> : <Sparkles size={12} />}</button></div> : empty}</td>
+          <td data-label="当前最新财报" className="col-report">{latestReport ? <div className="filing-cell"><div className="filing-cell-copy"><button type="button" className="filing-period-link" aria-label={`${code} ${reportLabel(latestReport)}，报告期末 ${latestReport.report_date}，查看详情`} onClick={() => onOpenReport(stock)}><time dateTime={latestReport.report_date}>{latestReport.report_date}</time></button><div className="filing-cell-meta"><span className="filing-form">{reportLabel(latestReport)}</span><span className="filing-filed" title={`SEC 提交于 ${latestReport.filed_date}`}>提交 <time dateTime={latestReport.filed_date}>{latestReport.filed_date.slice(0, 4) === latestReport.report_date.slice(0, 4) ? latestReport.filed_date.slice(5) : latestReport.filed_date}</time></span></div></div><button type="button" className="report-ai-button" aria-label={`${code} 财报 AI 解读`} title="查看 AI 财报解读" onClick={() => onOpenInsight(stock)}>{insightStatus?.[stock.id.toUpperCase()] === "pending" ? <Loader2 size={12} className="spin" /> : <Sparkles size={12} />}</button></div> : empty}</td>
           <td data-label="PE" className="mono col-pe" title={[metricHint(f, "pe"), f?.pe_price != null && f.trailing_eps != null && `${numeric(f.pe_price)} USD ÷ ${numeric(f.trailing_eps)} USD/股`, f?.trailing_eps_basis].filter(Boolean).join(" · ")}>{f?.pe != null && f.pe > 0 ? numeric(f.pe) : f?.trailing_eps != null && f.trailing_eps <= 0 ? "亏损" : empty}{f?.pe_price != null && f.trailing_eps != null && <small>现货 {numeric(f.pe_price)} ÷ TTM {numeric(f.trailing_eps)}</small>}{f?.pe == null && f?.trailing_eps != null && f.trailing_eps > 0 && <small>缺有效美元现货报价</small>}</td>
           <td data-label="公司指引" className="mono col-guidance" title={f?.guidance_report_date ? `财报发布 ${f.guidance_report_date}` : financialHint}>{f?.guidance_source_url && /^https?:\/\//.test(f.guidance_source_url) ? <a href={f.guidance_source_url} target="_blank" rel="noreferrer">{guidance}</a> : guidance}<small>{f?.guidance_period ? `${f.guidance_period} · ${f.guidance_basis || ""} · ${f.metrics?.guidance?.currency || f.currency || ""}` : na ? "" : "未取得有效公司指引"}</small></td>
           <td data-label="下份财报时间" className="mono col-earnings" title={metricHint(f, "next_earnings_date")}>{f?.next_earnings_date || empty}{f?.next_earnings_date_end && ` 至 ${f.next_earnings_date_end}`}{f?.next_earnings_date && <small>{f.earnings_date_status === "confirmed" ? "公司已确认" : "预计日期"}</small>}</td>
@@ -210,7 +211,7 @@ function SECFinancialReports({ reports }: { reports: NonNullable<Fundamentals["f
     <h5>SEC 财报与财务摘要</h5>
     <p className="watchlist-note">这里展示六项财务摘要；点击原始财报可查看完整正文。数值按各科目的披露期间列示，现金流可能为年初至今累计值。</p>
     {reports.map((report, index) => <details key={report.accession} open={index === 0}>
-      <summary>{report.form} · 报告期末 {report.report_date} · 提交 {report.filed_date}</summary>
+      <summary>{reportLabel(report)} · 报告期末 {report.report_date} · 提交 {report.filed_date}</summary>
       <a href={report.source_url} target="_blank" rel="noreferrer">查看 SEC 原始财报</a>
       <dl>{Object.entries(report.metrics || {}).map(([key, metric]) => <div key={key}>
         <dt>{labels[key] || key}</dt><dd title={metric.tag}><strong>{numeric(metric.value)} {metric.unit}</strong><small>{metric.period_start ? `${metric.period_start} 至 ${metric.period_end}` : `截至 ${metric.period_end}`}</small></dd>

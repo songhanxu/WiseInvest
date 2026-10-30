@@ -28,7 +28,8 @@ Page({
     ]);
     const fundamentals = tasks[0].status === 'fulfilled' ? tasks[0].value : null;
     const reports = fundamentals && Array.isArray(fundamentals.financial_reports) ? fundamentals.financial_reports.map((report) => ({
-      ...report, metricRows: Object.keys(report.metrics || {}).map((key) => ({ label: metricLabels[key] || key.replace(/_/g, ' '), ...report.metrics[key] })),
+      ...report, displayForm: report.kind === 'earnings_release' ? '8-K 业绩公告' : report.form,
+      metricRows: Object.keys(report.metrics || {}).map((key) => ({ label: metricLabels[key] || key.replace(/_/g, ' '), ...report.metrics[key] })),
     })) : [];
     const alerts = tasks[1].status === 'fulfilled' ? tasks[1].value.alerts || [] : [];
     const alert = alerts.find((row) => row.holding_id === `watchlist:${market}:${code}`) || null;

@@ -99,10 +99,16 @@ func (s *secFundamentalsClient) filingExcerpt(ctx context.Context, report SECFin
 	if err != nil || len(raw) > maxFilingBytes {
 		return "", fmt.Errorf("SEC filing is too large or incomplete")
 	}
-	return extractFilingExcerpt(raw), nil
+	return extractFilingExcerpt(raw, report.Kind == "earnings_release"), nil
 }
 
-func extractFilingExcerpt(raw []byte) string {
+type filingExcerptSection struct {
+	name string
+	keys []string
+	max  int
+}
+
+func extractFilingExcerpt(raw []byte, includeStatements ...bool) string {
 	root, err := html.Parse(strings.NewReader(string(raw)))
 	if err != nil {
 		return ""
@@ -153,15 +159,20 @@ func extractFilingExcerpt(raw []byte) string {
 		excerpts = append(excerpts, clean)
 	}
 	lower := strings.ToLower(clean)
-	for _, section := range []struct {
-		name string
-		keys []string
-		max  int
-	}{
+	sections := []filingExcerptSection{
 		{"经营讨论", []string{"management's discussion and analysis", "management’s discussion and analysis"}, 16000},
 		{"经营结果", []string{"results of operations"}, 7000},
 		{"风险因素", []string{"risk factors"}, 5500},
-	} {
+	}
+	if len(includeStatements) > 0 && includeStatements[0] {
+		sections = append(sections,
+			filingExcerptSection{"补充数据", []string{"supplemental information"}, 4500},
+			filingExcerptSection{"利润表", []string{"consolidated statements of income", "consolidated statements of operations"}, 7000},
+			filingExcerptSection{"现金流量表", []string{"consolidated statements of cash flows"}, 6000},
+			filingExcerptSection{"资产负债表", []string{"consolidated balance sheets"}, 5000},
+		)
+	}
+	for _, section := range sections {
 		position := -1
 		for _, key := range section.keys {
 			found := strings.Index(lower, key)

@@ -332,14 +332,26 @@ func (h *StockHandler) generateFilingInsight(userID uint, day, code string) {
 	}
 	fundamentals := h.fundamentals.SEC.fetch(ctx, code)
 	if len(fundamentals.FinancialReports) == 0 {
-		result.Message = "SEC 尚未提供这只股票可核对的定期财报"
+		result.Message = "SEC 尚未提供这只股票可核对的财报或业绩公告"
 		return
 	}
 	report := fundamentals.FinancialReports[0]
 	result.Accession, result.ReportDate, result.FiledDate = report.Accession, report.ReportDate, report.FiledDate
-	result.Sources = append(result.Sources, FilingInsightSource{Label: "SEC 原始财报", URL: report.SourceURL, Date: report.FiledDate})
+	sourceLabel := "SEC 原始财报"
+	if report.Kind == "earnings_release" {
+		sourceLabel = "SEC 8-K 业绩发布稿"
+	}
+	result.Sources = append(result.Sources, FilingInsightSource{Label: sourceLabel, URL: report.SourceURL, Date: report.FiledDate})
 	filingText, filingErr := h.fundamentals.SEC.filingExcerpt(ctx, report)
-	additionalFacts, factsErr := h.fundamentals.SEC.reportFacts(ctx, fundamentals.SECCIK, report)
+	if report.Kind == "earnings_release" && (filingErr != nil || filingText == "") {
+		result.Message = "SEC 业绩发布稿正文暂不可用，无法可靠解读"
+		return
+	}
+	var additionalFacts []filingFact
+	var factsErr error
+	if report.Kind != "earnings_release" {
+		additionalFacts, factsErr = h.fundamentals.SEC.reportFacts(ctx, fundamentals.SECCIK, report)
+	}
 	priceSymbol := "us" + code
 	if quotes, err := h.fetchTencentUSStocksBySymbol(ctx, code); err == nil {
 		for _, quote := range quotes {
@@ -390,12 +402,23 @@ func (h *StockHandler) generateFilingInsight(userID uint, day, code string) {
 			}
 		}
 	}
+	var reportedEPS any = fundamentals.EPS
+	reportedEPSBasis := fundamentals.EPSBasis
+	var trailingEPS any = fundamentals.TrailingEPS
+	trailingEPSBasis := fundamentals.TrailingEPSBasis
+	if report.Kind == "earnings_release" {
+		// CompanyFacts may still be one quarter behind an 8-K earnings release.
+		// Never present the older structured EPS as part of the new release.
+		reportedEPS, reportedEPSBasis = nil, ""
+		trailingEPS, trailingEPSBasis = nil, ""
+	}
 	data := map[string]any{
 		"code": code, "as_of": day, "report": report,
 		"latest_report_and_history": fundamentals.FinancialReports,
 		"same_period_comparisons":   filingComparableMetrics(fundamentals.FinancialReports),
-		"reported_eps":              fundamentals.EPS, "reported_eps_basis": fundamentals.EPSBasis,
-		"trailing_eps": fundamentals.TrailingEPS, "trailing_eps_basis": fundamentals.TrailingEPSBasis,
+		"reported_eps":              reportedEPS, "reported_eps_basis": reportedEPSBasis,
+		"previous_structured_eps": fundamentals.EPS, "previous_structured_eps_period_end": fundamentals.EPSPeriodEnd,
+		"trailing_eps": trailingEPS, "trailing_eps_basis": trailingEPSBasis,
 		"filing_excerpt":               filingText,
 		"filing_text_status":           map[bool]string{true: "SEC 正文可用", false: "SEC 正文暂不可用，仅有结构化摘要"}[filingErr == nil && filingText != ""],
 		"additional_reported_concepts": additionalFacts,
@@ -552,7 +575,7 @@ func (h *StockHandler) keepInsightLock(userID uint, day, code string, stop <-cha
 }
 
 const filingInsightInstructions = `你是严谨的股票财报研究员，用中文写一份针对最新一份 SEC 财报的深入解读，供投资者决策参考。
-必须以报告期末、提交日期和当前日期区分信息时点；优先使用 SEC 正文和结构化披露，逐项核对营收、利润、现金流、资产负债及 EPS 的期间、币种和口径。比较往期时仅比较同口径、同持续期间；若不可比则明确说明。解释利润与现金流背离、增长质量、潜在一次性事项、管理层展望和关键风险；没有证据的项目不要编造。
+必须以报告期末、提交日期和当前日期区分信息时点；优先使用 SEC 正文和结构化披露，逐项核对营收、利润、现金流、资产负债及 EPS 的期间、币种和口径。若最新材料是 8-K 业绩发布稿，明确说明完整 10-Q/10-K 尚未提交；不要把 previous_structured_eps 当作本期数据。比较往期时仅比较同口径、同持续期间；若不可比则明确说明。解释利润与现金流背离、增长质量、潜在一次性事项、管理层展望和关键风险；没有证据的项目不要编造。
 分析财报后股价已发生的变化：明确列出可验证的股票涨跌与标普 500 同期变化；区分财报影响、市场整体、估值变化和后续新闻。新闻搜索摘要只是线索，不能据此断言因果；缺少证据时列出至少两个竞争性解释并写出需要验证什么。如果财报较旧，把财报发布后的走势和当下判断分开。
 给出未来 1–3 个月看涨、基准、看跌三种情景、触发因素和失效条件。不要捏造目标价、概率、共识预期或未来业绩。若缺少估值、当前现货价或正文，降低结论强度。
 最后明确给出买入、持有、减仓或卖出的研究倾向，以及适用条件、反向证据和主要风险；这不是对特定用户的个性化投资建议。引用仅使用输入中已有来源，不得编造链接。约 800–1300 字，使用清晰的小标题。`

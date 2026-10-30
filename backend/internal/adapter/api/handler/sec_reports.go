@@ -35,6 +35,7 @@ type ReportedFinancialMetric struct {
 }
 type SECFinancialReport struct {
 	Form       string                             `json:"form"`
+	Kind       string                             `json:"kind,omitempty"`
 	FiledDate  string                             `json:"filed_date"`
 	ReportDate string                             `json:"report_date"`
 	Accession  string                             `json:"accession"`

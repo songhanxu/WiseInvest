@@ -158,6 +158,7 @@ type secSubmissions struct {
 			Filed      []string `json:"filingDate"`
 			ReportDate []string `json:"reportDate"`
 			Document   []string `json:"primaryDocument"`
+			Items      []string `json:"items"`
 		} `json:"recent"`
 	} `json:"filings"`
 }
@@ -207,6 +208,14 @@ func (s *secFundamentalsClient) fetch(ctx context.Context, code string) Fundamen
 	row.Source, row.AsOf, row.SECCIK = "SEC EDGAR（公司披露）", time.Now().UTC().Format(time.RFC3339), cik
 	if filingsError == "" {
 		row.FinancialReports = buildSECReports(facts, submissions, cik, time.Now())
+		if release, ok := latestSECEarningsRelease(submissions, cik, time.Now()); ok && (len(row.FinancialReports) == 0 || release.FiledDate > row.FinancialReports[0].FiledDate) {
+			if release, ok = s.resolveEarningsRelease(ctx, cik, release); ok && (len(row.FinancialReports) == 0 || release.ReportDate > row.FinancialReports[0].ReportDate) {
+				row.FinancialReports = append([]SECFinancialReport{release}, row.FinancialReports...)
+				if len(row.FinancialReports) > 8 {
+					row.FinancialReports = row.FinancialReports[:8]
+				}
+			}
+		}
 	}
 	// Domestic US-GAAP EPS has a known common-share basis. Foreign/ADR issuers
 	// can report ordinary shares rather than ADS: preserve their statements but

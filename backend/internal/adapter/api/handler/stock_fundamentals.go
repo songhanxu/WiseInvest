@@ -249,7 +249,13 @@ func (s *FundamentalsService) cachedFetch(ctx context.Context, market, code stri
 	key := market + ":" + code
 	for {
 		s.mu.Lock()
-		if entry, ok := s.cache[key]; ok && time.Since(entry.Time) < 6*time.Hour {
+		ttl := 6 * time.Hour
+		if market == "us_stock" {
+			// Earnings releases can precede a 10-Q by days; refresh the SEC
+			// filing list often enough for a newly announced quarter to appear.
+			ttl = 30 * time.Minute
+		}
+		if entry, ok := s.cache[key]; ok && time.Since(entry.Time) < ttl {
 			s.mu.Unlock()
 			return entry.Data
 		}
@@ -279,10 +285,9 @@ func (s *FundamentalsService) cachedFetch(ctx context.Context, market, code stri
 			case <-taskCtx.Done():
 			}
 			stamp := time.Now()
-			// Partial results must recover promptly when an upstream subscription,
-			// session or network issue is resolved, rather than staying empty for 6h.
+			// Partial results retry after a minute, using the market's cache TTL.
 			if row.Status == "unavailable" || (row.Status == "available" && (row.EPS == nil || row.ForwardPE == nil || row.NextEarningsDate == "")) {
-				stamp = stamp.Add(-6*time.Hour + time.Minute)
+				stamp = stamp.Add(-ttl + time.Minute)
 			}
 			s.mu.Lock()
 			for len(s.cache) >= 512 {

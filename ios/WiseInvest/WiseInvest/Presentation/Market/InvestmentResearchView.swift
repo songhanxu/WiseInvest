@@ -89,8 +89,12 @@ struct InvestmentResearchView: View {
                     }
                     ForEach(fundamentals?.financialReports ?? []) { report in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("\(report.form) · \(report.reportDate)").font(.subheadline.weight(.semibold))
+                            Text("\(report.displayForm) · \(report.reportDate)").font(.subheadline.weight(.semibold))
                             Text("提交 SEC \(report.filedDate)").font(.caption).foregroundStyle(.secondary)
+                            if report.kind == "earnings_release" {
+                                Text("业绩发布稿；完整 10-Q/10-K 尚未提交。")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                             ForEach((report.metrics ?? [:]).keys.sorted(), id: \.self) { key in
                                 if let metric = report.metrics?[key] {
                                     HStack(alignment: .top) {

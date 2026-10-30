@@ -42,6 +42,7 @@ export function AccountsPanel({ apiBase, token, markets, isActive = true, onOpen
   const [insightBusy, setInsightBusy] = useState("");
   const [filingView, setFilingView] = useState<{ code: string; type: "report" | "insight" } | null>(null);
   const lastInsightRefresh = useRef("");
+  const staleInsightRefresh = useRef(new Set<string>());
   const insightScopeRef = useRef("");
   const [filter, setFilter] = useState<MarketId | "all" | "other">("all");
   const version = useRef(0);
@@ -68,8 +69,22 @@ export function AccountsPanel({ apiBase, token, markets, isActive = true, onOpen
     finally { if (insightScopeRef.current === scope) setInsightBusy(""); }
   }, [apiBase, token, readInsights, insightScope]);
   useEffect(() => {
-    setInsights({}); setInsightError(""); setFilingView(null); lastInsightRefresh.current = "";
+    setInsights({}); setInsightError(""); setFilingView(null); lastInsightRefresh.current = ""; staleInsightRefresh.current.clear();
   }, [apiBase, token, accountId]);
+  useEffect(() => {
+    if (!isActive || !token) return;
+    for (const stock of stocks) {
+      if (stock.market !== "us_stock") continue;
+      const code = stock.id.toUpperCase();
+      const latest = fundamentals[stockKey(stock)]?.financial_reports?.[0];
+      const insight = insights[code];
+      if (!latest || insight?.status !== "ready" || !insight.accession || insight.accession === latest.accession) continue;
+      const key = `${code}:${latest.accession}`;
+      if (staleInsightRefresh.current.has(key)) continue;
+      staleInsightRefresh.current.add(key);
+      void refreshInsight(code, true, latest.accession);
+    }
+  }, [isActive, token, stocks, fundamentals, insights, refreshInsight]);
   useEffect(() => {
     if (!isActive || !token || !insightCodes) return;
     const scope = insightScope;
@@ -174,6 +189,6 @@ export function AccountsPanel({ apiBase, token, markets, isActive = true, onOpen
       return filingView.type === "report" ? <ReportDetailDialog stock={stock} fundamentals={data} onClose={() => setFilingView(null)} />
         : <FilingInsightDialog stock={stock} report={report} insight={insights[filingView.code]} busy={insightBusy === filingView.code} onRetry={() => void refreshInsight(filingView.code, true, report.accession)} onClose={() => setFilingView(null)} />;
     })()}
-    <p className="watchlist-data-note">展示已连接账户的股票、加密资产余额及已启用的合约持仓；不同平台、产品和多空方向分别列示。行情与公司财报沿用自选列表的数据来源和口径；当前最新财报与 AI 解读覆盖 SEC 收录的美股定期申报。全部账户不包含未配置、未绑定的平台或未接入的理财、资金账户及期权。价格保留各平台币种与数量单位，无法识别的资产仍保留数量。</p>
+    <p className="watchlist-data-note">展示已连接账户的股票、加密资产余额及已启用的合约持仓；不同平台、产品和多空方向分别列示。行情与公司财报沿用自选列表的数据来源和口径；当前最新财报与 AI 解读覆盖 SEC 收录的美股定期申报及已提交的业绩公告。全部账户不包含未配置、未绑定的平台或未接入的理财、资金账户及期权。价格保留各平台币种与数量单位，无法识别的资产仍保留数量。</p>
   </section>;
 }

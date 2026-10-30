@@ -41,6 +41,7 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
   const [insightBusy, setInsightBusy] = useState("");
   const [filingView, setFilingView] = useState<{ code: string; type: "report" | "insight" } | null>(null);
   const lastInsightRefresh = useRef("");
+  const staleInsightRefresh = useRef(new Set<string>());
   const insightScopeRef = useRef(`${apiBase}|${token}`); insightScopeRef.current = `${apiBase}|${token}`;
   const requestVersion = useRef(0);
   const mutationVersion = useRef(0);
@@ -71,8 +72,23 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
   }, [apiBase, token, readInsights]);
 
   useEffect(() => {
-    setInsights({}); setInsightError(""); setFilingView(null); lastInsightRefresh.current = "";
+    setInsights({}); setInsightError(""); setFilingView(null); lastInsightRefresh.current = ""; staleInsightRefresh.current.clear();
   }, [apiBase, token]);
+
+  useEffect(() => {
+    if (!isActive || !token) return;
+    for (const stock of stocks) {
+      if (stock.market !== "us_stock") continue;
+      const code = stock.id.toUpperCase();
+      const latest = fundamentals[stockKey(stock)]?.financial_reports?.[0];
+      const insight = insights[code];
+      if (!latest || insight?.status !== "ready" || !insight.accession || insight.accession === latest.accession) continue;
+      const key = `${code}:${latest.accession}`;
+      if (staleInsightRefresh.current.has(key)) continue;
+      staleInsightRefresh.current.add(key);
+      void refreshInsight(code, true, latest.accession);
+    }
+  }, [isActive, token, stocks, fundamentals, insights, refreshInsight]);
 
   useEffect(() => {
     if (!isActive || !token || !insightCodes || !lastSuccessAt.current) return;
@@ -249,6 +265,6 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
       return filingView.type === "report" ? <ReportDetailDialog stock={stock} fundamentals={data} onClose={() => setFilingView(null)} />
         : <FilingInsightDialog stock={stock} report={report} insight={insights[filingView.code]} busy={insightBusy === filingView.code} onRetry={() => void refreshInsight(filingView.code, true, report.accession)} onClose={() => setFilingView(null)} />;
     })()}
-    <p className="watchlist-data-note">行情优先使用 Bitget，美港股使用腾讯兜底，加密货币使用 Binance 兜底；每条价格显示实际来源和报价时间。美股 EPS、TTM 估算及财务摘要以 SEC 为主；Yahoo Finance 补充估值及其他市场。Yahoo PE 缺失时，使用腾讯美元美股现货报价与 SEC TTM EPS 计算，Bitget 股票代币报价不参与 PE。当前最新财报与每日 AI 解读覆盖 SEC 收录的美股定期申报；点击财报查看摘要和原文，AI 图标查看依据财报及财报后行情生成的研究判断。其他市场缺少已核验的最新财报时显示「—」。公司指引单独列示。</p>
+    <p className="watchlist-data-note">行情优先使用 Bitget，美港股使用腾讯兜底，加密货币使用 Binance 兜底；每条价格显示实际来源和报价时间。美股 EPS、TTM 估算及财务摘要以 SEC 为主；Yahoo Finance 补充估值及其他市场。Yahoo PE 缺失时，使用腾讯美元美股现货报价与 SEC TTM EPS 计算，Bitget 股票代币报价不参与 PE。当前最新财报优先显示 SEC 已提交的业绩公告（8-K Item 2.02），完整 10-Q/10-K 提交后再更新标准化摘要；EPS 与 PE 仍按各自标注的披露期间计算。点击财报查看摘要和原文，AI 图标查看依据最新材料及财报后行情生成的研究判断。其他市场缺少已核验的最新财报时显示「—」。公司指引单独列示。</p>
   </section>;
 }
