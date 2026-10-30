@@ -84,6 +84,40 @@ BITGET_INCLUDE_FUTURES=true
 
 新增 `GET /api/v1/accounts` 与 `GET /api/v1/accounts/bitget/holdings`，均需要 JWT。账号未绑定、凭证未填完整时不会访问 Bitget 私有接口。私有请求固定访问官方主机，拒绝重定向，不把凭证写到 URL、返回值或上游错误消息；不允许调用交易接口。
 
+### 给外部 AI 的只读持仓接口
+
+`GET /api/v1/automation/bitget/holdings` 使用单独的长期机器密钥，不需要慧投登录 JWT。它只返回 `BITGET_OWNER_USER_ID` 所绑定的这一个 Bitget 账户持仓快照；不能读取其他交易所、其他慧投用户，也没有交易或修改操作。未设置密钥时返回 404；密钥错误返回 401；Bitget 账户未绑定返回 503。返回体与 `GET /api/v1/accounts/bitget/holdings` 相同，包含 `holdings`、`account_equities`、`as_of`、`stale`、`complete` 和 `warnings`。外部 AI 应检查 `stale`、`complete` 与 `warnings`，避免把旧快照当作最新持仓。
+
+在**运行后端的环境**中新增以下配置，然后重建后端容器。密钥须为 `openssl rand -hex 32` 产生的 64 位十六进制字符串，与 Bitget API Key / Secret / Passphrase 不同。更换此值并重建容器即可撤销旧密钥。
+
+```dotenv
+BITGET_HOLDINGS_ACCESS_KEY=生成的64位十六进制字符串
+```
+
+调用时只在请求头中传入密钥，切勿放在 URL 查询参数、AI 提示词、聊天记录或 Git 仓库。若 AI 平台支持 Secret / 环境变量，把它存在那里，并让工具调用时填入请求头：
+
+```bash
+curl --fail-with-body --silent --show-error \
+  -H "Authorization: Bearer $BITGET_HOLDINGS_ACCESS_KEY" \
+  'https://你的域名/api/v1/automation/bitget/holdings'
+```
+
+公网访问必须走 HTTPS。仓库内默认 Nginx 配置目前只监听 80 端口，必须先配置 HTTPS 终止并让可信反向代理把实际协议以 `X-Forwarded-Proto: https` 转发给后端。当前 HTTP IP 直连地址不能用于这个接口；不要尝试在 HTTP URL 上发送机器密钥。后端仅信任本机或 Docker 内网代理的协议标头，外部请求自行伪造该标头不会绕过检查。`BITGET_OWNER_USER_ID` 应继续填写实际绑定这套 Bitget 凭证的慧投用户 ID；如管理员账户 ID 为 2，就设为 `2`。
+
+如果另一个 AI 在你本地电脑上运行，且服务器暂时没有 HTTPS，可以走 SSH 隧道。先在本地终端保持下面的隧道运行，再让 AI 的工具访问本机地址；HTTP 只在本机环回和服务器内部传输，公网段走 SSH 加密：
+
+```bash
+ssh -N -L 127.0.0.1:18080:127.0.0.1:8080 root@119.91.58.30
+```
+
+```bash
+curl --fail-with-body --silent --show-error \
+  -H "Authorization: Bearer $BITGET_HOLDINGS_ACCESS_KEY" \
+  'http://127.0.0.1:18080/api/v1/automation/bitget/holdings'
+```
+
+本地隧道仅适用于 AI 能访问这台电脑的情况；托管在外部云端的 AI 仍需要公开 HTTPS 入口。上述 `18080` 端口只绑定本机，不要把它映射到公网。
+
 股票根据官方 `symbolType=stock` 资料识别，不用币名首字母猜测。加密资产也会展示；无法识别的资产保留原数量并归入其他分类。未出现在当前官方股票资料中的资产不会被归为股票。现货冻结/锁定数量计入持仓，合约多空分别展示；港股 Quanto 行情仍以 HKD 计价。列表不是完整账户权益报表。公司财报数据源不可用时财务列显示缺失，不从 Bitget 行情推算财报。
 
 服务端完整持仓快照短暂缓存 10 秒，读取缓存前仍检查用户身份；部分失败不缓存。行情失败时保留持仓数量并显示价格缺失。凭证只在服务端读取；浏览器仅持有慧投登录 token。

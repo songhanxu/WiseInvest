@@ -7,7 +7,7 @@ import (
 )
 
 func TestBitgetConfigDisabledDefaultsAndValidation(t *testing.T) {
-	for _, key := range []string{"BITGET_API_KEY", "BITGET_API_SECRET", "BITGET_PASSPHRASE", "BITGET_OWNER_USER_ID", "BITGET_ACCOUNT_TYPE", "BITGET_ACCOUNT_NAME", "BITGET_INCLUDE_FUTURES"} {
+	for _, key := range []string{"BITGET_API_KEY", "BITGET_API_SECRET", "BITGET_PASSPHRASE", "BITGET_OWNER_USER_ID", "BITGET_ACCOUNT_TYPE", "BITGET_ACCOUNT_NAME", "BITGET_INCLUDE_FUTURES", "BITGET_HOLDINGS_ACCESS_KEY"} {
 		t.Setenv(key, "")
 	}
 	c, err := loadBitgetConfig()
@@ -28,5 +28,22 @@ func TestBitgetConfigDisabledDefaultsAndValidation(t *testing.T) {
 			t.Fatalf("invalid %s accepted", key)
 		}
 		t.Setenv(key, "")
+	}
+	for _, invalid := range []string{"short", strings.Repeat("z", 64), "private-key"} {
+		t.Setenv("BITGET_HOLDINGS_ACCESS_KEY", invalid)
+		if _, err := loadBitgetConfig(); err == nil {
+			t.Fatalf("invalid automation key accepted: %q", invalid)
+		}
+	}
+	accessKey := strings.Repeat("a", 64)
+	t.Setenv("BITGET_HOLDINGS_ACCESS_KEY", accessKey)
+	c, err = loadBitgetConfig()
+	encoded, _ = json.Marshal(c)
+	if err != nil || c.HoldingsAccessKey != accessKey || strings.Contains(string(encoded), accessKey) {
+		t.Fatal("automation key config invalid or exposed")
+	}
+	t.Setenv("BITGET_API_KEY", accessKey)
+	if _, err := loadBitgetConfig(); err == nil {
+		t.Fatal("Bitget API key reused as automation key")
 	}
 }

@@ -60,6 +60,7 @@ func NewRouter(
 		// ── Agents (public) ───────────────────────────────────────────────
 		conversationHandler := handler.NewConversationHandler(conversationService, logger)
 		v1.GET("/agents", conversationHandler.GetAvailableAgents)
+		v1.GET("/automation/bitget/holdings", accountHandler.GetAutomationBitgetHoldings)
 
 		// ── Stock Market Data (public — no auth needed) ─────────────────
 		stocks := v1.Group("/stocks")
