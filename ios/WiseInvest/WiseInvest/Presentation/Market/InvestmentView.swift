@@ -29,6 +29,8 @@ struct InvestmentView: View {
     @State private var alertedHoldings: Set<String> = []
     @State private var loading = false
     @State private var error: String?
+    @State private var accountSyncError: String?
+    @State private var didRequestInsights = false
     private let service = InvestmentDataService.shared
 
     private var filteredStocks: [InvestmentStock] {
@@ -52,11 +54,6 @@ struct InvestmentView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    if let error {
-                        Text(error).font(.footnote).foregroundStyle(.orange)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
                     if tab == 0 { watchlistContent } else { accountsContent }
                 }
                 .padding(.horizontal, 18)
@@ -65,13 +62,16 @@ struct InvestmentView: View {
             .background(Color.primaryBackground)
             .navigationBarTitleDisplayMode(.inline)
             .refreshable { await load() }
-            .task { await load() }
+            .task(id: tab) { await load() }
             .task(id: "\(searchMarket.rawValue):\(query)") { await search() }
         }
     }
 
     private var watchlistContent: some View {
         VStack(alignment: .leading, spacing: 16) {
+            if let error {
+                issueNotice("请求暂未完成", details: error)
+            }
             VStack(alignment: .leading, spacing: 12) {
                 Text("添加自选").font(.headline)
                 HStack {
@@ -162,6 +162,17 @@ struct InvestmentView: View {
 
     private var accountsContent: some View {
         VStack(alignment: .leading, spacing: 15) {
+            if let details = accountNoticeDetails {
+                issueNotice(accountSyncError == nil ? "部分持仓数据尚未更新" : "账户同步暂不可用", details: details)
+            }
+            if let error {
+                issueNotice("请求暂未完成", details: error)
+            }
+            if loading && accounts.isEmpty && snapshot == nil {
+                ProgressView("正在读取账户…")
+                    .frame(maxWidth: .infinity)
+                    .padding(20)
+            }
             if let snapshot {
                 ForEach(snapshot.accountEquities ?? []) { equity in
                     VStack(alignment: .leading, spacing: 6) {
@@ -169,13 +180,11 @@ struct InvestmentView: View {
                         Text("\(equity.amount) \(equity.currency)").font(.title3.weight(.semibold))
                     }.frame(maxWidth: .infinity, alignment: .leading).investmentCard()
                 }
-                if snapshot.stale { Text("持仓快照可能已过期，请下拉刷新。") .font(.footnote).foregroundStyle(.orange) }
-                ForEach(snapshot.warnings ?? [], id: \.self) { warning in Text(warning).font(.footnote).foregroundStyle(.orange) }
             }
             ForEach(accounts) { account in
                 VStack(alignment: .leading, spacing: 5) {
                     Text(account.name).font(.headline)
-                    Text(account.status == "ready" ? "只读同步" : account.message ?? account.status)
+                    Text(account.status == "ready" ? "已配置 · 只读" : account.message ?? account.status)
                         .font(.caption).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading).investmentCard()
             }
@@ -221,27 +230,78 @@ struct InvestmentView: View {
         }
     }
 
+    private var accountNoticeDetails: String? {
+        var messages: [String] = []
+        if let accountSyncError { messages.append(accountSyncError) }
+        if accountSyncError != nil && snapshot != nil {
+            messages.append("当前展示的是上次取得的持仓，向下拉动可重试同步。")
+        }
+        if snapshot?.stale == true { messages.append("当前展示的是上次取得的持仓，向下拉动可重试同步。") }
+        messages.append(contentsOf: snapshot?.warnings ?? [])
+        var seen: Set<String> = []
+        let unique = messages.filter { seen.insert($0).inserted }
+        return unique.isEmpty ? nil : unique.joined(separator: "\n\n")
+    }
+
+    private func issueNotice(_ title: String, details: String) -> some View {
+        DisclosureGroup {
+            Text(details)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 8)
+        } label: {
+            Label(title, systemImage: "exclamationmark.circle")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.textPrimary)
+        }
+        .tint(Color.textSecondary)
+        .padding(.horizontal, 13)
+        .padding(.vertical, 11)
+        .background(Color.secondaryBackground, in: RoundedRectangle(cornerRadius: 12))
+    }
+
     @MainActor private func load() async {
+        let requestedTab = tab
         loading = true
-        defer { loading = false }
+        defer { if tab == requestedTab { loading = false } }
         error = nil
-        do {
-            stocks = try await service.watchlist()
-            if stocks.contains(where: { $0.market == "us_stock" }) {
-                Task { try? await service.refreshAllInsights() }
+        if requestedTab == 0 {
+            do {
+                let loaded = try await service.watchlist()
+                guard !Task.isCancelled && tab == requestedTab else { return }
+                stocks = loaded
+                if !didRequestInsights && stocks.contains(where: { $0.market == "us_stock" }) {
+                    didRequestInsights = true
+                    Task { try? await service.refreshAllInsights() }
+                }
+            } catch {
+                if !Task.isCancelled && tab == requestedTab { self.error = error.localizedDescription }
             }
-        } catch { self.error = error.localizedDescription }
+            return
+        }
+        accountSyncError = nil
         guard AuthState.shared.isAuthenticated else { return }
-        do { accounts = try await service.accounts() } catch { self.error = error.localizedDescription }
-        guard AuthState.shared.isAuthenticated else { return }
-        do { snapshot = try await service.holdings() } catch { self.error = error.localizedDescription }
+        var syncErrors: [String] = []
+        do { accounts = try await service.accounts() }
+        catch { if !Task.isCancelled { syncErrors.append(error.localizedDescription) } }
+        guard !Task.isCancelled && tab == requestedTab else { return }
+        guard AuthState.shared.isAuthenticated else { accountSyncError = syncErrors.first; return }
+        do { snapshot = try await service.holdings() }
+        catch { if !Task.isCancelled { syncErrors.append(error.localizedDescription) } }
+        guard !Task.isCancelled && tab == requestedTab else { return }
+        accountSyncError = syncErrors.isEmpty ? nil : syncErrors.joined(separator: "\n\n")
         guard AuthState.shared.isAuthenticated else { return }
         do {
-            alertState = try await service.alerts()
+            let loaded = try await service.alerts()
+            guard !Task.isCancelled && tab == requestedTab else { return }
+            alertState = loaded
             email = alertState?.email ?? ""
             alertedHoldings = Set(alertState?.alerts.map(\.holdingID) ?? [])
             holdingTargets = Dictionary(uniqueKeysWithValues: alertState?.alerts.map { ($0.holdingID, String($0.targetPrice)) } ?? [])
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            if !Task.isCancelled && tab == requestedTab { self.error = error.localizedDescription }
+        }
     }
 
     @MainActor private func search() async {
