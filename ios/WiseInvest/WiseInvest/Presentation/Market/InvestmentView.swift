@@ -71,17 +71,18 @@ struct InvestmentView: View {
             if let error {
                 issueNotice("请求暂未完成", details: error)
             }
-            VStack(alignment: .leading, spacing: 12) {
-                Text("添加自选").font(.headline)
-                HStack {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("搜索名称或代码", text: $query)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                }
-                .padding(11)
-                .background(Color.primaryBackground, in: RoundedRectangle(cornerRadius: 9))
-                if !results.isEmpty {
+            HStack(spacing: 10) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("搜索名称或代码，添加自选", text: $query)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+            }
+            .padding(.horizontal, 15)
+            .padding(.vertical, 14)
+            .background(Color.secondaryBackground, in: RoundedRectangle(cornerRadius: 12))
+
+            if !results.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
                     ForEach(results) { stock in
                         HStack {
                             VStack(alignment: .leading) {
@@ -95,8 +96,8 @@ struct InvestmentView: View {
                         .padding(.vertical, 6)
                     }
                 }
+                .investmentCard()
             }
-            .investmentCard()
 
             Text("我的自选")
                 .font(.headline)

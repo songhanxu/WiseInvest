@@ -32,19 +32,18 @@ struct InvestmentResearchView: View {
                 if let fundamentals {
                     VStack(alignment: .leading, spacing: 14) {
                         Text("财务概览").font(.headline)
-                        HStack {
+                        LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 16) {
                             metric("每股收益 EPS", value: fundamentals.eps)
-                            Spacer()
                             metric("市盈率 PE", value: fundamentals.pe)
-                        }
-                        HStack {
                             metric("预期 PE", value: fundamentals.forwardPE)
-                            Spacer()
                             VStack(alignment: .leading, spacing: 4) {
                                 Text("下次财报").font(.caption).foregroundStyle(.secondary)
                                 Text(fundamentals.nextEarningsDate ?? "待确认")
                                     .font(.subheadline.weight(.medium))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         if let message = fundamentals.message, !message.isEmpty {
                             Text(message).font(.caption).foregroundStyle(.secondary)
@@ -56,9 +55,9 @@ struct InvestmentResearchView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("最新财报 AI 解读").font(.headline)
                         if insightIsCurrent, let insight {
-                            Text("报告期末 \(insight.reportDate ?? "—") · 生成于 \(insight.generatedAt ?? "—")")
+                            Text("报告期末 \(insight.reportDate ?? "—") · 更新 \(Self.displayDate(insight.generatedAt))")
                                 .font(.caption).foregroundStyle(.secondary)
-                            MarkdownContentView(content: insight.content ?? "")
+                            ResearchInsightText(content: insight.content ?? "")
                             if let sources = insight.sources, !sources.isEmpty {
                                 Text("核对来源").font(.subheadline.weight(.medium))
                                 ForEach(sources) { source in
@@ -152,6 +151,11 @@ struct InvestmentResearchView: View {
          "equity": "股东权益", "operating_cash_flow": "经营现金流" ][key] ?? key.replacingOccurrences(of: "_", with: " ")
     }
 
+    private static func displayDate(_ value: String?) -> String {
+        guard let value, let date = ISO8601DateFormatter().date(from: value) else { return value ?? "—" }
+        return date.formatted(date: .numeric, time: .shortened)
+    }
+
     @MainActor private func load() async {
         loading = true; error = nil
         do { fundamentals = try await service.fundamentals(stock) }
@@ -202,4 +206,96 @@ private struct InvestmentResearchCard: ViewModifier {
 }
 private extension View {
     func researchCard() -> some View { modifier(InvestmentResearchCard()) }
+}
+
+private struct ResearchInsightText: View {
+    let content: String
+
+    private struct Block {
+        enum Kind { case paragraph, heading, bullet, numbered, quote, divider }
+        let kind: Kind
+        let text: String
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                switch block.kind {
+                case .paragraph:
+                    Text(LocalizedStringKey("　　" + block.text))
+                        .font(.body)
+                        .lineSpacing(4)
+                        .fixedSize(horizontal: false, vertical: true)
+                case .heading:
+                    Text(LocalizedStringKey(block.text))
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.top, 4)
+                case .bullet:
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Text("•")
+                        Text(LocalizedStringKey(block.text))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .font(.body)
+                case .numbered:
+                    Text(LocalizedStringKey(block.text))
+                        .font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
+                case .quote:
+                    Text(LocalizedStringKey(block.text))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 10)
+                case .divider:
+                    Divider()
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var blocks: [Block] {
+        let lines = content.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        var result: [Block] = []
+        var paragraph: [String] = []
+        func flushParagraph() {
+            if !paragraph.isEmpty {
+                let text = paragraph.reduce("") { joined, line in
+                    guard !joined.isEmpty else { return line }
+                    let needsSpace = (joined.unicodeScalars.last?.isASCII ?? false)
+                        && (line.unicodeScalars.first?.isASCII ?? false)
+                    return joined + (needsSpace ? " " : "") + line
+                }
+                result.append(Block(kind: .paragraph, text: text))
+                paragraph.removeAll()
+            }
+        }
+        for raw in lines {
+            let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if line.isEmpty { flushParagraph(); continue }
+            if line.range(of: #"^#{1,6} "#, options: .regularExpression) != nil {
+                flushParagraph()
+                result.append(Block(kind: .heading, text: String(line.drop { $0 == "#" || $0 == " " })))
+            } else if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("+ ") {
+                flushParagraph()
+                result.append(Block(kind: .bullet, text: String(line.dropFirst(2))))
+            } else if line.range(of: #"^\d+[.)] "#, options: .regularExpression) != nil {
+                flushParagraph()
+                result.append(Block(kind: .numbered, text: line))
+            } else if line.hasPrefix("> ") {
+                flushParagraph()
+                result.append(Block(kind: .quote, text: String(line.dropFirst(2))))
+            } else if line == "---" || line == "***" {
+                flushParagraph()
+                result.append(Block(kind: .divider, text: ""))
+            } else {
+                if let previous = paragraph.last, let end = previous.last, "。！？".contains(end) {
+                    flushParagraph()
+                }
+                paragraph.append(line)
+            }
+        }
+        flushParagraph()
+        return result
+    }
 }
