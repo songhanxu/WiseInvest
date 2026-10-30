@@ -19,7 +19,6 @@ struct InvestmentView: View {
     @State private var marketFilter = "all"
     @State private var stocks: [InvestmentStock] = []
     @State private var query = ""
-    @State private var searchMarket: InvestmentMarket = .all
     @State private var results: [InvestmentStock] = []
     @State private var accounts: [InvestmentAccount] = []
     @State private var snapshot: InvestmentSnapshot?
@@ -63,7 +62,7 @@ struct InvestmentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .refreshable { await load() }
             .task(id: tab) { await load() }
-            .task(id: "\(searchMarket.rawValue):\(query)") { await search() }
+            .task(id: query) { await search() }
         }
     }
 
@@ -82,17 +81,6 @@ struct InvestmentView: View {
                 }
                 .padding(11)
                 .background(Color.primaryBackground, in: RoundedRectangle(cornerRadius: 9))
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(InvestmentMarket.allCases) { market in
-                            Button(market.title) { searchMarket = market }
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(searchMarket == market ? Color.white : Color.textSecondary)
-                                .padding(.horizontal, 12).padding(.vertical, 7)
-                                .background(searchMarket == market ? Color.accentBlue : Color.primaryBackground, in: Capsule())
-                        }
-                    }
-                }
                 if !results.isEmpty {
                     ForEach(results) { stock in
                         HStack {
@@ -110,6 +98,8 @@ struct InvestmentView: View {
             }
             .investmentCard()
 
+            Text("我的自选")
+                .font(.headline)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     filterButton("全部", id: "all")
@@ -309,7 +299,7 @@ struct InvestmentView: View {
         guard !value.isEmpty else { results = []; return }
         try? await Task.sleep(nanoseconds: 300_000_000)
         guard !Task.isCancelled else { return }
-        do { results = try await service.search(value, market: searchMarket.rawValue) }
+        do { results = try await service.search(value, market: InvestmentMarket.all.rawValue) }
         catch { if !Task.isCancelled { self.error = error.localizedDescription } }
     }
 
