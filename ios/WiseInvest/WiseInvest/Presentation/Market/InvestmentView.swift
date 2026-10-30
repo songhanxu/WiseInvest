@@ -82,10 +82,17 @@ struct InvestmentView: View {
                 }
                 .padding(11)
                 .background(Color.primaryBackground, in: RoundedRectangle(cornerRadius: 9))
-                Picker("搜索市场", selection: $searchMarket) {
-                    ForEach(InvestmentMarket.allCases) { market in Text(market.title).tag(market) }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(InvestmentMarket.allCases) { market in
+                            Button(market.title) { searchMarket = market }
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(searchMarket == market ? Color.white : Color.textSecondary)
+                                .padding(.horizontal, 12).padding(.vertical, 7)
+                                .background(searchMarket == market ? Color.accentBlue : Color.primaryBackground, in: Capsule())
+                        }
+                    }
                 }
-                .pickerStyle(.segmented)
                 if !results.isEmpty {
                     ForEach(results) { stock in
                         HStack {
@@ -148,9 +155,9 @@ struct InvestmentView: View {
     private func filterButton(_ title: String, id: String) -> some View {
         Button(title) { marketFilter = id }
             .font(.subheadline)
-            .foregroundStyle(marketFilter == id ? Color.white : Color.primary)
+            .foregroundStyle(marketFilter == id ? Color.white : Color.textPrimary)
             .padding(.horizontal, 14).padding(.vertical, 8)
-            .background(marketFilter == id ? Color.accentBlue : Color.white, in: Capsule())
+            .background(marketFilter == id ? Color.accentBlue : Color.secondaryBackground, in: Capsule())
     }
 
     private var accountsContent: some View {
@@ -216,6 +223,7 @@ struct InvestmentView: View {
 
     @MainActor private func load() async {
         loading = true
+        defer { loading = false }
         error = nil
         do {
             stocks = try await service.watchlist()
@@ -223,15 +231,17 @@ struct InvestmentView: View {
                 Task { try? await service.refreshAllInsights() }
             }
         } catch { self.error = error.localizedDescription }
+        guard AuthState.shared.isAuthenticated else { return }
         do { accounts = try await service.accounts() } catch { self.error = error.localizedDescription }
+        guard AuthState.shared.isAuthenticated else { return }
         do { snapshot = try await service.holdings() } catch { self.error = error.localizedDescription }
+        guard AuthState.shared.isAuthenticated else { return }
         do {
             alertState = try await service.alerts()
             email = alertState?.email ?? ""
             alertedHoldings = Set(alertState?.alerts.map(\.holdingID) ?? [])
             holdingTargets = Dictionary(uniqueKeysWithValues: alertState?.alerts.map { ($0.holdingID, String($0.targetPrice)) } ?? [])
         } catch { self.error = error.localizedDescription }
-        loading = false
     }
 
     @MainActor private func search() async {
@@ -275,7 +285,9 @@ struct InvestmentView: View {
 
 private struct InvestmentCardModifier: ViewModifier {
     func body(content: Content) -> some View {
-        content.padding(16).background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+        content.padding(16)
+            .foregroundStyle(Color.textPrimary)
+            .background(Color.secondaryBackground, in: RoundedRectangle(cornerRadius: 12))
     }
 }
 private extension View {

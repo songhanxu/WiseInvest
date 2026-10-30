@@ -179,13 +179,23 @@ final class InvestmentDataService {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let requestToken = authenticated ? AuthState.shared.token : nil
         if authenticated {
-            guard let token = AuthState.shared.token else { throw InvestmentRequestError.unauthenticated }
+            guard let token = requestToken else { throw InvestmentRequestError.unauthenticated }
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         if let body { request.httpBody = try JSONSerialization.data(withJSONObject: body) }
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw InvestmentRequestError.invalidResponse }
+        if authenticated && response.statusCode == 401 {
+            // A request started before a new login must not sign out the new session.
+            await MainActor.run {
+                if AuthState.shared.token == requestToken {
+                    AuthState.shared.signOut()
+                }
+            }
+            throw InvestmentRequestError.unauthenticated
+        }
         guard (200..<300).contains(response.statusCode) else {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: String])?["error"]
             throw InvestmentRequestError.server(message ?? "请求失败 (\(response.statusCode))")
