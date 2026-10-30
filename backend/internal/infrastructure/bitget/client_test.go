@@ -58,6 +58,27 @@ func TestPublicBitgetClientBacksOffAfterConnectionFailure(t *testing.T) {
 	}
 }
 
+func TestOptionalStockInfoFailureDoesNotBlockQuotes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/market/instruments":
+			_, _ = w.Write([]byte(`{"code":"00000","data":[{"symbol":"RAAPLUSDT","baseCoin":"rAAPL","quoteCoin":"USDT","symbolType":"stock","isReality":"yes","status":"online"}]}`))
+		case "/api/v3/reality/market/stock-info":
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case "/api/v3/market/tickers":
+			_, _ = w.Write([]byte(`{"code":"00000","data":[{"symbol":"RAAPLUSDT","lastPrice":"110","openPrice24h":"100"}]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	c := NewClient(server.URL)
+	quotes, err := c.Quotes(context.Background(), "us_stock", []string{"AAPL"})
+	if err != nil || len(quotes) != 1 || c.backoff != 0 {
+		t.Fatalf("optional stock info failure suppressed primary quote: %+v %v backoff=%s", quotes, err, c.backoff)
+	}
+}
+
 func TestStockMarketsKeepIdentityCurrencyAndChangeBasis(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var data interface{}

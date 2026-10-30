@@ -98,14 +98,12 @@ func (c *Client) get(ctx context.Context, path string, params url.Values, target
 	}
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		if ctx.Err() != context.Canceled {
-			c.deferRetry()
-		}
+		c.deferRetry(ctx, path)
 		return fmt.Errorf("Bitget request failed")
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		c.deferRetry()
+		c.deferRetry(ctx, path)
 		return fmt.Errorf("Bitget HTTP %d", resp.StatusCode)
 	}
 	var result struct {
@@ -113,15 +111,15 @@ func (c *Client) get(ctx context.Context, path string, params url.Values, target
 		Data json.RawMessage `json:"data"`
 	}
 	if err = json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&result); err != nil {
-		c.deferRetry()
+		c.deferRetry(ctx, path)
 		return fmt.Errorf("invalid Bitget response")
 	}
 	if result.Code != "00000" {
-		c.deferRetry()
+		c.deferRetry(ctx, path)
 		return fmt.Errorf("Bitget error %s", result.Code)
 	}
 	if err := json.Unmarshal(result.Data, target); err != nil {
-		c.deferRetry()
+		c.deferRetry(ctx, path)
 		return err
 	}
 	c.failureMu.Lock()
@@ -131,7 +129,12 @@ func (c *Client) get(ctx context.Context, path string, params url.Values, target
 	return nil
 }
 
-func (c *Client) deferRetry() {
+func (c *Client) deferRetry(ctx context.Context, path string) {
+	// Company names are optional enrichment. A short timeout or failure here
+	// must not suppress otherwise healthy instrument and ticker requests.
+	if ctx.Err() == context.Canceled || path == "/api/v3/reality/market/stock-info" {
+		return
+	}
 	c.failureMu.Lock()
 	defer c.failureMu.Unlock()
 	if c.backoff == 0 {
