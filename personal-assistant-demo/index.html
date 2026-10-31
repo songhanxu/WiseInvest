@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="一个轻巧的个人工具助手演示站：管理待办、专注计时、记录灵感。">
+  <title>个人工具助手 · Hanxu Song</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="site-shell">
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="个人工具助手首页">
+        <span class="brand-mark" aria-hidden="true">H</span>
+        <span class="brand-copy"><strong>Hanxu</strong><small>个人工具助手</small></span>
+      </a>
+      <nav class="site-nav" aria-label="页面导航">
+        <a href="#tasks">清单</a>
+        <a href="#focus">专注</a>
+        <a href="#notes">便签</a>
+      </nav>
+      <button class="theme-button" id="theme-toggle" type="button" aria-label="切换深色模式">深色模式</button>
+    </header>
+
+    <main id="top">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> 轻量工作台 · 演示版</p>
+          <h1 id="hero-title">把一天安排得<br><em>更从容。</em></h1>
+          <p class="hero-description">把想做的事放进清单，留一段时间专注，再把灵感记下来。三个小工具，刚好够用。</p>
+          <a class="primary-link" href="#tasks">开始整理今天 <span aria-hidden="true">↗</span></a>
+        </div>
+        <div class="today-card" aria-label="今日概览">
+          <div class="today-card-top"><span>今日概览</span><span class="today-pill">MY DAY</span></div>
+          <div class="today-date" id="today-date">今天</div>
+          <div class="today-clock" id="today-clock">--:--</div>
+          <div class="today-divider"></div>
+          <div class="today-summary"><span>清单进度</span><strong id="hero-progress">0 / 0</strong></div>
+          <div class="progress-track" aria-hidden="true"><span id="hero-progress-bar"></span></div>
+          <p>从一件小事开始，慢慢推进。</p>
+        </div>
+      </section>
+
+      <section class="tools-heading" aria-labelledby="tools-title">
+        <div><p class="eyebrow">YOUR SPACE</p><h2 id="tools-title">给每天一点秩序</h2></div>
+        <p>不用注册，打开就能用。</p>
+      </section>
+
+      <div class="tool-grid">
+        <section class="tool-card tasks-card" id="tasks" aria-labelledby="tasks-title">
+          <div class="card-heading"><div><span class="card-index">01 / PLAN</span><h3 id="tasks-title">今日清单</h3></div><span class="card-symbol" aria-hidden="true">✓</span></div>
+          <p class="card-description">先写下最重要的事，完成一项就划掉一项。</p>
+          <form class="task-form" id="task-form">
+            <label class="sr-only" for="task-input">添加待办事项</label>
+            <input id="task-input" name="task" type="text" maxlength="80" placeholder="添加一件待办事项" autocomplete="off" required>
+            <button type="submit" aria-label="添加待办">添加</button>
+          </form>
+          <ul class="task-list" id="task-list" aria-label="今日待办"></ul>
+          <div class="card-footer"><span id="task-count">0 项待完成</span><button class="text-button" id="clear-completed" type="button">清除已完成</button></div>
+        </section>
+
+        <section class="tool-card focus-card" id="focus" aria-labelledby="focus-title">
+          <div class="card-heading"><div><span class="card-index">02 / FOCUS</span><h3 id="focus-title">专注一会儿</h3></div><span class="card-symbol" aria-hidden="true">◷</span></div>
+          <p class="card-description">为一件事留出完整的时间，结束后再休息。</p>
+          <div class="timer-display" id="timer-display" role="timer" aria-live="off">25:00</div>
+          <div class="timer-presets" role="group" aria-label="计时长度">
+            <button class="preset is-active" type="button" data-minutes="25" aria-pressed="true">专注 25 分钟</button>
+            <button class="preset" type="button" data-minutes="5" aria-pressed="false">休息 5 分钟</button>
+          </div>
+          <div class="timer-actions"><button class="primary-button" id="timer-toggle" type="button">开始专注</button><button class="secondary-button" id="timer-reset" type="button">重置</button></div>
+          <p class="timer-status" id="timer-status" role="status" aria-live="polite">准备好就开始。</p>
+        </section>
+
+        <section class="tool-card notes-card" id="notes" aria-labelledby="notes-title">
+          <div class="card-heading"><div><span class="card-index">03 / CAPTURE</span><h3 id="notes-title">随手记</h3></div><span class="card-symbol" aria-hidden="true">✎</span></div>
+          <p class="card-description">想法不必整理好，先记下来就好。</p>
+          <label class="sr-only" for="notes-input">随手记内容</label>
+          <textarea id="notes-input" rows="8" maxlength="5000" placeholder="写下此刻的想法、计划或提醒…"></textarea>
+          <div class="card-footer"><span id="notes-status" role="status" aria-live="polite">自动保存在当前浏览器</span><span id="notes-count">0 / 5000</span></div>
+        </section>
+      </div>
+
+      <aside class="privacy-note"><span aria-hidden="true">✦</span><p>这是个人工具演示站。清单和便签仅保存在当前浏览器，不会发送到服务器；清除浏览器数据后内容会消失。</p></aside>
+    </main>
+
+    <footer class="site-footer"><span>© <span id="footer-year">2026</span> Hanxu Song</span><span>用简单的工具，过更清晰的一天。</span></footer>
+  </div>
+</body>
+</html>

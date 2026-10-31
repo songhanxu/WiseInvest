@@ -152,9 +152,15 @@ WiseInvest/
 │   │       └── search/      # DeepSeek 搜索与备用搜索源
 │   └── .env.example
 ├── ios/WiseInvest/          # SwiftUI iOS 客户端
+├── personal-assistant-demo/ # 独立的静态工具演示站
+├── nginx/                   # API 与演示站的虚拟主机配置
 ├── start.sh                 # 一键启动脚本
 └── README.md
 ```
+
+## 独立个人工具演示站
+
+`personal-assistant-demo/` 是供 `hanxusong.asia` 使用的静态演示站，包含清单、专注计时和便签；它不连接慧投后端。腾讯云部署与域名隔离验证步骤见 [演示站说明](personal-assistant-demo/README.md)。
 
 ## 环境变量说明
 
