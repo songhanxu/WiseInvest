@@ -7,7 +7,7 @@ import (
 )
 
 func TestBitgetConfigDisabledDefaultsAndValidation(t *testing.T) {
-	for _, key := range []string{"BITGET_API_KEY", "BITGET_API_SECRET", "BITGET_PASSPHRASE", "BITGET_OWNER_USER_ID", "BITGET_ACCOUNT_TYPE", "BITGET_ACCOUNT_NAME", "BITGET_INCLUDE_FUTURES", "BITGET_HOLDINGS_ACCESS_KEY", "BITGET_HOLDINGS_SNAPSHOT_FILE"} {
+	for _, key := range []string{"BITGET_API_KEY", "BITGET_API_SECRET", "BITGET_PASSPHRASE", "BITGET_OWNER_USER_ID", "BITGET_ACCOUNT_TYPE", "BITGET_ACCOUNT_NAME", "BITGET_INCLUDE_FUTURES", "BITGET_HOLDINGS_ACCESS_KEY", "BITGET_HOLDINGS_SNAPSHOT_JSON", "BITGET_HOLDINGS_SNAPSHOT_FILE"} {
 		t.Setenv(key, "")
 	}
 	c, err := loadBitgetConfig()
@@ -41,6 +41,13 @@ func TestBitgetConfigDisabledDefaultsAndValidation(t *testing.T) {
 	encoded, _ = json.Marshal(c)
 	if err != nil || c.HoldingsAccessKey != accessKey || strings.Contains(string(encoded), accessKey) {
 		t.Fatal("automation key config invalid or exposed")
+	}
+	snapshotJSON := `{"account_id":"bitget","holdings":[]}`
+	t.Setenv("BITGET_HOLDINGS_SNAPSHOT_JSON", snapshotJSON)
+	c, err = loadBitgetConfig()
+	encoded, _ = json.Marshal(c)
+	if err != nil || c.HoldingsSnapshotJSON != snapshotJSON || strings.Contains(string(encoded), snapshotJSON) {
+		t.Fatal("inline holdings snapshot config invalid or exposed")
 	}
 	t.Setenv("BITGET_API_KEY", accessKey)
 	if _, err := loadBitgetConfig(); err == nil {

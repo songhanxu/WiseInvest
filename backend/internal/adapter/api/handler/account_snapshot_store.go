@@ -70,26 +70,30 @@ func validateCompleteSnapshot(snapshot HoldingsSnapshot) error {
 	return nil
 }
 
-// ConfigureSnapshotPersistence restores the last complete Bitget response. An
-// optional private JSON file is imported only when the database has no row yet;
-// it is useful to bootstrap a deployment while Bitget is unreachable.
-func (h *AccountHandler) ConfigureSnapshotPersistence(ctx context.Context, db *gorm.DB, seedFile string) error {
+// ConfigureSnapshotPersistence restores the last complete Bitget response.
+// When the database is empty, an inline environment JSON value is preferred;
+// the private file option remains available for backwards compatibility.
+func (h *AccountHandler) ConfigureSnapshotPersistence(ctx context.Context, db *gorm.DB) error {
 	if h.cfg.OwnerUserID == 0 {
 		return nil
 	}
-	return h.configureSnapshotStore(ctx, gormHoldingsSnapshotStore{db: db}, seedFile)
+	return h.configureSnapshotStore(ctx, gormHoldingsSnapshotStore{db: db}, h.cfg.HoldingsSnapshotJSON, h.cfg.HoldingsSnapshotFile)
 }
 
-func (h *AccountHandler) configureSnapshotStore(ctx context.Context, store holdingsSnapshotStore, seedFile string) error {
+func (h *AccountHandler) configureSnapshotStore(ctx context.Context, store holdingsSnapshotStore, seedJSON, seedFile string) error {
 	h.snapshotStore = store
 	snapshot, found, err := store.Load(ctx, bitgetSnapshotProvider, h.cfg.OwnerUserID)
 	if err != nil {
 		return fmt.Errorf("load Bitget holdings snapshot: %w", err)
 	}
-	if !found && seedFile != "" {
-		raw, readErr := os.ReadFile(seedFile)
-		if readErr != nil {
-			return fmt.Errorf("read Bitget holdings seed: %w", readErr)
+	if !found && (seedJSON != "" || seedFile != "") {
+		raw := []byte(seedJSON)
+		if seedJSON == "" {
+			var readErr error
+			raw, readErr = os.ReadFile(seedFile)
+			if readErr != nil {
+				return fmt.Errorf("read Bitget holdings seed: %w", readErr)
+			}
 		}
 		if err := json.Unmarshal(raw, &snapshot); err != nil {
 			return fmt.Errorf("decode Bitget holdings seed: %w", err)

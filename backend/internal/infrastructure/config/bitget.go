@@ -14,6 +14,7 @@ type BitgetConfig struct {
 	APISecret            string `json:"-"`
 	Passphrase           string `json:"-"`
 	HoldingsAccessKey    string `json:"-"`
+	HoldingsSnapshotJSON string `json:"-"`
 	HoldingsSnapshotFile string `json:"-"`
 	OwnerUserID          uint
 	AccountType          string
@@ -48,7 +49,7 @@ func loadBitgetConfig() (BitgetConfig, error) {
 			}
 		}
 	}
-	return BitgetConfig{APIKey: strings.TrimSpace(getEnv("BITGET_API_KEY", "")), APISecret: strings.TrimSpace(getEnv("BITGET_API_SECRET", "")), Passphrase: getEnv("BITGET_PASSPHRASE", ""), HoldingsAccessKey: accessKey, HoldingsSnapshotFile: strings.TrimSpace(getEnv("BITGET_HOLDINGS_SNAPSHOT_FILE", "")), OwnerUserID: uint(owner), AccountType: accountType, AccountName: getEnv("BITGET_ACCOUNT_NAME", "Bitget"), IncludeFutures: futures}, nil
+	return BitgetConfig{APIKey: strings.TrimSpace(getEnv("BITGET_API_KEY", "")), APISecret: strings.TrimSpace(getEnv("BITGET_API_SECRET", "")), Passphrase: getEnv("BITGET_PASSPHRASE", ""), HoldingsAccessKey: accessKey, HoldingsSnapshotJSON: strings.TrimSpace(getEnv("BITGET_HOLDINGS_SNAPSHOT_JSON", "")), HoldingsSnapshotFile: strings.TrimSpace(getEnv("BITGET_HOLDINGS_SNAPSHOT_FILE", "")), OwnerUserID: uint(owner), AccountType: accountType, AccountName: getEnv("BITGET_ACCOUNT_NAME", "Bitget"), IncludeFutures: futures}, nil
 }
 
 func (c BitgetConfig) HasCredentials() bool {

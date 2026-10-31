@@ -179,7 +179,7 @@ func main() {
 	stockHandler := handler.NewStockHandler(watchlistRepo, log, quoteCache, searcher, llmClient, cfg.FilingInsight)
 	stockHandler.SetFundamentalsStore(db)
 	accountHandler := handler.NewAccountHandler(cfg.Bitget)
-	if err := accountHandler.ConfigureSnapshotPersistence(context.Background(), db, cfg.Bitget.HoldingsSnapshotFile); err != nil {
+	if err := accountHandler.ConfigureSnapshotPersistence(context.Background(), db); err != nil {
 		log.Fatalf("Bitget holdings snapshot initialization failed: %v", err)
 	}
 	accountHandler.AddExchange(cfg.BinanceAccount)

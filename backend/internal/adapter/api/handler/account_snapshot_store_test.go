@@ -42,7 +42,7 @@ func TestHoldingsSnapshotSurvivesRestartAndUpstreamFailure(t *testing.T) {
 	store := &memoryHoldingsSnapshotStore{}
 	fresh := HoldingsSnapshot{AccountID: "bitget", Holdings: []AccountHolding{{HoldingID: "spot:rAAPL", Quantity: "2"}}, AsOf: "2026-10-31T06:05:30Z", Complete: true, Warnings: []string{}}
 	first := &AccountHandler{cfg: config.BitgetConfig{OwnerUserID: 7}, loader: func(context.Context) (HoldingsSnapshot, error) { return fresh, nil }}
-	if err := first.configureSnapshotStore(context.Background(), store, ""); err != nil {
+	if err := first.configureSnapshotStore(context.Background(), store, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := first.holdings(context.Background()); err != nil || got.Stale || store.saves != 1 {
@@ -52,7 +52,7 @@ func TestHoldingsSnapshotSurvivesRestartAndUpstreamFailure(t *testing.T) {
 	restarted := &AccountHandler{cfg: config.BitgetConfig{OwnerUserID: 7}, loader: func(context.Context) (HoldingsSnapshot, error) {
 		return HoldingsSnapshot{Warnings: []string{"upstream unavailable"}}, errors.New("offline")
 	}}
-	if err := restarted.configureSnapshotStore(context.Background(), store, ""); err != nil {
+	if err := restarted.configureSnapshotStore(context.Background(), store, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	got, err := restarted.holdings(context.Background())
@@ -69,7 +69,7 @@ func TestPartialHoldingsNeverOverwriteDurableSnapshot(t *testing.T) {
 	h := &AccountHandler{cfg: config.BitgetConfig{OwnerUserID: 3}, loader: func(context.Context) (HoldingsSnapshot, error) {
 		return HoldingsSnapshot{AccountID: "bitget", Holdings: []AccountHolding{{Quantity: "partial"}}, AsOf: time.Now().UTC().Format(time.RFC3339), Complete: false, Warnings: []string{"partial"}}, nil
 	}}
-	if err := h.configureSnapshotStore(context.Background(), store, ""); err != nil {
+	if err := h.configureSnapshotStore(context.Background(), store, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	got, err := h.holdings(context.Background())
@@ -85,14 +85,26 @@ func TestPrivateSeedImportsOnlyWhenStoreIsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := &AccountHandler{cfg: config.BitgetConfig{OwnerUserID: 9}}
-	if err := h.configureSnapshotStore(context.Background(), store, file); err != nil {
+	if err := h.configureSnapshotStore(context.Background(), store, "", file); err != nil {
 		t.Fatal(err)
 	}
 	if store.saves != 1 || h.snapshot == nil || h.snapshot.AsOf != "2026-10-31T06:05:30Z" {
 		t.Fatalf("seed not imported: saves=%d snapshot=%+v", store.saves, h.snapshot)
 	}
-	if err := h.configureSnapshotStore(context.Background(), store, filepath.Join(t.TempDir(), "missing.json")); err != nil {
+	if err := h.configureSnapshotStore(context.Background(), store, "", filepath.Join(t.TempDir(), "missing.json")); err != nil {
 		t.Fatalf("existing database snapshot should bypass seed file: %v", err)
+	}
+}
+
+func TestInlineEnvironmentSeedImportsWithoutAFile(t *testing.T) {
+	store := &memoryHoldingsSnapshotStore{}
+	seed := `{"account_id":"bitget","holdings":[{"holding_id":"spot:rAAPL","holding_type":"spot","side":"long","quantity":"2"}],"as_of":"2026-10-31T06:05:30Z","stale":false,"complete":true,"warnings":[]}`
+	h := &AccountHandler{cfg: config.BitgetConfig{OwnerUserID: 9}}
+	if err := h.configureSnapshotStore(context.Background(), store, seed, filepath.Join(t.TempDir(), "missing.json")); err != nil {
+		t.Fatal(err)
+	}
+	if store.saves != 1 || h.snapshot == nil || len(h.snapshot.Holdings) != 1 || h.snapshot.Holdings[0].Quantity != "2" {
+		t.Fatalf("inline seed not imported: saves=%d snapshot=%+v", store.saves, h.snapshot)
 	}
 }
 
@@ -103,7 +115,7 @@ func TestAutomationEndpointUsesDurableSnapshotFallback(t *testing.T) {
 	h := &AccountHandler{cfg: config.BitgetConfig{APIKey: "key", APISecret: "secret", Passphrase: "pass", HoldingsAccessKey: accessKey, OwnerUserID: 7, AccountType: "uta"}, loader: func(context.Context) (HoldingsSnapshot, error) {
 		return HoldingsSnapshot{}, errors.New("offline")
 	}}
-	if err := h.configureSnapshotStore(context.Background(), store, ""); err != nil {
+	if err := h.configureSnapshotStore(context.Background(), store, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	w := httptest.NewRecorder()
