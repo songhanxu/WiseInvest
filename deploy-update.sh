@@ -7,8 +7,14 @@ cd "$PROJECT_DIR"
 
 fail() { printf '错误：%s\n' "$*" >&2; exit 1; }
 
+DOMAIN="${WISEINVEST_DOMAIN:-hanxusong.asia}"
+CERT_FILE="/home/ubuntu/ssl/hanxusong.asia_bundle.pem"
+KEY_FILE="/home/ubuntu/ssl/hanxusong.asia.key"
+
 [[ -f docker-compose.yml ]] || fail '找不到 docker-compose.yml'
 [[ -f backend/.env.production ]] || fail '请先配置 backend/.env.production'
+[[ -f "$CERT_FILE" ]] || fail "找不到 SSL 证书：$CERT_FILE"
+[[ -f "$KEY_FILE" ]] || fail "找不到 SSL 私钥：$KEY_FILE"
 command -v curl >/dev/null || fail '需要安装 curl'
 command -v docker >/dev/null || fail '需要先安装并启动 Docker'
 
@@ -48,8 +54,8 @@ done
 report_failure() {
     local status=$?
     trap - ERR
-    printf '\n部署失败，请检查后端日志：\n' >&2
-    "${COMPOSE[@]}" logs --tail=80 backend >&2 || true
+	printf '\n部署失败，请检查后端和 Nginx 日志：\n' >&2
+	"${COMPOSE[@]}" logs --tail=80 backend nginx >&2 || true
     exit "$status"
 }
 trap report_failure ERR
@@ -66,10 +72,26 @@ wait_for_health() {
     return 1
 }
 
-printf '[1/4] 构建后端镜像…\n'
+wait_for_https() {
+	local deadline=$((SECONDS + TIMEOUT))
+	while (( SECONDS < deadline )); do
+		if curl -fsS --noproxy '*' --resolve "$DOMAIN:443:127.0.0.1" --connect-timeout 2 --max-time 3 "https://$DOMAIN/health" >/dev/null 2>&1; then
+			return 0
+		fi
+		sleep 2
+	done
+	printf 'HTTPS 健康检查超时：https://%s/health\n' "$DOMAIN" >&2
+	return 1
+}
+
+if command -v ufw >/dev/null 2>&1; then
+	if [[ "$EUID" -eq 0 ]]; then ufw allow 443/tcp >/dev/null; else sudo ufw allow 443/tcp >/dev/null; fi
+fi
+
+printf '[1/5] 构建后端镜像…\n'
 "${COMPOSE[@]}" build backend
 
-printf '[2/4] 更新后端容器，加载生产环境配置…\n'
+printf '[2/5] 更新后端容器，加载生产环境配置…\n'
 if [[ "$LEGACY_COMPOSE" == true ]]; then
     # Compose 1.29.2 的 recreate 会读取新镜像中已缺失的 ContainerConfig。
     # 按项目/服务清理，也能匹配失败后被改成 <ID>_wiseinvest-api 的旧容器。
@@ -79,13 +101,21 @@ if [[ "$LEGACY_COMPOSE" == true ]]; then
 fi
 "${COMPOSE[@]}" up -d --no-deps --force-recreate backend
 
-printf '[3/4] 等待后端健康检查（最多 %s 秒）…\n' "$TIMEOUT"
+printf '[3/5] 等待后端健康检查（最多 %s 秒）…\n' "$TIMEOUT"
 wait_for_health http://127.0.0.1:8080/health
 
-printf '[4/4] 检查并刷新 Nginx，验证代理…\n'
-"${COMPOSE[@]}" exec -T nginx nginx -t
-"${COMPOSE[@]}" exec -T nginx nginx -s reload
+printf '[4/5] 使用新证书和配置检查 Nginx…\n'
+"${COMPOSE[@]}" run --rm --no-deps nginx nginx -t
+
+printf '[5/5] 重新创建 Nginx，应用 443 端口和证书挂载…\n'
+if [[ "$LEGACY_COMPOSE" == true ]]; then
+	"${COMPOSE[@]}" rm -s -f nginx
+	"${COMPOSE[@]}" up -d --no-deps nginx
+else
+	"${COMPOSE[@]}" up -d --no-deps --force-recreate nginx
+fi
 wait_for_health http://127.0.0.1/health
+wait_for_https
 
 "${COMPOSE[@]}" ps backend nginx
-printf '\n后端更新成功，健康检查和 Nginx 代理均通过。\n'
+printf '\n部署成功：HTTPS API https://%s/api/v1/\n' "$DOMAIN"

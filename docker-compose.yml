@@ -68,10 +68,13 @@ services:
     restart: always
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./personal-assistant-demo:/srv/personal-assistant-demo:ro
+      - /home/ubuntu/ssl/hanxusong.asia_bundle.pem:/etc/nginx/certs/hanxusong.asia_bundle.pem:ro
+      - /home/ubuntu/ssl/hanxusong.asia.key:/etc/nginx/certs/hanxusong.asia.key:ro
     depends_on:
       - backend
 
