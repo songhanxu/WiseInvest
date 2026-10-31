@@ -10,14 +10,15 @@ import (
 // Environment credentials belong to one explicit WiseInvest user. Zero never
 // grants access to a default/demo user or to all authenticated users.
 type BitgetConfig struct {
-	APIKey            string `json:"-"`
-	APISecret         string `json:"-"`
-	Passphrase        string `json:"-"`
-	HoldingsAccessKey string `json:"-"`
-	OwnerUserID       uint
-	AccountType       string
-	AccountName       string
-	IncludeFutures    bool
+	APIKey               string `json:"-"`
+	APISecret            string `json:"-"`
+	Passphrase           string `json:"-"`
+	HoldingsAccessKey    string `json:"-"`
+	HoldingsSnapshotFile string `json:"-"`
+	OwnerUserID          uint
+	AccountType          string
+	AccountName          string
+	IncludeFutures       bool
 }
 
 func loadBitgetConfig() (BitgetConfig, error) {
@@ -47,7 +48,7 @@ func loadBitgetConfig() (BitgetConfig, error) {
 			}
 		}
 	}
-	return BitgetConfig{APIKey: strings.TrimSpace(getEnv("BITGET_API_KEY", "")), APISecret: strings.TrimSpace(getEnv("BITGET_API_SECRET", "")), Passphrase: getEnv("BITGET_PASSPHRASE", ""), HoldingsAccessKey: accessKey, OwnerUserID: uint(owner), AccountType: accountType, AccountName: getEnv("BITGET_ACCOUNT_NAME", "Bitget"), IncludeFutures: futures}, nil
+	return BitgetConfig{APIKey: strings.TrimSpace(getEnv("BITGET_API_KEY", "")), APISecret: strings.TrimSpace(getEnv("BITGET_API_SECRET", "")), Passphrase: getEnv("BITGET_PASSPHRASE", ""), HoldingsAccessKey: accessKey, HoldingsSnapshotFile: strings.TrimSpace(getEnv("BITGET_HOLDINGS_SNAPSHOT_FILE", "")), OwnerUserID: uint(owner), AccountType: accountType, AccountName: getEnv("BITGET_ACCOUNT_NAME", "Bitget"), IncludeFutures: futures}, nil
 }
 
 func (c BitgetConfig) HasCredentials() bool {

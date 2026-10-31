@@ -179,6 +179,9 @@ func main() {
 	stockHandler := handler.NewStockHandler(watchlistRepo, log, quoteCache, searcher, llmClient, cfg.FilingInsight)
 	stockHandler.SetFundamentalsStore(db)
 	accountHandler := handler.NewAccountHandler(cfg.Bitget)
+	if err := accountHandler.ConfigureSnapshotPersistence(context.Background(), db, cfg.Bitget.HoldingsSnapshotFile); err != nil {
+		log.Fatalf("Bitget holdings snapshot initialization failed: %v", err)
+	}
 	accountHandler.AddExchange(cfg.BinanceAccount)
 	accountHandler.AddExchange(cfg.GateAccount)
 	mailClient := infraemail.New(infraemail.Config{Host: cfg.Notification.SMTPHost, Port: cfg.Notification.SMTPPort, Username: cfg.Notification.SMTPUsername, Password: cfg.Notification.SMTPPassword, From: cfg.Notification.SMTPFrom, TLSMode: cfg.Notification.SMTPTLSMode})

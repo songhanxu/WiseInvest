@@ -81,6 +81,7 @@ type AccountHandler struct {
 	lastErr         error
 	retryAt         time.Time
 	failureBackoff  time.Duration
+	snapshotStore   holdingsSnapshotStore
 	automationReads authLimit
 }
 
@@ -192,11 +193,23 @@ func (h *AccountHandler) syncHoldings() {
 	} else {
 		data, err = h.readHoldings(ctx)
 	}
+	var persistenceErr error
+	if err == nil && data.Complete {
+		data.Stale = false
+		data.LastSuccess = data.AsOf
+		if h.snapshotStore != nil {
+			persistCtx, persistCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			persistenceErr = h.snapshotStore.Save(persistCtx, bitgetSnapshotProvider, h.cfg.OwnerUserID, data)
+			persistCancel()
+		}
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.lastErr = err
 	if err == nil && data.Complete {
-		data.LastSuccess = data.AsOf
+		if persistenceErr != nil {
+			data.Warnings = append(data.Warnings, "持仓已更新，但持久化快照保存失败")
+		}
 		h.snapshot, h.latest = &data, &data
 		h.cachedAt = time.Now()
 		h.retryAt = time.Time{}

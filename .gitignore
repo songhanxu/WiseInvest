@@ -8,6 +8,7 @@ backend/*.exe
 backend/*.test
 backend/vendor/
 backend/.env
+backend/private/
 
 # ── Frontend / Node ─────────────────────────────────────────────
 frontend/node_modules/
