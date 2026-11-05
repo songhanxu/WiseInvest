@@ -182,7 +182,7 @@ WiseInvest/
 | `WECHAT_APP_SECRET` | 微信开放平台 AppSecret | — |
 | `BINANCE_API_KEY` | 币安 API（交易功能，可选） | — |
 
-自选列表的最新 SEC 财报和每日 AI 解读配置、数据范围见 [财报解读说明](docs/filing-insights.md)。
+自选列表的最新 SEC 财报和手动 AI 解读配置、数据范围见 [财报解读说明](docs/filing-insights.md)。
 联网搜索的优先级和配置见 [搜索说明](docs/web-search.md)。
 
 ## 网页账户登录

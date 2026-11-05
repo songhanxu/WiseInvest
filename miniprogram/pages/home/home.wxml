@@ -2,7 +2,7 @@
   <view class="content">
     <view class="header">
       <view class="brand"><view class="brand-mark"><view class="bar bar-one"></view><view class="bar bar-two"></view><view class="bar bar-three"></view></view><view><view class="brand-name">慧投</view><view class="brand-caption">投资研究工作台</view></view></view>
-      <button class="account-button" bindtap="openAccountMenu" hover-class="is-pressed" aria-label="账户选项">账户<text class="account-arrow">⌄</text></button>
+      <button class="account-button" bindtap="openAccountMenu" hover-class="is-pressed" aria-label="账户选项">{{guest ? '登录' : '账户'}}<text class="account-arrow">⌄</text></button>
     </view>
     <view class="intro">
       <view class="eyebrow">{{todayLabel}}</view>

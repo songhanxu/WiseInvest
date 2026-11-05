@@ -11,14 +11,16 @@ const welcome = '欢迎来到慧投圆桌。主持人、价值派、趋势派和
 
 Page({
   data: { agents, participants: [], messages: [{ id: 'welcome', role: 'assistant', name: '慧投圆桌', content: welcome, html: renderMarkdown(welcome) }],
-    input: '', busy: false, error: '', progress: '', conversationId: '', backendId: 0, scrollIntoView: 'bottom' },
+    input: '', busy: false, error: '', progress: '', conversationId: '', backendId: 0, scrollIntoView: 'bottom', guest: false },
   streamTask: null,
   onLoad(options) {
+    if (!getApp().isAuthenticated()) { this.setData({ guest: true }); return; }
     const saved = loadConversations().find((row) => row.id === options.conversationId && row.agentType === 'group_chat');
     if (saved) this.setData({ conversationId: saved.id, backendId: saved.backendConversationId || 0,
       messages: (saved.messages || []).map((message) => ({ ...message, html: renderMarkdown(message.content) })) });
   },
   onUnload() { if (this.streamTask && this.streamTask.abort) this.streamTask.abort(); },
+  goLogin() { wx.navigateTo({ url: '/pages/login/login' }); },
   onInput(e) { this.setData({ input: e.detail.value || '' }); },
   toggleAgent(e) {
     if (this.data.busy) return;

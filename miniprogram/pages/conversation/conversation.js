@@ -54,12 +54,14 @@ Page({
     effortOptions: [{ id: 'none', label: '关闭思考' }, { id: 'low', label: '低' }, { id: 'high', label: '高' }, { id: 'max', label: 'Max' }],
     modelIndex: 0,
     effortIndex: 0,
+    guest: false,
   },
 
   streamTask: null,
   currentStreamingId: '',
 
   async onLoad(options) {
+    if (!getApp().isAuthenticated()) { this.setData({ guest: true }); return; }
     const savedSelection = (wx.getStorageSync ? wx.getStorageSync('chat_selection') : null) || {};
     const modelIndex = this.data.modelOptions.findIndex((item) => item.id === savedSelection.model);
     const effortIndex = this.data.effortOptions.findIndex((item) => item.id === savedSelection.reasoningEffort);
@@ -99,8 +101,10 @@ Page({
   },
 
   onShow() {
-    this.setData({ keyboardHeight: 0 });
+    this.setData({ keyboardHeight: 0, guest: !getApp().isAuthenticated() });
   },
+
+  goLogin() { wx.navigateTo({ url: '/pages/login/login' }); },
 
   onHide() {
     this.setData({ keyboardHeight: 0 });

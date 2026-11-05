@@ -55,6 +55,7 @@ func NewRouter(
 			authProtected.POST("/phone/bind", authHandler.BindPhone)
 			authProtected.POST("/email/bind", authHandler.BindEmail)
 			authProtected.GET("/me", authHandler.GetMe)
+			authProtected.POST("/refresh", authHandler.RefreshSession)
 		}
 
 		// ── Agents (public) ───────────────────────────────────────────────

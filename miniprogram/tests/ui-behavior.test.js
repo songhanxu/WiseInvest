@@ -62,9 +62,13 @@ test('home summary counts all records while preview and deletion remain consiste
   assert.equal(page.data.recentConversations[0].id, '1');
 });
 
-test('home authentication and market navigation retain their original behavior', () => {
-  const guest = fixture('pages/home/home.js', { authenticated: false });
+test('home allows trial browsing and offers a login entry', () => {
+  const guest = fixture('pages/home/home.js', { authenticated: false, records: [{ id: 'private', title: '旧会话' }] });
   guest.page.onShow();
+  assert.equal(guest.page.data.guest, true);
+  assert.equal(guest.page.data.conversationCount, 0);
+  assert.equal(guest.page.data.recentConversations.length, 0);
+  guest.page.openAccountMenu();
   assert.equal(guest.events[0].url, '/pages/login/login');
   const owner = fixture('pages/home/home.js');
   owner.page.onTapMarket({ detail: markets.MARKETS[1] });
@@ -155,7 +159,7 @@ test('investment page loads all-market watchlist and keeps account failures inde
   const { page } = fixture('pages/invest/invest.js', { api });
   await page.refresh();
   assert.equal(page.data.visibleStocks[0].id, 'AAPL');
-  assert.deepEqual([...calls].sort(), ['/api/v1/stocks/watchlist/all', '/api/v1/stocks/watchlist/filing-insights/refresh', '/api/v1/accounts', '/api/v1/accounts/all/holdings', '/api/v1/price-alerts'].sort());
+  assert.deepEqual([...calls].sort(), ['/api/v1/stocks/watchlist/all', '/api/v1/accounts', '/api/v1/accounts/all/holdings', '/api/v1/price-alerts'].sort());
 });
 
 test('roundtable does not persist a welcome-only session and preserves speaker events', async () => {

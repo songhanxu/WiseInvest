@@ -147,7 +147,7 @@ export function LoginPage({ apiBase, theme, onToggleTheme, onSuccess, onBack }: 
         <section className="login-content">
           <div className="login-header-actions">
             <button type="button" className="login-theme-toggle" onClick={onToggleTheme} aria-label={theme === "dark" ? "切换到浅色模式" : "切换到深色模式"} title={theme === "dark" ? "浅色模式" : "深色模式"}>{theme === "dark" ? <Sun size={17} /> : <Moon size={17} />}</button>
-            <button type="button" className="login-back" onClick={onBack}><ArrowLeft size={16} /> 返回工作台</button>
+            <button type="button" className="login-back" onClick={onBack}><ArrowLeft size={16} /> 先试用</button>
           </div>
           <div className="login-card">
             <p className="login-kicker">WISEINVEST ACCOUNT</p>

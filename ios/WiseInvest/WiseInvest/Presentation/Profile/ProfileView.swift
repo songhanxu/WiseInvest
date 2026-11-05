@@ -12,10 +12,16 @@ struct ProfileView: View {
 
                 ScrollView {
                     VStack(spacing: 20) {
-                        avatarSection
-                        infoSection
+                        if authState.isAuthenticated {
+                            avatarSection
+                            infoSection
+                        } else {
+                            SignInGate(feature: "个人账户")
+                                .padding(.horizontal, 20)
+                                .padding(.top, 24)
+                        }
                         settingsSection
-                        signOutButton
+                        if authState.isAuthenticated { signOutButton }
                     }
                     .padding(.bottom, 32)
                 }

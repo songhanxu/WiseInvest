@@ -12,6 +12,8 @@ Page({
 
   onUnload() { if (this.codeTimer) clearInterval(this.codeTimer); },
 
+  tryApp() { wx.reLaunch({ url: '/pages/home/home' }); },
+
   switchMode() {
     this.setData({ mode: this.data.mode === 'wechat' ? 'phone' : 'wechat' });
   },

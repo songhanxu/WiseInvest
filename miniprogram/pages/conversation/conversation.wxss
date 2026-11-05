@@ -21,3 +21,6 @@
 .send { flex: 0 0 112rpx; width: 112rpx; min-height: 44px; padding: 24rpx 8rpx; border-radius: 14rpx; color: #fff; background: #36543c; font-size: 26rpx; line-height: 1.5; font-weight: 500; }
 .send[disabled] { color: #89967e; background: #edf1e8; opacity: 1; }
 @media (max-width: 340px) { .header-inner { padding-left: 24rpx; padding-right: 20rpx; }.messages { padding-left: 24rpx; padding-right: 24rpx; }.input-wrap { padding-left: 18rpx; padding-right: 18rpx; }.send { flex-basis: 104rpx; width: 104rpx; } }
+
+.guest-gate { margin: 80rpx 30rpx; padding: 40rpx; text-align: center; background: #fff; border-radius: 18rpx; color: #647b64; font-size: 26rpx; }
+.guest-gate button { margin-top: 24rpx; background: #e6eee4; color: #315637; font-size: 25rpx; }

@@ -240,9 +240,6 @@ final class InvestmentDataService {
         if let accession { body["accession"] = accession }
         let _: InvestmentIgnoredResponse = try await send("/api/v1/stocks/watchlist/filing-insights/refresh", method: "POST", body: body)
     }
-    func refreshAllInsights() async throws {
-        let _: InvestmentIgnoredResponse = try await send("/api/v1/stocks/watchlist/filing-insights/refresh", method: "POST", body: [:])
-    }
     func accounts() async throws -> [InvestmentAccount] { try await get("/api/v1/accounts") }
     func holdings() async throws -> InvestmentSnapshot { try await get("/api/v1/accounts/all/holdings") }
     func alerts() async throws -> InvestmentAlertResponse { try await get("/api/v1/price-alerts") }

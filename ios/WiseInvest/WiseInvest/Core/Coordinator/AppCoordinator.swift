@@ -38,13 +38,13 @@ private struct RootView: View {
 
     var body: some View {
         Group {
-            if authState.isAuthenticated {
+            if authState.isAuthenticated || authState.isGuest {
                 MainTabView(coordinator: coordinator)
             } else {
                 LoginView()
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: authState.isAuthenticated)
+        .animation(.easeInOut(duration: 0.3), value: authState.isAuthenticated || authState.isGuest)
     }
 }
 

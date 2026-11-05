@@ -11,6 +11,7 @@ function normalizeErrorMessage(errMsg) {
 
 function request({ url, method = 'GET', data, needAuth = false }) {
   const app = getApp();
+  if (needAuth && !app?.isAuthenticated()) return Promise.reject(new Error('登录后才能使用，请先登录'));
   const headers = {
     'Content-Type': 'application/json',
   };
@@ -63,6 +64,10 @@ function decodeChunk(arrayBuffer) {
 
 function streamRequest({ url, data, onChunk, onDone, onError }) {
   const app = getApp();
+  if (!app?.isAuthenticated()) {
+    if (onError) onError(new Error('登录后才能使用，请先登录'));
+    return { abort() {} };
+  }
   const headers = {
     'Content-Type': 'application/json',
     Accept: 'text/event-stream',

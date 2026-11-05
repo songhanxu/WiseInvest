@@ -137,7 +137,7 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid REDIS_DB: %w", err)
 	}
 
-	jwtExpiration, err := time.ParseDuration(getEnv("JWT_EXPIRATION", "24h"))
+	jwtExpiration, err := time.ParseDuration(getEnv("JWT_EXPIRATION", "720h"))
 	if err != nil {
 		return nil, fmt.Errorf("invalid JWT_EXPIRATION: %w", err)
 	}

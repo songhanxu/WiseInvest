@@ -7,14 +7,12 @@ Page({
     recentConversations: [],
     conversationCount: 0,
     todayLabel: '',
+    guest: true,
   },
 
   onShow() {
     const app = getApp();
-    if (!app.isAuthenticated()) {
-      wx.reLaunch({ url: '/pages/login/login' });
-      return;
-    }
+    this.setData({ guest: !app.isAuthenticated() });
 
     this.refreshConversations();
     const today = new Date();
@@ -22,11 +20,16 @@ Page({
   },
 
   refreshConversations() {
+    if (!getApp().isAuthenticated()) {
+      this.setData({ recentConversations: [], conversationCount: 0 });
+      return;
+    }
     const conversations = loadConversations();
     this.setData({ recentConversations: conversations.slice(0, 5), conversationCount: conversations.length });
   },
 
   openAccountMenu() {
+    if (!getApp().isAuthenticated()) { wx.navigateTo({ url: '/pages/login/login' }); return; }
     wx.showActionSheet({
       itemList: ['退出登录'],
       success: ({ tapIndex }) => {

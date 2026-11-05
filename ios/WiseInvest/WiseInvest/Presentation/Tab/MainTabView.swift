@@ -68,3 +68,25 @@ struct MainTabView: View {
         UITabBar.appearance().scrollEdgeAppearance = appearance
     }
 }
+
+struct SignInGate: View {
+    @EnvironmentObject private var authState: AuthState
+    let feature: String
+
+    var body: some View {
+        VStack(spacing: 13) {
+            Image(systemName: "lock.shield")
+                .font(.system(size: 25))
+                .foregroundStyle(Color.accentBlue)
+            Text("登录后才能使用\(feature)")
+                .font(.subheadline)
+                .foregroundStyle(Color.textSecondary)
+            Button("登录账户") { authState.showLogin() }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.accentBlue)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(28)
+        .background(Color.secondaryBackground, in: RoundedRectangle(cornerRadius: 14))
+    }
+}

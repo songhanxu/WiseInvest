@@ -41,8 +41,6 @@ export function AccountsPanel({ apiBase, token, markets, isActive = true, onOpen
   const [insightError, setInsightError] = useState("");
   const [insightBusy, setInsightBusy] = useState("");
   const [filingView, setFilingView] = useState<{ code: string; type: "report" | "insight" } | null>(null);
-  const lastInsightRefresh = useRef("");
-  const staleInsightRefresh = useRef(new Set<string>());
   const insightScopeRef = useRef("");
   const [filter, setFilter] = useState<MarketId | "all" | "other">("all");
   const version = useRef(0);
@@ -69,33 +67,12 @@ export function AccountsPanel({ apiBase, token, markets, isActive = true, onOpen
     finally { if (insightScopeRef.current === scope) setInsightBusy(""); }
   }, [apiBase, token, readInsights, insightScope]);
   useEffect(() => {
-    setInsights({}); setInsightError(""); setFilingView(null); lastInsightRefresh.current = ""; staleInsightRefresh.current.clear();
+    setInsights({}); setInsightError(""); setFilingView(null);
   }, [apiBase, token, accountId]);
-  useEffect(() => {
-    if (!isActive || !token) return;
-    for (const stock of stocks) {
-      if (stock.market !== "us_stock") continue;
-      const code = stock.id.toUpperCase();
-      const latest = fundamentals[stockKey(stock)]?.financial_reports?.[0];
-      const insight = insights[code];
-      if (!latest || insight?.status !== "ready" || !insight.accession || insight.accession === latest.accession) continue;
-      const key = `${code}:${latest.accession}`;
-      if (staleInsightRefresh.current.has(key)) continue;
-      staleInsightRefresh.current.add(key);
-      void refreshInsight(code, true, latest.accession);
-    }
-  }, [isActive, token, stocks, fundamentals, insights, refreshInsight]);
   useEffect(() => {
     if (!isActive || !token || !insightCodes) return;
     const scope = insightScope;
     void readInsights().catch(err => { if (insightScopeRef.current === scope) setInsightError(err instanceof Error ? err.message : "AI 解读暂不可用"); });
-    const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-    const key = `${apiBase}|${token}|${accountId}|${day}|${insightCodes}`;
-    if (lastInsightRefresh.current === key) return;
-    lastInsightRefresh.current = key;
-    void requestJson(apiBase, "/api/v1/stocks/watchlist/filing-insights/refresh", token, { method: "POST", body: JSON.stringify({ codes: insightCodes.split(",") }) })
-      .then(() => readInsights())
-      .catch(err => { if (lastInsightRefresh.current === key) { lastInsightRefresh.current = ""; setInsightError(err instanceof Error ? err.message : "AI 解读暂不可用"); } });
   }, [apiBase, token, accountId, isActive, insightCodes, insightScope, readInsights]);
   useEffect(() => {
     if (!isActive || !token || !Object.values(insights).some(row => row.status === "pending")) return;
@@ -174,7 +151,7 @@ export function AccountsPanel({ apiBase, token, markets, isActive = true, onOpen
     {token && <PriceAlertSettings alerts={priceAlerts} />}
     <StockResearchTable stocks={visible} markets={markets} fundamentals={fundamentals} onOpenStock={onOpenStock} getRowKey={stock => stock.holding_id} emptyMessage={emptyMessage} loading={loading && !snapshot}
       onOpenReport={stock => setFilingView({ code: stock.id.toUpperCase(), type: "report" })}
-      onOpenInsight={stock => { const code = stock.id.toUpperCase(); const report = fundamentals[stockKey(stock)]?.financial_reports?.[0]; const stale = insights[code]?.status === "ready" && !!report && insights[code].accession !== report.accession; setFilingView({ code, type: "insight" }); if (!insights[code]?.status || insights[code]?.status === "unavailable" || stale) void refreshInsight(code, stale, report?.accession); }}
+      onOpenInsight={stock => { setFilingView({ code: stock.id.toUpperCase(), type: "insight" }); }}
       insightStatus={Object.fromEntries(Object.entries(insights).map(([code, insight]) => [code, insight.status]))}
       renderTarget={stock => <TargetPriceCell stock={stock} alerts={priceAlerts} />}
       getHoldingValue={stock => stock.market_value != null && stock.market_value.trim() !== "" && Number.isFinite(Number(stock.market_value)) && stock.currency ? { amount: Number(stock.market_value), currency: stock.currency } : null}

@@ -15,6 +15,7 @@ private enum InvestmentMarket: String, CaseIterable, Identifiable {
 }
 
 struct InvestmentView: View {
+    @EnvironmentObject private var authState: AuthState
     @State private var tab = 0
     @State private var marketFilter = "all"
     @State private var stocks: [InvestmentStock] = []
@@ -29,7 +30,6 @@ struct InvestmentView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var accountSyncError: String?
-    @State private var didRequestInsights = false
     private let service = InvestmentDataService.shared
 
     private var filteredStocks: [InvestmentStock] {
@@ -53,7 +53,11 @@ struct InvestmentView: View {
                     }
                     .pickerStyle(.segmented)
 
-                    if tab == 0 { watchlistContent } else { accountsContent }
+                    if authState.isAuthenticated {
+                        if tab == 0 { watchlistContent } else { accountsContent }
+                    } else {
+                        SignInGate(feature: tab == 0 ? "自选研究" : "账户持仓")
+                    }
                 }
                 .padding(.horizontal, 18)
                 .padding(.bottom, 30)
@@ -253,6 +257,7 @@ struct InvestmentView: View {
     }
 
     @MainActor private func load() async {
+        guard authState.isAuthenticated else { return }
         let requestedTab = tab
         loading = true
         defer { if tab == requestedTab { loading = false } }
@@ -262,10 +267,6 @@ struct InvestmentView: View {
                 let loaded = try await service.watchlist()
                 guard !Task.isCancelled && tab == requestedTab else { return }
                 stocks = loaded
-                if !didRequestInsights && stocks.contains(where: { $0.market == "us_stock" }) {
-                    didRequestInsights = true
-                    Task { try? await service.refreshAllInsights() }
-                }
             } catch {
                 if !Task.isCancelled && tab == requestedTab { self.error = error.localizedDescription }
             }

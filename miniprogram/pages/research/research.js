@@ -8,10 +8,11 @@ Page({
     market: '', code: '', name: '', symbol: '', fundamentals: null, reports: [], insight: null,
     insightHTML: '', insightCurrent: false, sources: [], targetPrice: '', alert: null, loading: true, error: '',
     quote: null, news: [], candles: [], period: '1d', watched: false,
+    guest: true,
   },
   pollTimer: null,
   onLoad(options) {
-    this.setData({ market: options.market || '', code: decodeURIComponent(options.code || ''), name: decodeURIComponent(options.name || ''), symbol: decodeURIComponent(options.symbol || '') });
+    this.setData({ market: options.market || '', code: decodeURIComponent(options.code || ''), name: decodeURIComponent(options.name || ''), symbol: decodeURIComponent(options.symbol || ''), guest: !getApp().isAuthenticated() });
     this.refresh();
   },
   onUnload() { if (this.pollTimer) clearTimeout(this.pollTimer); },
@@ -40,7 +41,7 @@ Page({
       quote, news, watched: watchlist.some((item) => item.market === market && item.id === code),
       error: tasks[0].status === 'rejected' ? tasks[0].reason.message : '' });
     await this.loadKline();
-    if (market === 'us_stock' && this.data.watched && reports.length) await this.loadInsight(true);
+    if (market === 'us_stock' && this.data.watched && reports.length) await this.loadInsight();
   },
   async loadKline() {
     try {
@@ -77,35 +78,36 @@ Page({
     }).exec();
   },
   async addToWatchlist() {
+    if (!getApp().isAuthenticated()) { this.goLogin(); return; }
     try {
       await request({ url: '/api/v1/stocks/watchlist', method: 'POST', needAuth: true,
         data: { stock_code: this.data.code, symbol: this.data.symbol || this.data.code, name: this.data.name, market: this.data.market } });
       this.setData({ watched: true, error: '' });
-      if (this.data.market === 'us_stock' && this.data.reports.length) await this.loadInsight(true);
+      if (this.data.market === 'us_stock' && this.data.reports.length) await this.loadInsight();
     } catch (error) { this.setData({ error: error.message }); }
   },
   openAgent() { wx.navigateTo({ url: `/pages/conversation/conversation?market=${this.data.market}` }); },
   openRoundtable() { wx.navigateTo({ url: '/pages/roundtable/roundtable' }); },
-  async loadInsight(start) {
+  async loadInsight() {
     try {
-      if (start) await request({ url: '/api/v1/stocks/watchlist/filing-insights/refresh', method: 'POST', needAuth: true,
-        data: { code: this.data.code } });
       const response = await request({ url: '/api/v1/stocks/watchlist/filing-insights', needAuth: true });
       const insight = (response.insights || {})[this.data.code] || null;
       const current = !!(insight && insight.status === 'ready' && this.data.reports[0] && insight.accession === this.data.reports[0].accession);
       this.setData({ insight, insightCurrent: current, insightHTML: renderMarkdown(current && insight.content), sources: current ? insight.sources || [] : [] });
       if (this.pollTimer) clearTimeout(this.pollTimer);
-      if (insight && insight.status === 'pending') this.pollTimer = setTimeout(() => this.loadInsight(false), 5000);
+      if (insight && insight.status === 'pending') this.pollTimer = setTimeout(() => this.loadInsight(), 5000);
     } catch (error) { this.setData({ error: error.message }); }
   },
   async retryInsight() {
+    if (!getApp().isAuthenticated()) { this.goLogin(); return; }
     try {
       await request({ url: '/api/v1/stocks/watchlist/filing-insights/refresh', method: 'POST', needAuth: true,
         data: { code: this.data.code, retry: true, accession: this.data.insight && this.data.insight.accession } });
-      await this.loadInsight(false);
+      await this.loadInsight();
     } catch (error) { this.setData({ error: error.message }); }
   },
   onTargetPrice(e) { this.setData({ targetPrice: e.detail.value || '' }); },
+  goLogin() { wx.navigateTo({ url: '/pages/login/login' }); },
   async saveAlert() {
     if (!this.data.watched) { this.setData({ error: '请先加入自选，再设置价格提醒' }); return; }
     const target = Number(this.data.targetPrice);

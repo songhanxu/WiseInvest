@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Conversation view with stock context - AI answers based on stock info and K-line data
 struct StockConversationView: View {
+    @EnvironmentObject private var authState: AuthState
     let stock: Stock
     let market: Market
     let klineData: [KLinePoint]
@@ -38,7 +39,9 @@ struct StockConversationView: View {
         ZStack {
             Color.primaryBackground.ignoresSafeArea()
 
-            VStack(spacing: 0) {
+            if !authState.isAuthenticated {
+                SignInGate(feature: "个股 AI 对话").padding(20)
+            } else { VStack(spacing: 0) {
                 headerSection
                 stockInfoBar
                 messagesSection
@@ -46,7 +49,7 @@ struct StockConversationView: View {
                     errorBanner(error)
                 }
                 inputSection
-            }
+            } }
         }
     }
 

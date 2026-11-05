@@ -65,7 +65,7 @@ export function FilingInsightDialog({ stock, report, insight, busy, onRetry, onC
       <ChatMarkdown content={insight.content || ""} disableExternalContent />
       {!!insight.sources?.length && <div className="filing-insight-sources"><h3>核对来源</h3>{insight.sources.map((source, index) => <a key={`${source.url}-${index}`} href={source.url} target="_blank" rel="noopener noreferrer">{source.label}{source.date ? ` · ${source.date}` : ""}<ExternalLink size={12} /></a>)}</div>}
     </> : <div className="filing-insight-state" role="status">
-      {insight?.status === "pending" || busy ? <><Loader2 className="spin" size={22} /><p>正在核对财报、历史股价并生成解读…</p></> : <><p>{insight?.status === "failed" ? insight.message || "解读生成失败" : insight?.status === "ready" ? "这份解读对应旧财报，请核对并更新。" : "今天的解读尚未生成。"}</p><button type="button" className="ghost-button" onClick={onRetry}><RefreshCw size={14} />{insight?.status === "failed" || insight?.status === "ready" ? "重新生成" : "开始生成"}</button></>}
+      {insight?.status === "pending" || busy ? <><Loader2 className="spin" size={22} /><p>正在核对财报、历史股价并生成解读…</p></> : <><p>{insight?.status === "failed" ? insight.message || "解读生成失败" : insight?.status === "ready" ? "这份解读对应旧财报，请核对并更新。" : "点击后才会开始分析，不会自动消耗模型额度。"}</p><button type="button" className="ghost-button" onClick={onRetry}><RefreshCw size={14} />{insight?.status === "failed" || insight?.status === "ready" ? "重新分析" : "开始分析"}</button></>}
     </div>}
   </DialogShell>;
 }

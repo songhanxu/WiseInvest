@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Conversation screen for chatting with a market agent
 struct ConversationView: View {
+    @EnvironmentObject private var authState: AuthState
     let agentType: AgentType
     let market: Market?
     @ObservedObject var coordinator: AppCoordinator
@@ -33,7 +34,9 @@ struct ConversationView: View {
         ZStack {
             Color.primaryBackground.ignoresSafeArea()
             
-            VStack(spacing: 0) {
+            if !authState.isAuthenticated {
+                SignInGate(feature: "AI 对话").padding(20)
+            } else { VStack(spacing: 0) {
                 // Header
                 headerSection
                 
@@ -86,7 +89,7 @@ struct ConversationView: View {
                 
                 // Input area
                 inputSection
-            }
+            } }
         }
     }
     

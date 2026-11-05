@@ -2,17 +2,18 @@ const { request } = require('../../utils/api');
 const { getMarketById } = require('../../utils/market');
 
 Page({
-  data: { market: getMarketById('a_share'), indices: [], stocks: [], results: [], query: '', loading: true, error: '' },
+  data: { market: getMarketById('a_share'), indices: [], stocks: [], results: [], query: '', loading: true, error: '', guest: true },
   searchTimer: null,
   onLoad(options) { this.setData({ market: getMarketById(options.market) }); this.refresh(); },
   onUnload() { if (this.searchTimer) clearTimeout(this.searchTimer); },
   onPullDownRefresh() { this.refresh().finally(() => wx.stopPullDownRefresh()); },
   async refresh() {
     const market = this.data.market.id;
-    this.setData({ loading: true, error: '' });
+    const guest = !getApp().isAuthenticated();
+    this.setData({ loading: true, error: '', guest });
     const responses = await Promise.allSettled([
       request({ url: `/api/v1/stocks/indices?market=${market}` }),
-      request({ url: `/api/v1/stocks/watchlist?market=${market}`, needAuth: true }),
+      guest ? Promise.resolve([]) : request({ url: `/api/v1/stocks/watchlist?market=${market}`, needAuth: true }),
     ]);
     this.setData({ indices: responses[0].status === 'fulfilled' && Array.isArray(responses[0].value) ? responses[0].value : [],
       stocks: responses[1].status === 'fulfilled' && Array.isArray(responses[1].value) ? responses[1].value : [],
@@ -38,4 +39,5 @@ Page({
   },
   openAgent() { wx.navigateTo({ url: `/pages/conversation/conversation?market=${this.data.market.id}` }); },
   openInvest() { wx.navigateTo({ url: '/pages/invest/invest' }); },
+  goLogin() { wx.navigateTo({ url: '/pages/login/login' }); },
 });

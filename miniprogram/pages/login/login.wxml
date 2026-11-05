@@ -16,6 +16,7 @@
         <button class="login-alternate" bindtap="switchMode">返回微信登录</button>
       </block>
       <view class="feature-row"><text>多市场研究</text><text class="feature-dot">·</text><text>AI 辅助分析</text><text class="feature-dot">·</text><text>对话留存</text></view>
+      <button class="login-alternate" bindtap="tryApp">先试用，稍后登录</button>
     </view>
     <view class="login-note">专注研究，审慎决策。</view>
   </view>

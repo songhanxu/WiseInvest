@@ -40,8 +40,6 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
   const [insightError, setInsightError] = useState("");
   const [insightBusy, setInsightBusy] = useState("");
   const [filingView, setFilingView] = useState<{ code: string; type: "report" | "insight" } | null>(null);
-  const lastInsightRefresh = useRef("");
-  const staleInsightRefresh = useRef(new Set<string>());
   const insightScopeRef = useRef(`${apiBase}|${token}`); insightScopeRef.current = `${apiBase}|${token}`;
   const requestVersion = useRef(0);
   const mutationVersion = useRef(0);
@@ -52,7 +50,6 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
   const lastSuccessAt = useRef(0);
   const membershipDirty = useRef(false);
   const membership = useMemo(() => new Set(stocks.map(stockKey)), [stocks]);
-  const insightCodes = stocks.filter(stock => stock.market === "us_stock").map(stock => stock.id.toUpperCase()).sort().join("|");
 
   const readInsights = useCallback(async () => {
     if (!token) return;
@@ -72,36 +69,12 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
   }, [apiBase, token, readInsights]);
 
   useEffect(() => {
-    setInsights({}); setInsightError(""); setFilingView(null); lastInsightRefresh.current = ""; staleInsightRefresh.current.clear();
+    setInsights({}); setInsightError(""); setFilingView(null);
   }, [apiBase, token]);
 
   useEffect(() => {
-    if (!isActive || !token) return;
-    for (const stock of stocks) {
-      if (stock.market !== "us_stock") continue;
-      const code = stock.id.toUpperCase();
-      const latest = fundamentals[stockKey(stock)]?.financial_reports?.[0];
-      const insight = insights[code];
-      if (!latest || insight?.status !== "ready" || !insight.accession || insight.accession === latest.accession) continue;
-      const key = `${code}:${latest.accession}`;
-      if (staleInsightRefresh.current.has(key)) continue;
-      staleInsightRefresh.current.add(key);
-      void refreshInsight(code, true, latest.accession);
-    }
-  }, [isActive, token, stocks, fundamentals, insights, refreshInsight]);
-
-  useEffect(() => {
-    if (!isActive || !token || !insightCodes || !lastSuccessAt.current) return;
-    const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-    const key = `${apiBase}|${token}|${day}|${insightCodes}`;
-    if (lastInsightRefresh.current === key) return;
-    lastInsightRefresh.current = key;
-    let cancelled = false;
-    void requestJson(apiBase, "/api/v1/stocks/watchlist/filing-insights/refresh", token, { method: "POST", body: "{}" })
-      .then(() => readInsights())
-      .catch(err => { if (!cancelled) { if (lastInsightRefresh.current === key) lastInsightRefresh.current = ""; setInsightError(err instanceof Error ? err.message : "AI 解读暂不可用"); } });
-    return () => { cancelled = true; };
-  }, [apiBase, token, isActive, insightCodes, readInsights]);
+    if (isActive && token) void readInsights().catch(() => {});
+  }, [isActive, token, readInsights]);
 
   useEffect(() => {
     if (!isActive || !token || !Object.values(insights).some(row => row.status === "pending")) return;
@@ -250,7 +223,7 @@ export function WatchlistPanel({ apiBase, token, markets, isActive = true, onOpe
     {token && <PriceAlertSettings alerts={priceAlerts} />}
     <StockResearchTable stocks={visible} markets={markets} fundamentals={fundamentals} onOpenStock={onOpenStock}
       onOpenReport={stock => setFilingView({ code: stock.id.toUpperCase(), type: "report" })}
-      onOpenInsight={stock => { const code = stock.id.toUpperCase(); const report = fundamentals[stockKey(stock)]?.financial_reports?.[0]; const stale = insights[code]?.status === "ready" && !!report && insights[code].accession !== report.accession; setFilingView({ code, type: "insight" }); if (!insights[code]?.status || insights[code]?.status === "unavailable" || stale) void refreshInsight(code, stale, report?.accession); }}
+      onOpenInsight={stock => { setFilingView({ code: stock.id.toUpperCase(), type: "insight" }); }}
       insightStatus={Object.fromEntries(Object.entries(insights).map(([code, insight]) => [code, insight.status]))}
       loading={initialLoading}
       emptyMessage={token ? "暂无自选，在上方搜索并添加标的。" : "登录后展示你的自选列表。"}

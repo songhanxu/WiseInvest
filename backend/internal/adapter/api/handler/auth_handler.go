@@ -747,6 +747,26 @@ func (h *AuthHandler) BindPhone(c *gin.Context) {
 
 // ─── Profile ──────────────────────────────────────────────────────────────────
 
+// RefreshSession extends an active session. An expired token cannot be renewed.
+func (h *AuthHandler) RefreshSession(c *gin.Context) {
+	userID := c.GetUint("userID")
+	var user model.User
+	if err := h.db.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "账号已失效，请重新登录"})
+		return
+	}
+	phone := ""
+	if user.Phone != nil {
+		phone = *user.Phone
+	}
+	token, err := h.jwtSvc.GenerateToken(user.ID, phone)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "登录状态续期失败"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": token, "user": h.userResponse(&user)})
+}
+
 // GetMe returns the authenticated user's profile.
 // GET /api/v1/auth/me
 func (h *AuthHandler) GetMe(c *gin.Context) {

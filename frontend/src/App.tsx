@@ -10,6 +10,7 @@ import { mergeQuoteRows, quoteCurrency, quoteTimeLabel, quoteStatusLabel } from 
 import { quoteProductIdentity, quoteProductQuery } from "./quote-product";
 import { formatMarketNumber } from "./number-format";
 import { SessionCache } from "./session-cache";
+import { tokenIsActive } from "./auth-session";
 import { StockWatchlistButton } from "./StockWatchlistButton";
 import { applyWatchlistChange, watchlistState } from "./watchlist-state";
 import { enterStock, leaveStock, stockBackLabel } from "./stock-navigation";
@@ -654,13 +655,14 @@ function usePreventPageZoom() {
 
 export function App() {
   const [theme, setTheme] = useState<"light" | "dark">(() => localStorage.getItem(storage.theme) === "dark" ? "dark" : "light");
-  const [view, setView] = useState<View>("home");
+  const [view, setView] = useState<View>(() => tokenIsActive(localStorage.getItem(storage.token) || "") ? "home" : "login");
   const [watchlistVisited, setWatchlistVisited] = useState(false);
   const [visitedMarkets, setVisitedMarkets] = useState<MarketId[]>([]);
   const [chatVisited, setChatVisited] = useState(false);
   const [accountsVisited, setAccountsVisited] = useState(false);
   const [apiBase, setApiBase] = useState(() => localStorage.getItem(storage.apiBase) || DEFAULT_API_BASE);
-  const [token, setToken] = useState(() => localStorage.getItem(storage.token) || "");
+  const [token, setToken] = useState(() => { const saved = localStorage.getItem(storage.token) || ""; return tokenIsActive(saved) ? saved : ""; });
+  const lastSessionRefresh = useRef(0);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [afterLoginView, setAfterLoginView] = useState<WorkspaceView>("home");
   const { conversations, setConversations, historyScope } = useAccountHistory(apiBase, token);
@@ -711,6 +713,29 @@ export function App() {
   }, [token]);
 
   useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!tokenIsActive(token)) { setToken(""); setView("login"); return; }
+      if (Date.now() - lastSessionRefresh.current < 24 * 60 * 60 * 1000) return;
+      lastSessionRefresh.current = Date.now();
+      fetch(`${apiBase}/api/v1/auth/refresh`, { method: "POST", headers: { Authorization: `Bearer ${token}` } })
+        .then(async response => {
+          if (cancelled) return;
+          if (response.status === 401) { setToken(""); setView("login"); return; }
+          if (!response.ok) { lastSessionRefresh.current = 0; return; }
+          const result = await response.json() as { token?: string; user?: AuthUser };
+          if (!cancelled && result.token && result.user) { setToken(result.token); setUser(result.user); }
+        }).catch(() => { lastSessionRefresh.current = 0; });
+    };
+    refresh();
+    document.addEventListener("visibilitychange", refresh);
+    const timer = window.setInterval(refresh, 60 * 60 * 1000);
+    return () => { cancelled = true; document.removeEventListener("visibilitychange", refresh); window.clearInterval(timer); };
+  }, [apiBase, token]);
+
+  useEffect(() => {
     if (!token) {
       setUser(null);
       return;
@@ -720,7 +745,7 @@ export function App() {
       .then(async (response) => {
         if (cancelled) return;
         if (response.status === 401) {
-          setToken(""); setUser(null); setConversationDraft(null); setActiveId(null);
+          setToken(""); setUser(null); setConversationDraft(null); setActiveId(null); setView("login");
           return;
         }
         if (!response.ok) return;
@@ -960,6 +985,7 @@ export function App() {
               setUser(null);
               setConversationDraft(null);
               setActiveId(null);
+              setView("login");
             }}
             onRefreshHealth={() => healthCheck(apiBase).then(setIsOnline)}
           />

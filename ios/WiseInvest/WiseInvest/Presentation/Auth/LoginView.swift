@@ -32,6 +32,11 @@ struct LoginView: View {
                         .foregroundStyle(Color.textSecondary)
                         .padding(.top, 8)
                     loginCard.padding(.top, 32)
+                    Button("先试用，稍后登录") { authState.startTrial() }
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(Color.accentBlue)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 20)
                     Text("账户用于同步你的自选与研究记录")
                         .font(.system(size: 12))
                         .foregroundStyle(Color.textTertiary)

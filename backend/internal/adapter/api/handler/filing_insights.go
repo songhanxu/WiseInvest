@@ -252,15 +252,11 @@ func (h *StockHandler) RefreshFilingInsights(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求格式不正确"})
 		return
 	}
-	if request.Code != "" && len(request.Codes) > 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请使用单个或批量股票代码"})
+	if request.Code == "" || len(request.Codes) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请从财报页面选择一只股票开始分析"})
 		return
 	}
-	requested := request.Codes
-	if request.Code != "" {
-		requested = []string{request.Code}
-	}
-	codes, err := h.insightSelectedCodes(c.Request.Context(), userID, requested)
+	codes, err := h.insightSelectedCodes(c.Request.Context(), userID, []string{request.Code})
 	if err != nil {
 		if errors.Is(err, errInsightInvalidCodes) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

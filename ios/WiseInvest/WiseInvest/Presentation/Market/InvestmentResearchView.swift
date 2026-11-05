@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct InvestmentResearchView: View {
+    @EnvironmentObject private var authState: AuthState
     let stock: InvestmentStock
     @State private var fundamentals: InvestmentFundamentals?
     @State private var insight: InvestmentInsight?
@@ -51,7 +52,9 @@ struct InvestmentResearchView: View {
                     }.researchCard()
                 }
 
-                if stock.market == "us_stock" {
+                if stock.market == "us_stock" && !authState.isAuthenticated {
+                    SignInGate(feature: "财报 AI 解读")
+                } else if stock.market == "us_stock" {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("最新财报 AI 解读").font(.headline)
                         if insightIsCurrent, let insight {
@@ -70,10 +73,10 @@ struct InvestmentResearchView: View {
                             HStack { ProgressView(); Text("正在核对财报并生成解读…") }
                                 .font(.subheadline).foregroundStyle(.secondary)
                         } else {
-                            Text(latestReport == nil ? "暂无可核验的 SEC 财报" : insight?.message ?? "今天尚无可用的财报解读")
+                            Text(latestReport == nil ? "暂无可核验的 SEC 财报" : insight?.message ?? "点击开始分析后才会生成解读")
                                 .font(.subheadline).foregroundStyle(.secondary)
                             if latestReport != nil {
-                                Button(insight?.status == "failed" || insight?.status == "ready" ? "重新生成" : "开始生成") {
+                                Button(insight?.status == "failed" || insight?.status == "ready" ? "重新分析" : "开始分析") {
                                     Task { await refreshInsight(retry: true) }
                                 }
                             }
@@ -111,7 +114,9 @@ struct InvestmentResearchView: View {
                     }
                 }.researchCard()
 
-                VStack(alignment: .leading, spacing: 12) {
+                if !authState.isAuthenticated {
+                    SignInGate(feature: "价格提醒")
+                } else { VStack(alignment: .leading, spacing: 12) {
                     Text("价格提醒").font(.headline)
                     Text("达到目标价后发送邮件。接收邮箱可在投资页设置。")
                         .font(.caption).foregroundStyle(.secondary)
@@ -121,7 +126,7 @@ struct InvestmentResearchView: View {
                         Button("保存") { Task { await saveAlert() } }
                         if hasAlert { Button("删除") { Task { await removeAlert() } } }
                     }.font(.subheadline)
-                }.researchCard()
+                }.researchCard() }
             }
             .padding(.horizontal, 18).padding(.bottom, 30)
         }
@@ -160,13 +165,13 @@ struct InvestmentResearchView: View {
         loading = true; error = nil
         do { fundamentals = try await service.fundamentals(stock) }
         catch { self.error = error.localizedDescription }
-        do {
+        if authState.isAuthenticated { do {
             let alert = try await service.alerts().alerts.first { $0.holdingID == holdingID }
             hasAlert = alert != nil
             targetPrice = alert.map { String($0.targetPrice) } ?? ""
-        } catch { self.error = error.localizedDescription }
+        } catch { self.error = error.localizedDescription } }
         if stock.market == "us_stock" && latestReport != nil {
-            await refreshInsight(retry: false)
+            if authState.isAuthenticated { await fetchInsight() }
         }
         loading = false
     }

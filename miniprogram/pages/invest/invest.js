@@ -10,14 +10,17 @@ Page({
     stocks: [], visibleStocks: [], searchMarket: 'all', searchMarketIndex: 0, query: '', results: [],
     accounts: [], holdings: [], equities: [], warnings: [], snapshotStale: false,
     alertEmail: '', mailerConfigured: false, alerts: [], busy: false, error: '',
+    guest: true,
   },
   searchTimer: null,
 
-  onShow() { this.refresh(); },
+  onShow() { const guest = !getApp().isAuthenticated(); this.setData({ guest }); if (!guest) this.refresh(); },
+  goLogin() { wx.navigateTo({ url: '/pages/login/login' }); },
   onUnload() { if (this.searchTimer) clearTimeout(this.searchTimer); },
   onPullDownRefresh() { this.refresh().finally(() => wx.stopPullDownRefresh()); },
 
   async refresh() {
+    if (!getApp().isAuthenticated()) return [];
     this.setData({ busy: true, error: '' });
     const tasks = await Promise.allSettled([
       request({ url: `${base}/stocks/watchlist/all`, needAuth: true }),
@@ -43,9 +46,6 @@ Page({
       error: tasks[0].status === 'rejected' ? tasks[0].reason.message : '',
     });
     this.applyFilter();
-    if (this.data.stocks.some((row) => row.market === 'us_stock')) {
-      request({ url: `${base}/stocks/watchlist/filing-insights/refresh`, method: 'POST', needAuth: true, data: {} }).catch(() => {});
-    }
     return tasks;
   },
 

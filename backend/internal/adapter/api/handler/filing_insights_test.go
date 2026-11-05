@@ -98,6 +98,22 @@ func TestFilingInsightRefreshRejectsUnownedSymbol(t *testing.T) {
 	}
 }
 
+func TestFilingInsightRefreshRequiresOneExplicitStock(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
+	h := &StockHandler{llmClient: &llm.OpenAIClient{}}
+	for _, body := range []string{`{}`, `{"codes":["AAPL","NVDA"]}`} {
+		response := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(response)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/stocks/watchlist/filing-insights/refresh", strings.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		c.Set("userID", uint(7))
+		h.RefreshFilingInsights(c)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("bulk analysis request was accepted: %d %s", response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestFilingInsightsAllowOwnedAccountHoldingWithoutLeakingItToOtherUsers(t *testing.T) {
 	repo := &alertWatchlistRepo{items: map[uint][]model.WatchlistItem{7: {{Market: "us_stock", StockCode: "AAPL"}}}}
 	account := &AccountHandler{

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ChatTabView: View {
+    @EnvironmentObject private var authState: AuthState
     @ObservedObject var coordinator: AppCoordinator
     @StateObject private var viewModel = ChatTabViewModel()
     @State private var showGroupChat = false
@@ -11,7 +12,10 @@ struct ChatTabView: View {
             ZStack {
                 Color.primaryBackground.ignoresSafeArea()
 
-                ScrollView {
+                if !authState.isAuthenticated {
+                    SignInGate(feature: "AI 对话")
+                        .padding(20)
+                } else { ScrollView {
                     VStack(spacing: 0) {
                         groupChatRow
 
@@ -21,7 +25,7 @@ struct ChatTabView: View {
 
                         agentConversationList
                     }
-                }
+                } }
             }
             .navigationTitle("对话")
             .navigationBarTitleDisplayMode(.large)
@@ -46,7 +50,7 @@ struct ChatTabView: View {
                 )
             }
         }
-        .onAppear { viewModel.refresh() }
+        .onAppear { if authState.isAuthenticated { viewModel.refresh() } }
     }
 
     // MARK: - Group Chat Row (first in list)

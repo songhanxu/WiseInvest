@@ -1,8 +1,8 @@
-# 自选列表：最新财报与每日 AI 解读
+# 自选列表：最新财报与手动 AI 解读
 
 自选列表中，SEC 能识别的美股定期申报和已提交的 8-K Item 2.02 业绩公告会显示在“当前最新财报”列。日期分为报告期末和 SEC 提交日。业绩公告先于完整 10-Q/10-K 提交时，会标记为“8-K 业绩公告”，直接链接其 SEC 附件；标准化财务科目和 EPS/PE 仍显示各自已核验的披露期间，不把上季度数值当作新季度。点击条目可查看摘要和 SEC 原文，星形图标打开该份材料的 AI 解读。
 
-每天首次打开自选列表时，前端为当前账户的美股自选请求解读。后端按用户、上海时区日期和股票代码去重，最多同时处理两只股票；部署环境用 Redis 跨后端实例共享结果。新的一天会重新生成。如果当天出现新财报或业绩公告，页面发现报告编号变化时会核对 SEC 最新申报并更新旧版解读，弹窗也提供重试。失败结果十分钟后可重新提交。
+进入自选或账户持仓时，页面只读取已有解读；打开解读弹窗也不会调用模型。用户点击“开始分析”后才提交当前一只股票。后端拒绝空请求和批量提交，并按用户、上海时区日期和股票代码去重；部署环境用 Redis 跨后端实例共享结果。新的一天不会自动重新生成，用户可以再次点击。若当天出现新财报或业绩公告，用户点击“重新分析”后，后端会核对 SEC 最新申报并更新旧版解读。失败结果十分钟后可重新提交。
 
 后端生产环境需配置：
 
@@ -23,15 +23,15 @@ OPENAI_MODEL_PRO=deepseek-v4-pro
 
 财报解读只在模型返回非空正文且 `finish_reason=stop` 时标记成功。若首次返回 `length`，会用同一份资料和更紧凑的输出要求重试一次；第二次仍截断则记为失败，绝不保存截断内容。设置 `OPENAI_MODEL_PRO=deepseek-v4-pro` 且使用官方 DeepSeek 地址时，财报解读单独调用 Pro 模型，发送 `thinking.enabled` 和 `reasoning_effort=max`；普通聊天继续使用 `OPENAI_MODEL`。此时未显式配置的财报请求上限为 32768 / 65536 token，共享超时 10 分钟；已有的 `FILING_INSIGHT_*` 配置仍会覆盖这些默认值。较高的思考强度和上限可能增加耗时及费用。没有配置 Pro 模型时，仍使用 `OPENAI_MODEL` 和原有的 8192 / 16384 token、180 秒默认值；`FILING_INSIGHT_THINKING=auto` 对官方 DeepSeek V4/Flash 的财报请求关闭思考模式。
 
-切换到 Pro 后，当天由旧模型生成的解读会被视为过期，并在下一次进入自选或实体账户时重新生成。若服务器配置文件已有 `FILING_INSIGHT_MAX_TOKENS=8192`、`FILING_INSIGHT_RETRY_MAX_TOKENS=16384` 或 `FILING_INSIGHT_TIMEOUT=180s`，应删除这些行或改为所需的 Pro 上限；否则它们会继续覆盖新的默认值。
+切换到 Pro 后，当天由旧模型生成的解读会被视为过期；用户再次点击“开始分析”后才重新生成。若服务器配置文件已有 `FILING_INSIGHT_MAX_TOKENS=8192`、`FILING_INSIGHT_RETRY_MAX_TOKENS=16384` 或 `FILING_INSIGHT_TIMEOUT=180s`，应删除这些行或改为所需的 Pro 上限；否则它们会继续覆盖新的默认值。
 
 生成时先从 SEC Submissions 确认最新定期申报或 Item 2.02 业绩公告；公告报告期从 SEC 正文核对，附件从同一申报目录取得。定期报告使用 Company Facts 的标准科目；8-K 发布稿则以原始附件正文为依据，并标明完整定期报告尚未提交。随后对照腾讯美股与标普 500 日线。SEC 原文无法读取时，解读会标注正文缺失。历史行情若不覆盖财报提交前一日，不能计算财报后累计涨跌；新闻搜索结果只作为可能原因的线索。AI 被要求区分事实、推断和不确定性，比较同口径期间，给出未来情景及有条件的买入、持有、减仓或卖出倾向。解读是研究意见，生成后行情与公告会变化。
 
 接口均需登录：
 
 - `GET /api/v1/stocks/watchlist/filing-insights`：读取当前用户今日自选解读状态和内容。
-- `POST /api/v1/stocks/watchlist/filing-insights/refresh`：空 JSON `{}` 提交今日全部美股自选；`{"code":"AAPL"}` 仅提交一只；`{"code":"AAPL","retry":true}` 重试失败结果。新财报时带 `retry:true` 和已展示财报的 `accession`，后端核对 SEC 后才替换旧解读。
+- `POST /api/v1/stocks/watchlist/filing-insights/refresh`：必须提供一只股票，例如 `{"code":"AAPL"}`；`{"code":"AAPL","retry":true}` 重试失败结果。空 JSON 和批量代码都会被拒绝。新财报时带 `retry:true` 和已展示财报的 `accession`，后端核对 SEC 后才替换旧解读。
 
 当前覆盖范围是 SEC 可识别的美股上市公司，其他市场在该列显示「—」。财报详情页内的标准化摘要是六项；完整正文通过 SEC 官方原文链接查看。若 SEC、模型或行情数据源暂时不可达，解读会显示失败原因并允许重试，不会伪造数值或走势。
 
-若弹窗提示模型失败，先在服务器检查后端日志中的 `SEC filing insight model request failed`。新版会在弹窗区分鉴权失败（401）、模型或地址不存在（404）、限流或额度（429）、请求不兼容（400）、超时和空回复；日志保留服务商返回的具体错误。可使用 `docker compose -f docker-compose.yml logs --tail=200 backend` 查看，不要将 `OPENAI_API_KEY` 的值贴到聊天或日志里。已有失败解读会短暂缓存；部署修复后点击“重新生成”可立即重试。
+若弹窗提示模型失败，先在服务器检查后端日志中的 `SEC filing insight model request failed`。新版会在弹窗区分鉴权失败（401）、模型或地址不存在（404）、限流或额度（429）、请求不兼容（400）、超时和空回复；日志保留服务商返回的具体错误。可使用 `docker compose -f docker-compose.yml logs --tail=200 backend` 查看，不要将 `OPENAI_API_KEY` 的值贴到聊天或日志里。已有失败解读会短暂缓存；部署修复后点击“重新分析”可立即重试。
