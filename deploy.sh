@@ -2,7 +2,7 @@
 
 # ============================================================
 # WiseInvest 腾讯云 HTTPS 部署脚本
-# 在腾讯云轻量应用服务器 (Ubuntu 22.04) 上执行
+# 在腾讯云 Ubuntu 服务器上执行
 # ============================================================
 
 set -e
@@ -142,11 +142,12 @@ if grep -q "CHANGE_ME_TO_A_RANDOM_32_CHAR_STRING" backend/.env.production; then
 fi
 
 # 先完成构建；构建失败时不停止现有后端。
-$COMPOSE_CMD "${COMPOSE_ARGS[@]}" build backend
+$COMPOSE_CMD "${COMPOSE_ARGS[@]}" build backend nginx
 if [[ "$LEGACY_COMPOSE" == true ]]; then
     echo -e "${YELLOW}旧版 Compose：清理旧后端容器，避开 ContainerConfig 兼容问题...${NC}"
     $COMPOSE_CMD "${COMPOSE_ARGS[@]}" rm -s -f backend
-    # 保留已有数据库、Redis 和 Nginx，避免旧 Compose 重建它们。
+    $COMPOSE_CMD "${COMPOSE_ARGS[@]}" rm -s -f nginx
+    # 保留已有数据库和 Redis，避免旧 Compose 重建它们。
     $COMPOSE_CMD "${COMPOSE_ARGS[@]}" up -d --no-recreate
 else
     $COMPOSE_CMD "${COMPOSE_ARGS[@]}" up -d
@@ -190,6 +191,11 @@ wait_for_health http://127.0.0.1:8080/health
 $COMPOSE_CMD "${COMPOSE_ARGS[@]}" exec -T nginx nginx -t
 wait_for_health http://127.0.0.1/health
 wait_for_https
+site_html="$(curl -fsS --noproxy '*' --resolve "$DOMAIN:443:127.0.0.1" --connect-timeout 2 --max-time 10 "https://$DOMAIN/")"
+if [[ "$site_html" != *'<title>慧投 WiseInvest</title>'* ]]; then
+    echo -e "${RED}❌ HTTPS 首页未返回慧投前端${NC}" >&2
+    exit 1
+fi
 
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗"

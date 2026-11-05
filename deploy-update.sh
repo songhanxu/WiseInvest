@@ -44,7 +44,7 @@ fi
 # 固定项目和配置文件，避免 COMPOSE_FILE 等环境变量选中其他服务。
 COMPOSE+=(-f "$PROJECT_DIR/docker-compose.yml" --project-directory "$PROJECT_DIR")
 
-for service in postgres redis nginx; do
+for service in postgres redis; do
     container_id="$("${COMPOSE[@]}" ps -q "$service")"
     [[ -n "$container_id" ]] || fail "$service 尚未启动；此脚本用于更新已部署的服务"
     running="$("${DOCKER[@]}" inspect --format '{{.State.Running}}' "$container_id")"
@@ -88,8 +88,9 @@ if command -v ufw >/dev/null 2>&1; then
 	if [[ "$EUID" -eq 0 ]]; then ufw allow 443/tcp >/dev/null; else sudo ufw allow 443/tcp >/dev/null; fi
 fi
 
-printf '[1/5] 构建后端镜像…\n'
+printf '[1/5] 构建后端和前端镜像…\n'
 "${COMPOSE[@]}" build backend
+"${COMPOSE[@]}" build nginx
 
 printf '[2/5] 更新后端容器，加载生产环境配置…\n'
 if [[ "$LEGACY_COMPOSE" == true ]]; then
@@ -116,6 +117,8 @@ else
 fi
 wait_for_health http://127.0.0.1/health
 wait_for_https
+site_html="$(curl -fsS --noproxy '*' --resolve "$DOMAIN:443:127.0.0.1" --connect-timeout 2 --max-time 10 "https://$DOMAIN/")"
+[[ "$site_html" == *'<title>慧投 WiseInvest</title>'* ]] || fail "HTTPS 首页未返回慧投前端：https://$DOMAIN/"
 
 "${COMPOSE[@]}" ps backend nginx
-printf '\n部署成功：HTTPS API https://%s/api/v1/\n' "$DOMAIN"
+printf '\n部署成功：慧投网站 https://%s/，API https://%s/api/v1/\n' "$DOMAIN" "$DOMAIN"

@@ -152,15 +152,18 @@ WiseInvest/
 │   │       └── search/      # DeepSeek 搜索与备用搜索源
 │   └── .env.example
 ├── ios/WiseInvest/          # SwiftUI iOS 客户端
-├── personal-assistant-demo/ # 独立的静态工具演示站
-├── nginx/                   # API 与演示站的虚拟主机配置
+├── frontend/                # 慧投网页端，由 Nginx 镜像构建并提供
+├── personal-assistant-demo/ # 保留的独立演示站源码，不参与部署
+├── nginx/                   # 网页与 API 的虚拟主机配置
 ├── start.sh                 # 一键启动脚本
 └── README.md
 ```
 
-## 独立个人工具演示站
+## 网站部署
 
-`personal-assistant-demo/` 是供 `hanxusong.asia` 使用的静态演示站，包含清单、专注计时和便签；它不连接慧投后端。腾讯云部署与域名隔离验证步骤见 [演示站说明](personal-assistant-demo/README.md)。
+`hanxusong.asia` 的 HTTPS 首页提供慧投网页，`/api/` 和 `/health` 转发到后端。前端随 `nginx` 镜像构建，生产环境默认同源请求 API。现有服务器拉取本分支后运行 `bash deploy-update.sh`；脚本兼容旧版 `docker-compose`，并验证 HTTPS 首页和 API 健康检查。部署需要服务器已有 `/home/ubuntu/ssl/hanxusong.asia_bundle.pem` 和 `/home/ubuntu/ssl/hanxusong.asia.key`，以及腾讯云安全组放行 TCP 80/443。
+
+`personal-assistant-demo/` 仍保留源码，但不再挂载到 Nginx，也不再占用域名。
 
 ## 环境变量说明
 
