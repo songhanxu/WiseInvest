@@ -1,6 +1,6 @@
 .conversation-page { position: fixed; top: 0; right: 0; left: 0; bottom: 0; display: flex; flex-direction: column; overflow: hidden; background: #f7f8f6; }
 .header { flex-shrink: 0; background: #fff; }
-.header-inner { max-width: 1120rpx; margin: 0 auto; min-height: 108rpx; padding: 14rpx 32rpx; display: flex; align-items: center; gap: 18rpx; }
+.header-inner { width: 100%; max-width: 1120rpx; margin: 0 auto; min-height: 108rpx; padding: 14rpx 32rpx; display: flex; align-items: center; gap: 18rpx; }
 .market-icon { flex-shrink: 0; width: 64rpx; height: 64rpx; border-radius: 12rpx; display: flex; align-items: center; justify-content: center; background: #edf2e8; color: #48623f; font-size: 25rpx; font-weight: 500; }
 .market-meta { flex: 1; min-width: 0; }
 .market-name { color: #2b3726; font-size: 28rpx; font-weight: 550; }
@@ -11,8 +11,9 @@
 .conversation-note { margin-bottom: 32rpx; color: #87937b; font-size: 20rpx; text-align: center; }
 .bottom-anchor { height: 8rpx; }
 .error-banner { flex-shrink: 0; margin: 8rpx 28rpx; padding: 16rpx 20rpx; border-radius: 12rpx; background: #f8edeb; color: #a15d4e; font-size: 24rpx; line-height: 1.6; }
-.chat-selection { display: flex; gap: 12rpx; padding: 14rpx 24rpx 0; background: #fff; }
-.selection-pill { border: 1rpx solid #dce5d6; border-radius: 12rpx; padding: 10rpx 16rpx; color: #48623f; background: #f4f7f0; font-size: 22rpx; }
+.chat-selection { display: flex; flex-wrap: wrap; padding: 14rpx 24rpx 0; background: #fff; }
+.selection-pill { border: 1rpx solid #dce5d6; border-radius: 12rpx; padding: 10rpx 16rpx; color: #48623f; background: #f4f7f0; font-size: 24rpx; }
+.chat-selection picker { margin-right: 12rpx; margin-bottom: 10rpx; }
 .input-wrap { flex-shrink: 0; display: flex; align-items: flex-end; gap: 14rpx; padding: 16rpx 24rpx 20rpx; padding-bottom: calc(20rpx + env(safe-area-inset-bottom)); background: #fff; }
 .keyboard-open .input-wrap { padding-bottom: 16rpx; }
 .input-box { flex: 1; min-width: 0; }
@@ -21,6 +22,3 @@
 .send { flex: 0 0 112rpx; width: 112rpx; min-height: 44px; padding: 24rpx 8rpx; border-radius: 14rpx; color: #fff; background: #36543c; font-size: 26rpx; line-height: 1.5; font-weight: 500; }
 .send[disabled] { color: #89967e; background: #edf1e8; opacity: 1; }
 @media (max-width: 340px) { .header-inner { padding-left: 24rpx; padding-right: 20rpx; }.messages { padding-left: 24rpx; padding-right: 24rpx; }.input-wrap { padding-left: 18rpx; padding-right: 18rpx; }.send { flex-basis: 104rpx; width: 104rpx; } }
-
-.guest-gate { margin: 80rpx 30rpx; padding: 40rpx; text-align: center; background: #fff; border-radius: 18rpx; color: #647b64; font-size: 26rpx; }
-.guest-gate button { margin-top: 24rpx; background: #e6eee4; color: #315637; font-size: 25rpx; }

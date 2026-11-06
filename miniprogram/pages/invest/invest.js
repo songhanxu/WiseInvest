@@ -1,5 +1,5 @@
 const { request } = require('../../utils/api');
-const { MARKETS } = require('../../utils/market');
+const { MARKETS, getMarketById } = require('../../utils/market');
 
 const base = '/api/v1';
 const key = (stock) => `${stock.market}:${stock.id}`;
@@ -10,7 +10,7 @@ Page({
     stocks: [], visibleStocks: [], searchMarket: 'all', searchMarketIndex: 0, query: '', results: [],
     accounts: [], holdings: [], equities: [], warnings: [], snapshotStale: false,
     alertEmail: '', mailerConfigured: false, alerts: [], busy: false, error: '',
-    guest: true,
+    guest: true, showSyncDetails: false, syncIssues: [],
   },
   searchTimer: null,
 
@@ -30,7 +30,7 @@ Page({
     ]);
     const [stocks, accounts, snapshot, alerts] = tasks.map((result) => result.status === 'fulfilled' ? result.value : null);
     this.setData({
-      stocks: Array.isArray(stocks) ? stocks : [],
+      stocks: Array.isArray(stocks) ? stocks.map((row) => ({ ...row, marketLabel: getMarketById(row.market).displayName })) : [],
       accounts: Array.isArray(accounts) ? accounts : [],
       holdings: snapshot && Array.isArray(snapshot.holdings) ? snapshot.holdings.map((row) => {
         const saved = alerts && Array.isArray(alerts.alerts) ? alerts.alerts.find((item) => item.holding_id === row.holding_id) : null;
@@ -38,6 +38,7 @@ Page({
       }) : [],
       equities: snapshot && Array.isArray(snapshot.account_equities) ? snapshot.account_equities : [],
       warnings: snapshot && Array.isArray(snapshot.warnings) ? snapshot.warnings : [],
+      syncIssues: [...new Set([...(snapshot && Array.isArray(snapshot.warnings) ? snapshot.warnings : []), ...(Array.isArray(accounts) ? accounts.filter((row) => !['ready', 'unbound', 'not_configured'].includes(row.status) && row.message).map((row) => `${row.name}：${row.message}`) : []), ...tasks.slice(1, 3).filter((result) => result.status === 'rejected').map((result) => result.reason.message || '账户同步暂不可用')])],
       snapshotStale: !!(snapshot && snapshot.stale),
       alerts: alerts && Array.isArray(alerts.alerts) ? alerts.alerts : [],
       alertEmail: alerts ? alerts.email || '' : '',
@@ -49,6 +50,7 @@ Page({
     return tasks;
   },
 
+  toggleSyncDetails() { this.setData({ showSyncDetails: !this.data.showSyncDetails }); },
   setMode(e) { this.setData({ mode: e.currentTarget.dataset.mode }); },
   setFilter(e) { this.setData({ filter: e.currentTarget.dataset.market }, () => this.applyFilter()); },
   applyFilter() {

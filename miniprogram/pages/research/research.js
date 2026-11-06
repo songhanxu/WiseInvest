@@ -1,4 +1,5 @@
 const { request } = require('../../utils/api');
+const { getMarketById } = require('../../utils/market');
 const { renderMarkdown } = require('../../utils/markdown');
 
 const metricLabels = { revenue: '营业收入', net_income: '净利润', operating_income: '营业利润', assets: '总资产', liabilities: '总负债', operating_cash_flow: '经营现金流', diluted_eps: '摊薄每股收益' };
@@ -8,11 +9,12 @@ Page({
     market: '', code: '', name: '', symbol: '', fundamentals: null, reports: [], insight: null,
     insightHTML: '', insightCurrent: false, sources: [], targetPrice: '', alert: null, loading: true, error: '',
     quote: null, news: [], candles: [], period: '1d', watched: false,
-    guest: true,
+    guest: true, marketLabel: '', showDataDetails: false,
   },
   pollTimer: null,
   onLoad(options) {
     this.setData({ market: options.market || '', code: decodeURIComponent(options.code || ''), name: decodeURIComponent(options.name || ''), symbol: decodeURIComponent(options.symbol || ''), guest: !getApp().isAuthenticated() });
+    this.setData({ marketLabel: getMarketById(this.data.market).displayName });
     this.refresh();
   },
   onUnload() { if (this.pollTimer) clearTimeout(this.pollTimer); },
@@ -93,7 +95,7 @@ Page({
       const response = await request({ url: '/api/v1/stocks/watchlist/filing-insights', needAuth: true });
       const insight = (response.insights || {})[this.data.code] || null;
       const current = !!(insight && insight.status === 'ready' && this.data.reports[0] && insight.accession === this.data.reports[0].accession);
-      this.setData({ insight, insightCurrent: current, insightHTML: renderMarkdown(current && insight.content), sources: current ? insight.sources || [] : [] });
+      this.setData({ insight, insightCurrent: current, insightHTML: renderMarkdown(current && insight.content, { indentParagraphs: true }), sources: current ? insight.sources || [] : [] });
       if (this.pollTimer) clearTimeout(this.pollTimer);
       if (insight && insight.status === 'pending') this.pollTimer = setTimeout(() => this.loadInsight(), 5000);
     } catch (error) { this.setData({ error: error.message }); }
@@ -106,6 +108,7 @@ Page({
       await this.loadInsight();
     } catch (error) { this.setData({ error: error.message }); }
   },
+  toggleDataDetails() { this.setData({ showDataDetails: !this.data.showDataDetails }); },
   onTargetPrice(e) { this.setData({ targetPrice: e.detail.value || '' }); },
   goLogin() { wx.navigateTo({ url: '/pages/login/login' }); },
   async saveAlert() {

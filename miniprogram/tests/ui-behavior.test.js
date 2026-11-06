@@ -146,6 +146,14 @@ test('Markdown formatting escapes HTML while preserving headings, lists, and emp
   assert.doesNotMatch(html, /<script>/);
 });
 
+test('financial paragraphs keep bounded spacing and indent only prose', () => {
+  const { renderMarkdown } = require('../utils/markdown');
+  const html = renderMarkdown('\n\n第一段。\n\n\n第二段。\n\n# 估值\n- 风险', { indentParagraphs: true });
+  assert.equal((html.match(/text-indent:2em/g) || []).length, 2);
+  assert.doesNotMatch(html, /<br\/>/);
+  assert.match(html, /<p style="font-weight:600[^>]+>估值/);
+});
+
 test('investment page loads all-market watchlist and keeps account failures independent', async () => {
   const calls = [];
   const api = { request: async ({ url }) => {
@@ -159,6 +167,10 @@ test('investment page loads all-market watchlist and keeps account failures inde
   const { page } = fixture('pages/invest/invest.js', { api });
   await page.refresh();
   assert.equal(page.data.visibleStocks[0].id, 'AAPL');
+  assert.equal(page.data.syncIssues[0], '账户暂不可用');
+  assert.equal(page.data.showSyncDetails, false);
+  page.toggleSyncDetails();
+  assert.equal(page.data.showSyncDetails, true);
   assert.deepEqual([...calls].sort(), ['/api/v1/stocks/watchlist/all', '/api/v1/accounts', '/api/v1/accounts/all/holdings', '/api/v1/price-alerts'].sort());
 });
 
@@ -183,6 +195,23 @@ test('roundtable does not persist a welcome-only session and preserves speaker e
   assert.equal(page.data.messages[2].name, '价值派');
   assert.match(page.data.messages[2].html, /<strong>估值<\/strong>/);
   assert.equal(records().length, 1);
+});
+
+test('roundtable composer follows the keyboard and resets after blur and resize', () => {
+  const { page } = fixture('pages/roundtable/roundtable.js');
+  page.onLoad({});
+  page.onKeyboardHeightChange({ detail: { height: 320 } });
+  assert.equal(page.data.keyboardHeight, 320);
+  page.onKeyboardHeightChange({ detail: { height: 9999 } });
+  assert.equal(page.data.keyboardHeight, page.data.windowHeight);
+  page.onInputBlur();
+  assert.equal(page.data.keyboardHeight, 0);
+  page.onKeyboardHeightChange({ detail: { height: 320 } });
+  page.onResize({ size: { windowHeight: 500 } });
+  assert.equal(page.data.windowHeight, 500);
+  assert.equal(page.data.keyboardHeight, 320);
+  page.onHide();
+  assert.equal(page.data.keyboardHeight, 0);
 });
 
 test('market overview loads indices and scoped watchlist', async () => {

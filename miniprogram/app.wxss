@@ -16,7 +16,7 @@ page {
   line-height: 1.5;
 }
 view, button, input, textarea, scroll-view { box-sizing: border-box; }
-button { margin: 0; font: inherit; padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; line-height: inherit; }
+button { width: auto; max-width: none; margin: 0; font: inherit; padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; line-height: inherit; }
 button::after { border: 0; }
 button[disabled] { opacity: .5; }
 .safe-area-bottom { padding-bottom: 24rpx; padding-bottom: calc(24rpx + env(safe-area-inset-bottom)); }
@@ -24,3 +24,24 @@ button[disabled] { opacity: .5; }
 .text-secondary { color: #6c7868; }
 .text-tertiary { color: #87917f; }
 .is-pressed { opacity: .7; }
+
+.guest-gate { margin: 48rpx 36rpx; padding: 40rpx 28rpx; border: 1rpx solid #e5e9e0; border-radius: 20rpx; background: #fff; text-align: center; color: #6c7868; font-size: 27rpx; line-height: 1.7; }
+.guest-gate button { width: 100%; min-height: 44px; margin-top: 28rpx; padding: 18rpx; border-radius: 12rpx; color: #36573d; background: #e8f0e5; font-size: 26rpx; }
+
+/* Shared mobile page typography and controls. */
+
+.invest .intro, .invest .heading, .research .intro, .research .heading, .market-page .intro, .market-page .heading { padding: 12rpx 0 32rpx; }
+.invest .eyebrow, .research .eyebrow, .market-page .eyebrow { color: #73806e; font-size: 22rpx; line-height: 1.5; }
+.invest .title, .research .title, .market-page .title { margin: 8rpx 0; font-size: 48rpx; line-height: 1.25; font-weight: 600; overflow-wrap: anywhere; }
+.invest .subtitle, .invest .muted, .research .subtitle, .research .muted, .market-page .subtitle, .market-page .muted { color: #758071; font-size: 24rpx; line-height: 1.6; overflow-wrap: anywhere; }
+.invest .subtitle, .research .subtitle, .market-page .subtitle { margin-top: 10rpx; }
+.invest .card, .research .card, .market-page .card { padding: 28rpx; margin-bottom: 20rpx; border: 1rpx solid #e5e9e0; border-radius: 20rpx; background: #fff; }
+.invest .section-title, .invest .label, .research .section-title, .research .label, .market-page .section-title, .market-page .label { font-size: 30rpx; line-height: 1.4; font-weight: 600; }
+.invest .section-title, .research .section-title, .market-page .section-title { margin-bottom: 20rpx; }
+.invest .error, .research .error, .market-page .error { padding: 20rpx 24rpx; margin: 0 0 20rpx; background: #fbf1e8; color: #9a603d; border-radius: 14rpx; font-size: 24rpx; line-height: 1.6; overflow-wrap: anywhere; }
+.invest .empty, .research .empty, .market-page .empty { padding: 48rpx 28rpx; text-align: center; color: #758071; font-size: 26rpx; line-height: 1.7; }
+.invest .action, .research .action, .market-page .action { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 44px; padding: 18rpx 24rpx; margin-top: 20rpx; background: #e8f0e5; color: #36573d; border-radius: 12rpx; font-size: 26rpx; }
+.invest .source, .research .source, .market-page .source { display: block; width: 100%; padding: 16rpx 0; color: #36573d; font-size: 23rpx; line-height: 1.6; text-align: left; overflow-wrap: anywhere; }
+.invest .positive, .research .positive, .market-page .positive { color: #bb5a4b; }
+.invest .negative, .research .negative, .market-page .negative { color: #328269; }
+.invest .guest-login, .research .guest-login, .market-page .guest-login { width: 100%; min-height: 44px; margin-top: 24rpx; padding: 18rpx; border-radius: 12rpx; color: #36573d; background: #e8f0e5; font-size: 26rpx; }
