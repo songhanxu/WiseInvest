@@ -1,6 +1,6 @@
 {
   "navigationBarTitleText": "慧投",
-  "backgroundColor": "#f7f8f6",
+  "backgroundColor": "#f2f2f7",
   "backgroundTextStyle": "dark",
   "usingComponents": {
     "market-card": "/components/market-card/market-card",

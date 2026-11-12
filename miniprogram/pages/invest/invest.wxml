@@ -1,5 +1,5 @@
 <view class="invest safe-area-bottom">
-  <view class="intro"><view class="eyebrow">投资工作台</view><view class="title">我的投资</view><view class="subtitle">关注的公司、最新财报与账户持仓</view></view>
+  <view class="intro"><view class="title">我的投资</view></view>
   <view class="tabs"><button class="{{mode === 'watchlist' ? 'active' : ''}}" data-mode="watchlist" bindtap="setMode">自选研究</button><button class="{{mode === 'accounts' ? 'active' : ''}}" data-mode="accounts" bindtap="setMode">账户持仓</button></view>
   <view wx:if="{{guest}}" class="empty card">自选、持仓和提醒需要登录后使用。<button bindtap="goLogin" class="guest-login">登录账户</button></view>
   <block wx:else>

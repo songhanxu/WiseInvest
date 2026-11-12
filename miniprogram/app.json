@@ -11,11 +11,11 @@
   ],
   "window": {
     "navigationBarTitleText": "慧投",
-    "navigationBarBackgroundColor": "#f7f8f6",
+    "navigationBarBackgroundColor": "#f2f2f7",
     "navigationBarTextStyle": "black",
-    "backgroundColor": "#f7f8f6",
-    "backgroundColorTop": "#f7f8f6",
-    "backgroundColorBottom": "#f7f8f6",
+    "backgroundColor": "#f2f2f7",
+    "backgroundColorTop": "#f2f2f7",
+    "backgroundColorBottom": "#f2f2f7",
     "backgroundTextStyle": "dark"
   },
   "style": "v2",

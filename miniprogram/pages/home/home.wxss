@@ -1,48 +1,16 @@
-.home-page { min-height: 100vh; background: #f7f8f6; }
-.content { width: 100%; max-width: 1040rpx; margin: 0 auto; padding: 28rpx 36rpx 20rpx; }
-
-.header, .brand { display: flex; align-items: center; }
-.header { justify-content: space-between; }
-.brand { gap: 16rpx; }
-.brand-mark { width: 62rpx; height: 62rpx; border-radius: 14rpx; background: #344e38; display: flex; align-items: flex-end; justify-content: center; gap: 6rpx; padding-bottom: 17rpx; }
-.bar { width: 5rpx; background: #edf4e9; border-radius: 2rpx; }
-.bar-one { height: 18rpx; }
-.bar-two { height: 30rpx; }
-.bar-three { height: 24rpx; }
-.brand-name { font-size: 34rpx; font-weight: 600; letter-spacing: 2rpx; }
-.brand-caption { margin-top: 3rpx; font-size: 20rpx; color: #74806c; }
-.account-button { display: flex; align-items: center; justify-content: center; min-width: 104rpx; min-height: 44px; font-size: 24rpx; color: #53644d; }
-.account-arrow { margin-left: 10rpx; color: #89957f; }
-
-.intro { padding: 42rpx 0 36rpx; }
-.eyebrow { color: #7b8773; font-size: 21rpx; letter-spacing: 1rpx; margin-bottom: 14rpx; }
-.intro-title { font-size: 42rpx; font-weight: 550; letter-spacing: -1rpx; line-height: 1.4; }
-.intro-copy { margin-top: 12rpx; color: #74806c; font-size: 24rpx; line-height: 1.6; }
-
-.quick-actions { margin-bottom: 42rpx; }
-.quick-action { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 112rpx; padding: 23rpx 28rpx; margin-bottom: 14rpx; background: #fff; border: 1rpx solid #e5e9e0; border-radius: 20rpx; color: #2f4030; }
-.quick-action-primary { background: #e8f0e5; border-color: #e8f0e5; }
-.quick-action-copy { flex: 1; min-width: 0; }
-.quick-action-title { font-size: 29rpx; font-weight: 600; line-height: 1.3; }
-.quick-action-note { margin-top: 8rpx; color: #61735f; font-size: 21rpx; line-height: 1.4; }
-.quick-action-arrow { flex: none; display: flex; align-items: center; justify-content: center; width: 44rpx; height: 44rpx; margin-left: 18rpx; border-radius: 50%; background: rgba(52, 78, 56, .08); color: #35583c; font-size: 34rpx; line-height: 1; }
-
-.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12rpx; margin-bottom: 20rpx; }
-.section-title { font-size: 30rpx; font-weight: 600; }
-.section-note { color: #7c8774; font-size: 21rpx; }
-.markets { display: flex; flex-wrap: wrap; justify-content: space-between; }
-.market-slot { width: 48.5%; min-width: 0; margin-bottom: 20rpx; }
-.market-slot-wide { width: 100%; }
-.recent-heading { margin-top: 22rpx; }
-.recent-list { background: #fff; border-radius: 20rpx; padding: 10rpx; }
-.recent-empty { text-align: center; padding: 36rpx 24rpx; border-radius: 20rpx; background: #fff; }
-.empty-mark { color: #7d9274; font-size: 40rpx; margin-bottom: 12rpx; }
-.empty-title { color: #47543f; font-size: 26rpx; font-weight: 500; }
-.empty-desc { color: #7c8774; font-size: 23rpx; line-height: 1.7; margin-top: 8rpx; }
-.page-note { padding-top: 30rpx; color: #88937f; font-size: 20rpx; text-align: center; }
-
-@media (max-width: 340px) {
-  .content { padding-left: 28rpx; padding-right: 28rpx; }
-  .intro-title { font-size: 39rpx; }
-  .market-slot { width: 48%; }
-}
+.home-page { min-height: 100vh; background: #f2f2f7; }
+.content { width: 100%; max-width: 1040rpx; margin: auto; padding: 24rpx 36rpx 40rpx; }
+.header { display: flex; justify-content: space-between; align-items: center; padding: 8rpx 4rpx 36rpx; }
+.eyebrow { margin-bottom: 8rpx; color: #8e8e93; font-size: 24rpx; }
+.page-title { font-size: 64rpx; font-weight: 700; line-height: 1.2; letter-spacing: -2rpx; }
+.account-button { min-width: 88rpx; min-height: 44px; padding: 16rpx 0 16rpx 24rpx; color: #007aff; font-size: 28rpx; }
+.quick-actions, .markets, .recent-list { overflow: hidden; background: #fff; border-radius: 24rpx; }
+.quick-actions { margin-bottom: 40rpx; }
+.quick-action { display: flex; align-items: center; min-height: 128rpx; padding: 24rpx 30rpx; }
+.quick-action + .quick-action { border-top: 1rpx solid #ececf0; }
+.quick-action-copy { flex: 1; min-width: 0; }.quick-action-title { font-size: 32rpx; font-weight: 500; }.quick-action-note { margin-top: 5rpx; font-size: 24rpx; color: #8e8e93; }
+.chevron { flex: none; margin-left: 24rpx; font-size: 36rpx; font-weight: 300; color: #c7c7cc; }
+.section-heading { margin: 0 8rpx 16rpx; }.section-title { font-size: 28rpx; font-weight: 600; color: #636366; }
+.market-slot + .market-slot { border-top: 1rpx solid #ececf0; }
+.recent-heading { margin-top: 40rpx; }.page-note { padding: 32rpx 16rpx 0; color: #8e8e93; font-size: 24rpx; text-align: center; }
+@media (max-width: 340px) { .content { padding-left: 28rpx; padding-right: 28rpx; } }

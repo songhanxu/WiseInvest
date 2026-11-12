@@ -9,7 +9,7 @@ Page({
     market: '', code: '', name: '', symbol: '', fundamentals: null, reports: [], insight: null,
     insightHTML: '', insightCurrent: false, sources: [], targetPrice: '', alert: null, loading: true, error: '',
     quote: null, news: [], candles: [], period: '1d', watched: false,
-    guest: true, marketLabel: '', showDataDetails: false,
+    guest: true, marketLabel: '', showDataDetails: false, showReports: false, showNews: false,
   },
   pollTimer: null,
   onLoad(options) {
@@ -108,6 +108,8 @@ Page({
       await this.loadInsight();
     } catch (error) { this.setData({ error: error.message }); }
   },
+  toggleReports() { this.setData({ showReports: !this.data.showReports }); },
+  toggleNews() { this.setData({ showNews: !this.data.showNews }); },
   toggleDataDetails() { this.setData({ showDataDetails: !this.data.showDataDetails }); },
   onTargetPrice(e) { this.setData({ targetPrice: e.detail.value || '' }); },
   goLogin() { wx.navigateTo({ url: '/pages/login/login' }); },

@@ -6,9 +6,9 @@ function escapeHTML(value) {
 function inlineMarkdown(source) {
   let text = escapeHTML(source);
   text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) =>
-    `<a href="${url}" style="color:#36573d;text-decoration:underline">${label}</a>`);
+    `<a href="${url}" style="color:#007aff;text-decoration:underline">${label}</a>`);
   text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`]+)`/g, '<code style="background:#f1f4ef">$1</code>')
+    .replace(/`([^`]+)`/g, '<code style="background:#f2f2f7">$1</code>')
     .replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
   return text;
 }
@@ -27,7 +27,7 @@ function renderMarkdown(source, { indentParagraphs = false } = {}) {
   lines.forEach((line) => {
     if (/^\s*```/.test(line)) {
       flush();
-      rendered.push(inCode ? '</code></pre>' : '<pre style="white-space:pre-wrap;background:#f1f4ef;padding:12px;border-radius:8px;margin:12px 0;word-wrap:break-word"><code>');
+      rendered.push(inCode ? '</code></pre>' : '<pre style="white-space:pre-wrap;background:#f2f2f7;padding:12px;border-radius:8px;margin:12px 0;word-wrap:break-word"><code>');
       inCode = !inCode;
     } else if (inCode) {
       rendered.push(`${escapeHTML(line)}\n`);
@@ -44,7 +44,7 @@ function renderMarkdown(source, { indentParagraphs = false } = {}) {
       rendered.push(`<p style="margin:0 0 8px;padding-left:12px;line-height:1.8">${inlineMarkdown(line.trim())}</p>`);
     } else if (/^>\s?/.test(line)) {
       flush();
-      rendered.push(`<p style="margin:8px 0 12px;color:#69766a;border-left:2px solid #cbd7c8;padding-left:12px;line-height:1.8">${inlineMarkdown(line.replace(/^>\s?/, ''))}</p>`);
+      rendered.push(`<p style="margin:8px 0 12px;color:#636366;border-left:2px solid #d1d1d6;padding-left:12px;line-height:1.8">${inlineMarkdown(line.replace(/^>\s?/, ''))}</p>`);
     } else {
       paragraph.push(line);
     }

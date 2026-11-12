@@ -1,15 +1,15 @@
 page {
-  --color-bg-primary: #f7f8f6;
+  --color-bg-primary: #f2f2f7;
   --color-bg-secondary: #ffffff;
-  --color-text-primary: #232b24;
-  --color-text-secondary: #6c7868;
-  --color-text-tertiary: #87917f;
-  --color-accent-blue: #36573d;
-  --color-user-msg: #edf3e8;
+  --color-text-primary: #1c1c1e;
+  --color-text-secondary: #8e8e93;
+  --color-text-tertiary: #8e8e93;
+  --color-accent-blue: #007aff;
+  --color-user-msg: #f2f2f7;
   --color-assistant-msg: #ffffff;
-  --color-line: #e5e9e0;
-  background: #f7f8f6;
-  color: #232b24;
+  --color-line: #e5e5ea;
+  background: #f2f2f7;
+  color: #1c1c1e;
   min-height: 100%;
   font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
   font-size: 28rpx;
@@ -20,28 +20,28 @@ button { width: auto; max-width: none; margin: 0; font: inherit; padding: 0; bor
 button::after { border: 0; }
 button[disabled] { opacity: .5; }
 .safe-area-bottom { padding-bottom: 24rpx; padding-bottom: calc(24rpx + env(safe-area-inset-bottom)); }
-.card { background: #fff; border: 1rpx solid #e5e9e0; border-radius: 20rpx; }
-.text-secondary { color: #6c7868; }
-.text-tertiary { color: #87917f; }
+.card { background: #fff; border: 0; border-radius: 24rpx; }
+.text-secondary { color: #8e8e93; }
+.text-tertiary { color: #8e8e93; }
 .is-pressed { opacity: .7; }
 
-.guest-gate { margin: 48rpx 36rpx; padding: 40rpx 28rpx; border: 1rpx solid #e5e9e0; border-radius: 20rpx; background: #fff; text-align: center; color: #6c7868; font-size: 27rpx; line-height: 1.7; }
-.guest-gate button { width: 100%; min-height: 44px; margin-top: 28rpx; padding: 18rpx; border-radius: 12rpx; color: #36573d; background: #e8f0e5; font-size: 26rpx; }
+.guest-gate { margin: 48rpx 36rpx; padding: 40rpx 28rpx; border: 0; border-radius: 24rpx; background: #fff; text-align: center; color: #8e8e93; font-size: 27rpx; line-height: 1.7; }
+.guest-gate button { width: 100%; min-height: 44px; margin-top: 28rpx; padding: 18rpx; border-radius: 12rpx; color: #007aff; background: #e5e5ea; font-size: 26rpx; }
 
 /* Shared mobile page typography and controls. */
 
 .invest .intro, .invest .heading, .research .intro, .research .heading, .market-page .intro, .market-page .heading { padding: 12rpx 0 32rpx; }
-.invest .eyebrow, .research .eyebrow, .market-page .eyebrow { color: #73806e; font-size: 22rpx; line-height: 1.5; }
+.invest .eyebrow, .research .eyebrow, .market-page .eyebrow { color: #8e8e93; font-size: 22rpx; line-height: 1.5; }
 .invest .title, .research .title, .market-page .title { margin: 8rpx 0; font-size: 48rpx; line-height: 1.25; font-weight: 600; overflow-wrap: anywhere; }
-.invest .subtitle, .invest .muted, .research .subtitle, .research .muted, .market-page .subtitle, .market-page .muted { color: #758071; font-size: 24rpx; line-height: 1.6; overflow-wrap: anywhere; }
+.invest .subtitle, .invest .muted, .research .subtitle, .research .muted, .market-page .subtitle, .market-page .muted { color: #8e8e93; font-size: 24rpx; line-height: 1.6; overflow-wrap: anywhere; }
 .invest .subtitle, .research .subtitle, .market-page .subtitle { margin-top: 10rpx; }
-.invest .card, .research .card, .market-page .card { padding: 28rpx; margin-bottom: 20rpx; border: 1rpx solid #e5e9e0; border-radius: 20rpx; background: #fff; }
+.invest .card, .research .card, .market-page .card { padding: 28rpx; margin-bottom: 20rpx; border: 0; border-radius: 24rpx; background: #fff; }
 .invest .section-title, .invest .label, .research .section-title, .research .label, .market-page .section-title, .market-page .label { font-size: 30rpx; line-height: 1.4; font-weight: 600; }
 .invest .section-title, .research .section-title, .market-page .section-title { margin-bottom: 20rpx; }
 .invest .error, .research .error, .market-page .error { padding: 20rpx 24rpx; margin: 0 0 20rpx; background: #fbf1e8; color: #9a603d; border-radius: 14rpx; font-size: 24rpx; line-height: 1.6; overflow-wrap: anywhere; }
-.invest .empty, .research .empty, .market-page .empty { padding: 48rpx 28rpx; text-align: center; color: #758071; font-size: 26rpx; line-height: 1.7; }
-.invest .action, .research .action, .market-page .action { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 44px; padding: 18rpx 24rpx; margin-top: 20rpx; background: #e8f0e5; color: #36573d; border-radius: 12rpx; font-size: 26rpx; }
-.invest .source, .research .source, .market-page .source { display: block; width: 100%; padding: 16rpx 0; color: #36573d; font-size: 23rpx; line-height: 1.6; text-align: left; overflow-wrap: anywhere; }
+.invest .empty, .research .empty, .market-page .empty { padding: 48rpx 28rpx; text-align: center; color: #8e8e93; font-size: 26rpx; line-height: 1.7; }
+.invest .action, .research .action, .market-page .action { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 44px; padding: 18rpx 24rpx; margin-top: 20rpx; background: #e5e5ea; color: #007aff; border-radius: 12rpx; font-size: 26rpx; }
+.invest .source, .research .source, .market-page .source { display: block; width: 100%; padding: 16rpx 0; color: #007aff; font-size: 23rpx; line-height: 1.6; text-align: left; overflow-wrap: anywhere; }
 .invest .positive, .research .positive, .market-page .positive { color: #bb5a4b; }
 .invest .negative, .research .negative, .market-page .negative { color: #328269; }
-.invest .guest-login, .research .guest-login, .market-page .guest-login { width: 100%; min-height: 44px; margin-top: 24rpx; padding: 18rpx; border-radius: 12rpx; color: #36573d; background: #e8f0e5; font-size: 26rpx; }
+.invest .guest-login, .research .guest-login, .market-page .guest-login { width: 100%; min-height: 44px; margin-top: 24rpx; padding: 18rpx; border-radius: 12rpx; color: #007aff; background: #e5e5ea; font-size: 26rpx; }

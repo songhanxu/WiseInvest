@@ -1,8 +1,13 @@
 .market-page { width: 100%; max-width: 1040rpx; margin: auto; padding: 28rpx 36rpx; padding-bottom: calc(32rpx + env(safe-area-inset-bottom)); }
-.actions { display: flex; justify-content: space-between; margin-bottom: 32rpx; }.actions button { width: 48.5%; min-height: 48px; background: #e8f0e5; border-radius: 14rpx; padding: 20rpx 12rpx; color: #345b3c; font-size: 24rpx; }
+.actions { display: flex; justify-content: space-between; margin-bottom: 32rpx; }.actions button { width: 48.5%; min-height: 48px; background: #e5e5ea; border-radius: 14rpx; padding: 20rpx 12rpx; color: #007aff; font-size: 24rpx; }
 .space { margin-top: 32rpx; }
 .index, .stock { display: flex; justify-content: space-between; align-items: center; }.index > view:first-child, .stock > view:first-child { flex: 1; min-width: 0; padding-right: 16rpx; }
 .name { font-size: 28rpx; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }.right { flex: none; max-width: 46%; text-align: right; }.value { font-size: 30rpx; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }.change { font-size: 24rpx; }
 .market-page .search { width: 100%; height: 88rpx; padding: 0 24rpx; background: #fff; font-size: 27rpx; }
-.empty button { width: 100%; min-height: 44px; margin-top: 20rpx; padding: 16rpx; border-radius: 12rpx; color: #36573d; background: #e8f0e5; font-size: 26rpx; }
+.empty button { width: 100%; min-height: 44px; margin-top: 20rpx; padding: 16rpx; border-radius: 12rpx; color: #007aff; background: #e5e5ea; font-size: 26rpx; }
 @media (max-width: 340px) { .market-page { padding-left: 28rpx; padding-right: 28rpx; } }
+
+.grouped-list { margin-bottom: 28rpx; overflow: hidden; border-radius: 24rpx; background: #fff; }.list-row { padding: 26rpx 28rpx; }.list-row + .list-row { border-top: 1rpx solid #ececf0; }
+.market-page .search { width: 100%; height: 88rpx; margin: 32rpx 0 24rpx; padding: 0 24rpx; border-radius: 16rpx; background: #e9e9ee; font-size: 28rpx; }
+.market-page .title { font-size: 60rpx; font-weight: 700; letter-spacing: -1.5rpx; }.market-page .section-title { margin-left: 8rpx; color: #636366; font-size: 27rpx; }
+.name { font-weight: 500; }.chevron { color: #c7c7cc; font-size: 36rpx; }.actions button { color: #007aff; background: #fff; font-weight: 500; }.loading-note { margin: 0 8rpx 20rpx; }
