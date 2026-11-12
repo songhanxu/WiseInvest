@@ -4,212 +4,168 @@ struct ProfileView: View {
     @EnvironmentObject var authState: AuthState
     @AppStorage("appearance") private var appearance = "dark"
     @State private var showSignOutConfirmation = false
+    @State private var presentedInfo: ProfileInfo?
+
+    private enum ProfileInfo: String, Identifiable {
+        case account, data, about
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .account: return "账号信息"
+            case .data: return "数据与同步"
+            case .about: return "关于慧投"
+            }
+        }
+    }
 
     var body: some View {
-        NavigationView {
-            ZStack {
-                Color.primaryBackground.ignoresSafeArea()
-
-                ScrollView {
-                    VStack(spacing: 20) {
-                        if authState.isAuthenticated {
-                            avatarSection
-                        } else {
-                            SignInGate(feature: "个人账户")
-                                .padding(.horizontal, 20)
-                                .padding(.top, 24)
+        NavigationStack {
+            List {
+                Section {
+                    Button {
+                        if authState.isAuthenticated { presentedInfo = .account }
+                        else { authState.showLogin() }
+                    } label: {
+                        HStack(spacing: 14) {
+                            accountAvatar
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(authState.isAuthenticated ? authState.currentUser?.effectiveName ?? "我的账户" : "登录慧投")
+                                    .font(.body.weight(.semibold))
+                                    .foregroundStyle(Color.textPrimary)
+                                Text(authState.isAuthenticated ? "查看账号信息" : "同步自选与研究记录")
+                                    .font(.subheadline)
+                                    .foregroundStyle(Color.textSecondary)
+                            }
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Color.textTertiary)
                         }
-                        settingsSection
-                        if authState.isAuthenticated { signOutButton }
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.bottom, 32)
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("profile.account")
+                }
+                .listRowBackground(Color.secondaryBackground)
+
+                Section("外观") {
+                    Toggle(isOn: Binding(
+                        get: { appearance == "dark" },
+                        set: { appearance = $0 ? "dark" : "light" }
+                    )) {
+                        settingsLabel("深色模式", icon: "moon")
+                    }
+                    .tint(.accentBlue)
+                    .accessibilityIdentifier("profile.appearance")
+                }
+                .listRowBackground(Color.secondaryBackground)
+
+                Section("通用") {
+                    Button { presentedInfo = .data } label: {
+                        settingsRow("数据与同步", icon: "arrow.triangle.2.circlepath")
+                    }
+                    Button { presentedInfo = .about } label: {
+                        settingsRow("关于慧投", icon: "info.circle")
+                    }
+                }
+                .listRowBackground(Color.secondaryBackground)
+
+                if authState.isAuthenticated {
+                    Section {
+                        Button("退出登录", role: .destructive) { showSignOutConfirmation = true }
+                            .frame(maxWidth: .infinity, minHeight: 30)
+                    }
+                    .listRowBackground(Color.secondaryBackground)
                 }
             }
-            .navigationTitle("个人中心")
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(24)
+            .scrollContentBackground(.hidden)
+            .background(Color.primaryBackground)
+            .navigationTitle("我的")
             .navigationBarTitleDisplayMode(.large)
         }
-    }
-
-    // MARK: - Avatar Section
-
-    private var avatarSection: some View {
-        VStack(spacing: 14) {
-            // Avatar
-            Group {
-                if let user = authState.currentUser, !user.effectiveAvatar.isEmpty,
-                   let url = URL(string: user.effectiveAvatar) {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        default:
-                            defaultAvatar
-                        }
-                    }
-                } else {
-                    defaultAvatar
-                }
-            }
-            .frame(width: 80, height: 80)
-            .clipShape(Circle())
-
-            VStack(spacing: 4) {
-                Text(authState.currentUser?.effectiveName ?? "投资者")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(.textPrimary)
-
-                if let phone = authState.currentUser?.phone {
-                    Text(phone)
-                        .font(.system(size: 14))
-                        .foregroundColor(.textSecondary)
-                }
-            }
-        }
-        .padding(.top, 24)
-    }
-
-    private var defaultAvatar: some View {
-        Circle()
-            .fill(Color.subtleBackground)
-            .overlay(
-                Image(systemName: "person.fill")
-                    .font(.system(size: 34))
-                    .foregroundColor(.textSecondary)
-            )
-    }
-
-    // MARK: - Settings Section
-
-    private var settingsSection: some View {
-        VStack(spacing: 0) {
-            Toggle(isOn: Binding(
-                get: { appearance == "dark" },
-                set: { appearance = $0 ? "dark" : "light" }
-            )) {
-                Label("深色模式", systemImage: "moon.stars")
-                    .font(.system(size: 15))
-                    .foregroundColor(.textPrimary)
-            }
-            .tint(.accentBlue)
-            .padding(16)
-            .background(Color.secondaryBackground)
-            .cornerRadius(16)
-
-            Spacer().frame(height: 16)
-
-            settingsGroup(items: [
-                SettingsItem(icon: "person.crop.circle", iconColor: .accentBlue, title: "账号信息"),
-                SettingsItem(icon: "bell", iconColor: .textSecondary, title: "消息通知"),
-                SettingsItem(icon: "shield.checkerboard", iconColor: .textSecondary, title: "隐私与安全"),
-            ])
-
-            Spacer().frame(height: 16)
-
-            settingsGroup(items: [
-                SettingsItem(icon: "questionmark.circle", iconColor: .textSecondary, title: "帮助与反馈"),
-                SettingsItem(icon: "info.circle", iconColor: .textSecondary, title: "关于慧投"),
-            ])
-        }
-        .padding(.horizontal, 20)
-    }
-
-    private func settingsGroup(items: [SettingsItem]) -> some View {
-        VStack(spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.element.title) { index, item in
-                settingsRow(item: item)
-
-                if index < items.count - 1 {
-                    Divider()
-                        .background(Color.textTertiary.opacity(0.15))
-                        .padding(.leading, 54)
-                }
-            }
-        }
-        .background(Color.secondaryBackground)
-        .cornerRadius(16)
-    }
-
-    private func settingsRow(item: SettingsItem) -> some View {
-        Button(action: {}) {
-            HStack(spacing: 14) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(item.iconColor.opacity(0.15))
-                        .frame(width: 34, height: 34)
-                    Image(systemName: item.icon)
-                        .font(.system(size: 16))
-                        .foregroundColor(item.iconColor)
-                }
-
-                Text(item.title)
-                    .font(.system(size: 15))
-                    .foregroundColor(.textPrimary)
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 13))
-                    .foregroundColor(.textTertiary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 13)
-        }
-        .buttonStyle(PlainButtonStyle())
-    }
-
-    // MARK: - Sign Out
-
-    private var signOutButton: some View {
-        Button(action: { showSignOutConfirmation = true }) {
-            Text("退出登录")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundColor(.red)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(Color.secondaryBackground)
-                .cornerRadius(16)
-        }
-        .padding(.horizontal, 20)
         .confirmationDialog("确认退出登录？", isPresented: $showSignOutConfirmation) {
-            Button("退出登录", role: .destructive) {
-                authState.signOut()
-            }
+            Button("退出登录", role: .destructive) { authState.signOut() }
             Button("取消", role: .cancel) {}
         }
-    }
-}
-
-// MARK: - Supporting Views
-
-private struct StatCard: View {
-    let title: String
-    let value: String
-    let icon: String
-    let color: Color
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 20))
-                .foregroundColor(color)
-
-            Text(value)
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(.textPrimary)
-
-            Text(title)
-                .font(.system(size: 11))
-                .foregroundColor(.textSecondary)
+        .sheet(item: $presentedInfo) { info in
+            NavigationStack {
+                List {
+                    switch info {
+                    case .account:
+                        if let user = authState.currentUser {
+                            Section {
+                                LabeledContent("昵称", value: user.effectiveName)
+                                LabeledContent("用户 ID", value: String(user.id))
+                                if let phone = user.phone, !phone.isEmpty {
+                                    LabeledContent("手机号", value: phone)
+                                }
+                            }
+                        }
+                    case .data:
+                        Section("账户数据") {
+                            Text("登录后可访问你的自选、账户持仓和价格提醒。")
+                        }
+                        Section("当前设备") {
+                            Text("对话记录保存在当前设备。登录状态和外观选择会在下次打开时恢复。")
+                        }
+                    case .about:
+                        Section {
+                            LabeledContent("应用", value: "慧投 WiseInvest")
+                            LabeledContent("版本", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0")
+                        }
+                        Section {
+                            Text("关注市场，理解公司，记录你的研究。")
+                        }
+                    }
+                }
+                .navigationTitle(info.title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { presentedInfo = nil } } }
+            }
+            .tint(.accentBlue)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
-        .background(Color.secondaryBackground)
-        .cornerRadius(14)
     }
-}
 
-private struct SettingsItem {
-    let icon: String
-    let iconColor: Color
-    let title: String
+    private var accountAvatar: some View {
+        Group {
+            if authState.isAuthenticated, let value = authState.currentUser?.effectiveAvatar,
+               !value.isEmpty, let url = URL(string: value) {
+                AsyncImage(url: url) { image in image.resizable().scaledToFill() }
+                    placeholder: { avatarPlaceholder }
+            } else { avatarPlaceholder }
+        }
+        .frame(width: 48, height: 48)
+        .clipShape(Circle())
+    }
+
+    private var avatarPlaceholder: some View {
+        Image(systemName: "person.crop.circle.fill")
+            .resizable().scaledToFit()
+            .foregroundStyle(Color.textTertiary.opacity(0.6))
+    }
+
+    private func settingsLabel(_ title: String, icon: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .regular))
+                .foregroundStyle(Color.textSecondary)
+                .frame(width: 24)
+            Text(title).foregroundStyle(Color.textPrimary)
+        }
+        .padding(.vertical, 3)
+    }
+
+    private func settingsRow(_ title: String, icon: String) -> some View {
+        HStack {
+            settingsLabel(title, icon: icon)
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.textTertiary)
+        }
+        .contentShape(Rectangle())
+    }
 }

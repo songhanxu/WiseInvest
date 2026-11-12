@@ -8,192 +8,128 @@ struct LoginView: View {
     @State private var showsPassword = false
     @FocusState private var focusedField: Field?
 
-    private enum Field {
-        case identifier
-        case password
-    }
+    private enum Field { case identifier, password }
 
     var body: some View {
-        GeometryReader { geometry in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    header
-                    Spacer(minLength: 40)
-                    Text("欢迎回来")
-                        .font(.system(size: 36, weight: .bold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("慧投")
+                        .font(.title3.weight(.semibold))
                         .foregroundStyle(Color.textPrimary)
-                        .padding(.top, 12)
-                    Text("登录后同步自选与研究记录。")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Color.textSecondary)
-                        .padding(.top, 8)
-                    loginCard.padding(.top, 32)
-                    Button("先试用，稍后登录") { authState.startTrial() }
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(Color.accentBlue)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 20)
-                    Text("账户用于同步你的自选与研究记录")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.textTertiary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 24)
-                    Spacer(minLength: 48)
+                    Spacer()
+                    Button {
+                        appearance = appearance == "dark" ? "light" : "dark"
+                    } label: {
+                        Image(systemName: appearance == "dark" ? "sun.max" : "moon")
+                            .font(.system(size: 19))
+                            .foregroundStyle(Color.textSecondary)
+                            .frame(width: 44, height: 44)
+                    }
+                    .accessibilityLabel(appearance == "dark" ? "切换到浅色模式" : "切换到深色模式")
                 }
-                .frame(maxWidth: 430)
-                .frame(minHeight: geometry.size.height, alignment: .top)
-                .padding(.horizontal, 24)
-                .frame(maxWidth: .infinity)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("登录")
+                        .font(.largeTitle.bold())
+                        .foregroundStyle(Color.textPrimary)
+                    Text("同步你的自选、持仓与研究记录。")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.textSecondary)
+                }
+                .padding(.top, 44)
+                .padding(.bottom, 32)
+
+                VStack(spacing: 0) {
+                    TextField("账号、邮箱或手机号", text: $viewModel.identifier)
+                        .textContentType(.username)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.emailAddress)
+                        .submitLabel(.next)
+                        .focused($focusedField, equals: .identifier)
+                        .onSubmit { focusedField = .password }
+                        .padding(.horizontal, 18)
+                        .frame(minHeight: 58)
+                        .accessibilityIdentifier("login.identifier")
+                    Divider().padding(.leading, 18)
+                    HStack(spacing: 0) {
+                        Group {
+                            if showsPassword {
+                                TextField("密码", text: $viewModel.password)
+                            } else {
+                                SecureField("密码", text: $viewModel.password)
+                            }
+                        }
+                        .textContentType(.password)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.go)
+                        .focused($focusedField, equals: .password)
+                        .onSubmit(submit)
+                        .padding(.leading, 18)
+                        .frame(minHeight: 58)
+                        .accessibilityIdentifier("login.password")
+                        Button {
+                            showsPassword.toggle()
+                            focusedField = .password
+                        } label: {
+                            Image(systemName: showsPassword ? "eye.slash" : "eye")
+                                .font(.system(size: 16))
+                                .foregroundStyle(Color.textTertiary)
+                                .frame(width: 52, height: 58)
+                        }
+                        .accessibilityLabel(showsPassword ? "隐藏密码" : "显示密码")
+                    }
+                }
+                .font(.body)
+                .foregroundStyle(Color.textPrimary)
+                .background(Color.secondaryBackground, in: RoundedRectangle(cornerRadius: 14))
+                .disabled(viewModel.isLoading)
+
+                if !viewModel.errorMessage.isEmpty {
+                    Text(viewModel.errorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .padding(.top, 12)
+                        .accessibilityIdentifier("login.error")
+                }
+
+                Button(action: submit) {
+                    HStack(spacing: 10) {
+                        if viewModel.isLoading { ProgressView().tint(.white) }
+                        Text(viewModel.isLoading ? "正在登录" : "登录")
+                            .font(.body.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .foregroundStyle(viewModel.canSubmit || viewModel.isLoading ? Color.white : Color.textTertiary)
+                    .background(viewModel.canSubmit || viewModel.isLoading ? Color.accentBlue : Color.subtleBackground, in: RoundedRectangle(cornerRadius: 14))
+                }
+                .disabled(!viewModel.canSubmit)
+                .padding(.top, 24)
+                .accessibilityIdentifier("login.submit")
+
+                Button("先试用") { authState.startTrial() }
+                    .font(.body)
+                    .foregroundStyle(Color.accentBlue)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .padding(.top, 12)
+                    .accessibilityIdentifier("login.trial")
             }
-            .scrollDismissesKeyboard(.interactively)
+            .frame(maxWidth: 420)
+            .padding(.horizontal, 28)
+            .padding(.top, 12)
+            .padding(.bottom, 32)
+            .frame(maxWidth: .infinity)
         }
+        .scrollDismissesKeyboard(.interactively)
         .background(Color.primaryBackground.ignoresSafeArea())
     }
 
-    private var header: some View {
-        HStack(spacing: 11) {
-            Image(systemName: "chart.bar.xaxis")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 38, height: 38)
-                .background(Color.accentBlue, in: RoundedRectangle(cornerRadius: 11))
-            Text("慧投")
-                .font(.system(size: 19, weight: .semibold))
-                .foregroundStyle(Color.textPrimary)
-            Text("WiseInvest")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Color.textTertiary)
-            Spacer()
-            Button {
-                appearance = appearance == "dark" ? "light" : "dark"
-            } label: {
-                Image(systemName: appearance == "dark" ? "sun.max" : "moon")
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(Color.textSecondary)
-                    .frame(width: 40, height: 40)
-                    .background(Color.secondaryBackground, in: Circle())
-            }
-            .accessibilityLabel(appearance == "dark" ? "切换到浅色模式" : "切换到深色模式")
-        }
-        .padding(.top, 20)
-    }
-
-    private var loginCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("登录账户")
-                .font(.system(size: 21, weight: .semibold))
-                .foregroundStyle(Color.textPrimary)
-            Text("使用与网页端相同的账号和密码")
-                .font(.system(size: 13))
-                .foregroundStyle(Color.textSecondary)
-                .padding(.top, 6)
-
-            Text("账号 / 邮箱 / 手机号")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color.textPrimary)
-                .padding(.top, 28)
-            HStack(spacing: 12) {
-                Image(systemName: "person")
-                    .frame(width: 18)
-                    .foregroundStyle(Color.textTertiary)
-                TextField("输入账号名、邮箱或手机号", text: $viewModel.identifier)
-                    .textContentType(.username)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.emailAddress)
-                    .submitLabel(.next)
-                    .focused($focusedField, equals: .identifier)
-                    .onSubmit { focusedField = .password }
-                    .foregroundStyle(Color.textPrimary)
-            }
-            .modifier(LoginFieldStyle())
-            .padding(.top, 10)
-
-            Text("密码")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Color.textPrimary)
-                .padding(.top, 20)
-            HStack(spacing: 12) {
-                Image(systemName: "lock")
-                    .frame(width: 18)
-                    .foregroundStyle(Color.textTertiary)
-                Group {
-                    if showsPassword {
-                        TextField("输入密码", text: $viewModel.password)
-                    } else {
-                        SecureField("输入密码", text: $viewModel.password)
-                    }
-                }
-                .textContentType(.password)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.go)
-                .focused($focusedField, equals: .password)
-                .onSubmit(submit)
-                .foregroundStyle(Color.textPrimary)
-                Button {
-                    showsPassword.toggle()
-                } label: {
-                    Image(systemName: showsPassword ? "eye.slash" : "eye")
-                        .font(.system(size: 16))
-                        .foregroundStyle(Color.textSecondary)
-                }
-                .accessibilityLabel(showsPassword ? "隐藏密码" : "显示密码")
-            }
-            .modifier(LoginFieldStyle())
-            .padding(.top, 10)
-
-            if !viewModel.errorMessage.isEmpty {
-                Text(viewModel.errorMessage)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.red)
-                    .padding(.top, 14)
-            }
-            Button(action: submit) {
-                HStack(spacing: 8) {
-                    Spacer()
-                    if viewModel.isLoading { ProgressView().tint(.white) }
-                    Text(viewModel.isLoading ? "正在登录" : "登录账户")
-                        .font(.system(size: 16, weight: .semibold))
-                    if !viewModel.isLoading {
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 15, weight: .semibold))
-                    }
-                    Spacer()
-                }
-                .foregroundStyle(.white)
-                .frame(height: 52)
-                .background(Color.accentBlue, in: RoundedRectangle(cornerRadius: 13))
-            }
-            .disabled(!viewModel.canSubmit)
-            .opacity(viewModel.canSubmit ? 1 : 0.65)
-            .padding(.top, 26)
-        }
-        .padding(24)
-        .background(Color.secondaryBackground, in: RoundedRectangle(cornerRadius: 22))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22)
-                .stroke(Color.textTertiary.opacity(0.13), lineWidth: 1)
-        }
-    }
-
     private func submit() {
+        guard viewModel.canSubmit else { return }
         focusedField = nil
         viewModel.login(authState: authState)
-    }
-}
-
-private struct LoginFieldStyle: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .font(.system(size: 15))
-            .frame(height: 52)
-            .padding(.horizontal, 15)
-            .background(Color.subtleBackground, in: RoundedRectangle(cornerRadius: 12))
-            .overlay {
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.textTertiary.opacity(0.16), lineWidth: 1)
-            }
     }
 }
 
