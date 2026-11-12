@@ -1,16 +1,16 @@
-.home-page { min-height: 100vh; background: #f2f2f7; }
+.home-page { min-height: 100vh; background: var(--ui-bg); }
 .content { width: 100%; max-width: 1040rpx; margin: auto; padding: 24rpx 36rpx 40rpx; }
 .header { display: flex; justify-content: space-between; align-items: center; padding: 8rpx 4rpx 36rpx; }
-.eyebrow { margin-bottom: 8rpx; color: #8e8e93; font-size: 24rpx; }
+.eyebrow { margin-bottom: 8rpx; color: var(--ui-muted); font-size: 24rpx; }
 .page-title { font-size: 64rpx; font-weight: 700; line-height: 1.2; letter-spacing: -2rpx; }
-.account-button { min-width: 88rpx; min-height: 44px; padding: 16rpx 0 16rpx 24rpx; color: #007aff; font-size: 28rpx; }
-.quick-actions, .markets, .recent-list { overflow: hidden; background: #fff; border-radius: 24rpx; }
+.account-button { min-width: 88rpx; min-height: 44px; padding: 16rpx 0 16rpx 24rpx; color: var(--ui-accent); font-size: 28rpx; }
+.quick-actions, .markets, .recent-list { overflow: hidden; background: var(--ui-panel); border-radius: 24rpx; }
 .quick-actions { margin-bottom: 40rpx; }
 .quick-action { display: flex; align-items: center; min-height: 128rpx; padding: 24rpx 30rpx; }
-.quick-action + .quick-action { border-top: 1rpx solid #ececf0; }
-.quick-action-copy { flex: 1; min-width: 0; }.quick-action-title { font-size: 32rpx; font-weight: 500; }.quick-action-note { margin-top: 5rpx; font-size: 24rpx; color: #8e8e93; }
-.chevron { flex: none; margin-left: 24rpx; font-size: 36rpx; font-weight: 300; color: #c7c7cc; }
-.section-heading { margin: 0 8rpx 16rpx; }.section-title { font-size: 28rpx; font-weight: 600; color: #636366; }
-.market-slot + .market-slot { border-top: 1rpx solid #ececf0; }
-.recent-heading { margin-top: 40rpx; }.page-note { padding: 32rpx 16rpx 0; color: #8e8e93; font-size: 24rpx; text-align: center; }
+.quick-action + .quick-action { border-top: 1rpx solid var(--ui-line); }
+.quick-action-copy { flex: 1; min-width: 0; }.quick-action-title { font-size: 32rpx; font-weight: 500; }.quick-action-note { margin-top: 5rpx; font-size: 24rpx; color: var(--ui-muted); }
+.chevron { flex: none; margin-left: 24rpx; font-size: 36rpx; font-weight: 300; color: var(--ui-faint); }
+.section-heading { margin: 0 8rpx 16rpx; }.section-title { font-size: 28rpx; font-weight: 600; color: var(--ui-secondary); }
+.market-slot + .market-slot { border-top: 1rpx solid var(--ui-line); }
+.recent-heading { margin-top: 40rpx; }.page-note { padding: 32rpx 16rpx 0; color: var(--ui-muted); font-size: 24rpx; text-align: center; }
 @media (max-width: 340px) { .content { padding-left: 28rpx; padding-right: 28rpx; } }

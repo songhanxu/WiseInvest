@@ -1,3 +1,4 @@
+const { themedPage } = require('../../utils/theme');
 const { request, streamRequest } = require('../../utils/api');
 const { loadConversations, upsertConversation } = require('../../utils/storage');
 const { renderMarkdown } = require('../../utils/markdown');
@@ -9,7 +10,7 @@ const agents = [
 const createID = () => `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 const welcome = '欢迎来到慧投圆桌。主持人、价值派、趋势派和量化派会从不同角度讨论你的问题。选择参与角色，或输入 @ 指定发言人；@所有人 邀请全部角色。';
 
-Page({
+Page(themedPage({
   data: { agents, participants: [], messages: [{ id: 'welcome', role: 'assistant', name: '慧投圆桌', content: welcome, html: renderMarkdown(welcome) }],
     input: '', busy: false, error: '', progress: '', conversationId: '', backendId: 0, scrollIntoView: 'bottom', guest: false, keyboardHeight: 0, windowHeight: 812 },
   streamTask: null,
@@ -91,4 +92,4 @@ Page({
       title: user.content.slice(0, 24), messages: this.data.messages.map(({ html, ...rest }) => rest), updatedAt: new Date().toISOString() });
     if (!this.data.conversationId) this.setData({ conversationId: id });
   },
-});
+}));

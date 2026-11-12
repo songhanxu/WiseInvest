@@ -29,6 +29,7 @@ function fixture(file, { records = [], authenticated = true, api = {} } = {}) {
     Page(config) { definition = config; }, Component(config) { definition = config; },
     getApp: () => app, getCurrentPages: () => [], wx, Date, Math,
     require(module) {
+      if (module.endsWith('/theme')) return { themedPage: (definition) => definition };
       if (module.endsWith('/market')) return markets;
       if (module.endsWith('/storage')) return storage;
       if (module.endsWith('/conversation-service')) return {

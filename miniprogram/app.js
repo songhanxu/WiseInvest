@@ -20,6 +20,7 @@ App({
   },
 
   onLaunch() {
+    this.globalData.ui.theme = wx.getStorageSync('appearance') === 'dark' ? 'dark' : 'light';
     const token = wx.getStorageSync('auth_token') || '';
     const user = wx.getStorageSync('auth_user') || null;
     this.globalData.auth = tokenIsActive(token) ? { token, user } : { token: '', user: null };
@@ -39,6 +40,12 @@ App({
         if (/invalid or expired token/.test(error.message || '')) this.clearAuth();
       })
       .finally(() => { this.refreshing = false; });
+  },
+
+  setTheme(theme) {
+    this.globalData.ui.theme = theme === 'dark' ? 'dark' : 'light';
+    wx.setStorageSync('appearance', this.globalData.ui.theme);
+    if (typeof getCurrentPages === 'function') getCurrentPages().forEach((page) => page.setData({ theme: this.globalData.ui.theme }));
   },
 
   isAuthenticated() {

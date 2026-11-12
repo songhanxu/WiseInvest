@@ -1,3 +1,4 @@
+<view class="theme-root theme-{{theme}}">
 <view class="phone-page safe-area-bottom"><view class="phone-content">
   <view class="eyebrow">完善账户</view><view class="title">绑定手机号</view><view class="subtitle">用于账号安全验证，也可以稍后完成。</view>
   <view class="form-card">
@@ -7,3 +8,5 @@
     <button class="skip" bindtap="skip" hover-class="is-pressed">稍后再说</button>
   </view>
 </view></view>
+
+</view>

@@ -1,10 +1,11 @@
+const { themedPage } = require('../../utils/theme');
 const { request } = require('../../utils/api');
 const { MARKETS, getMarketById } = require('../../utils/market');
 
 const base = '/api/v1';
 const key = (stock) => `${stock.market}:${stock.id}`;
 
-Page({
+Page(themedPage({
   data: {
     mode: 'watchlist', filter: 'all', markets: [{ id: 'all', displayName: '全部' }, ...MARKETS], searchMarkets: [{ id: 'all', displayName: '全部市场' }, ...MARKETS],
     stocks: [], visibleStocks: [], searchMarket: 'all', searchMarketIndex: 0, query: '', results: [],
@@ -125,4 +126,4 @@ Page({
       this.setData({ holdings: this.data.holdings.map((item) => item.holding_id === id ? { ...item, hasAlert: false, targetPrice: '' } : item), error: '' });
     } catch (error) { this.setData({ error: error.message }); }
   },
-});
+}));

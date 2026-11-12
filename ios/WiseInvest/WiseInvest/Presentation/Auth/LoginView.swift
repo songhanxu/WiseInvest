@@ -18,16 +18,12 @@ struct LoginView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     header
-                    Spacer(minLength: 64)
-                    Text("WISEINVEST ACCOUNT")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .tracking(2.2)
-                        .foregroundStyle(Color.accentBlue)
+                    Spacer(minLength: 40)
                     Text("欢迎回来")
                         .font(.system(size: 36, weight: .bold))
                         .foregroundStyle(Color.textPrimary)
                         .padding(.top, 12)
-                    Text("把市场信息，整理成自己的判断。")
+                    Text("登录后同步自选与研究记录。")
                         .font(.system(size: 15))
                         .foregroundStyle(Color.textSecondary)
                         .padding(.top, 8)

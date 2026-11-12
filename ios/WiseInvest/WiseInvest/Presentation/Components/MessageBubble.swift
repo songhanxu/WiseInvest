@@ -85,7 +85,7 @@ struct MessageBubble: View {
                     ThinkingBox(lines: message.thinkingLines)
                         .padding(10)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.black.opacity(0.14))
+                        .background(Color.subtleBackground)
                         .cornerRadius(8)
                 }
 
@@ -96,7 +96,7 @@ struct MessageBubble: View {
         } else {
             Text(message.content)
                 .font(.system(size: 16))
-                .foregroundColor(.white)
+                .foregroundColor(.textPrimary)
         }
     }
 
@@ -221,28 +221,28 @@ private struct MarkdownLineView: View {
             } else if t.hasPrefix("#### ") {
                 Text(LocalizedStringKey(String(t.dropFirst(5))))
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 8)
                     .padding(.bottom, 1)
             } else if t.hasPrefix("### ") {
                 Text(LocalizedStringKey(String(t.dropFirst(4))))
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 10)
                     .padding(.bottom, 2)
             } else if t.hasPrefix("## ") {
                 Text(LocalizedStringKey(String(t.dropFirst(3))))
                     .font(.system(size: 19, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 12)
                     .padding(.bottom, 2)
             } else if t.hasPrefix("# ") {
                 Text(LocalizedStringKey(String(t.dropFirst(2))))
                     .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundColor(.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 14)
                     .padding(.bottom, 4)
@@ -319,7 +319,7 @@ struct CodeBlockView: View {
                 if !language.isEmpty {
                     Text(language)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(Color(hex: "A0A0A0"))
+                        .foregroundColor(Color.textSecondary)
                 }
                 Spacer()
                 Button(action: copyCode) {
@@ -329,29 +329,29 @@ struct CodeBlockView: View {
                         Text(copied ? "已复制" : "复制")
                             .font(.system(size: 12))
                     }
-                    .foregroundColor(copied ? Color(hex: "50C878") : Color(hex: "A0A0A0"))
+                    .foregroundColor(copied ? Color(hex: "50C878") : Color.textSecondary)
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color(hex: "161B2E"))
+            .background(Color.subtleBackground)
 
-            Divider().background(Color(hex: "2C3E50"))
+            Divider().background(Color.separator)
 
             // 代码内容
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(code.trimmingCharacters(in: .newlines))
                     .font(.system(size: 13, design: .monospaced))
-                    .foregroundColor(Color(hex: "A8D8A8"))
+                    .foregroundColor(Color.textPrimary)
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(Color(hex: "0F1320"))
+            .background(Color.secondaryBackground)
         }
         .cornerRadius(10)
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color(hex: "2C3E50"), lineWidth: 1)
+                .stroke(Color.separator, lineWidth: 1)
         )
     }
 

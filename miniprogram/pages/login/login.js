@@ -1,6 +1,7 @@
+const { themedPage } = require('../../utils/theme');
 const { wechatLogin, sendPhoneCode, phoneLogin } = require('../../utils/auth-service');
 
-Page({
+Page(themedPage({
   data: {
     isLoading: false,
     mode: 'wechat',
@@ -99,4 +100,4 @@ Page({
       },
     });
   },
-});
+}));

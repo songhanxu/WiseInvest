@@ -1,6 +1,7 @@
+const { themedPage } = require('../../utils/theme');
 const { sendPhoneCode, bindPhone } = require('../../utils/auth-service');
 
-Page({
+Page(themedPage({
   data: {
     phone: '',
     code: '',
@@ -85,4 +86,4 @@ Page({
   skip() {
     wx.reLaunch({ url: '/pages/home/home' });
   },
-});
+}));

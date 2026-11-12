@@ -67,10 +67,10 @@ struct HomeView: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("慧投")
+            Text("研究")
                 .font(.system(size: 32, weight: .bold))
                 .foregroundColor(.textPrimary)
-            Text("WiseInvest")
+            Text(Date.now.formatted(date: .abbreviated, time: .omitted))
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.textSecondary)
         }
@@ -84,7 +84,7 @@ struct HomeView: View {
     // MARK: - Market Section Header (sticky)
 
     private var marketSectionHeader: some View {
-        SectionHeader(title: "选择市场", subtitle: "进入对话，开始分析")
+        SectionHeader(title: "市场", subtitle: nil)
             .padding(.horizontal, 20)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -94,15 +94,18 @@ struct HomeView: View {
     // MARK: - Market Section Content
 
     private var marketSectionContent: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 0) {
             ForEach(Market.allCases) { market in
                 MarketCard(market: market) {
                     openMarketSheet(market)
                 }
-                .padding(.horizontal, 20)
+                if market != Market.allCases.last { Divider().padding(.leading, 76) }
             }
         }
-        .padding(.bottom, 8)
+        .background(Color.secondaryBackground, in: RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 20)
+        .padding(.bottom, 16)
     }
 
     // MARK: - Open Market Sheet (handles dismiss-animation race)

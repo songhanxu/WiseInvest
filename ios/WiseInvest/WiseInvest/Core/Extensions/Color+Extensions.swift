@@ -2,22 +2,21 @@ import SwiftUI
 import UIKit
 
 extension Color {
-    // The light palette follows the web workspace; the dark palette keeps the iOS navy surfaces.
-    static let primaryBackground = themed(light: "F7F8F6", dark: "0A0E27")
-    static let secondaryBackground = themed(light: "FFFFFF", dark: "1A1F3A")
-    static let subtleBackground = themed(light: "F3F5F2", dark: "121831")
-    static let marketIconBackground = themed(light: "EDF2E9", dark: "283552")
-    static let accentBlue = themed(light: "35664B", dark: "4A90E2")
-    static let accentGreen = themed(light: "2C7951", dark: "50C878")
-    static let accentPurple = themed(light: "736887", dark: "9B59B6")
-
-    static let textPrimary = themed(light: "202522", dark: "FFFFFF")
-    static let textSecondary = themed(light: "727B72", dark: "A0A0A0")
-    static let textTertiary = themed(light: "879187", dark: "888FA8")
+    // Shared neutral surfaces and system-blue actions across all clients.
+    static let primaryBackground = themed(light: "F2F2F7", dark: "000000")
+    static let secondaryBackground = themed(light: "FFFFFF", dark: "1C1C1E")
+    static let subtleBackground = themed(light: "E5E5EA", dark: "2C2C2E")
+    static let marketIconBackground = themed(light: "F2F2F7", dark: "2C2C2E")
+    static let accentBlue = themed(light: "007AFF", dark: "0A84FF")
+    static let accentGreen = themed(light: "328269", dark: "70C99C")
+    static let accentPurple = themed(light: "636366", dark: "AEAEB2")
+    static let textPrimary = themed(light: "1C1C1E", dark: "F2F2F7")
+    static let textSecondary = themed(light: "636366", dark: "AEAEB2")
+    static let textTertiary = themed(light: "8E8E93", dark: "98989D")
+    static let separator = themed(light: "E5E5EA", dark: "38383A")
     static let skeleton = textPrimary.opacity(0.10)
-
-    static let userMessageBg = themed(light: "35664B", dark: "4A90E2")
-    static let assistantMessageBg = themed(light: "EDF1EC", dark: "2C3E50")
+    static let userMessageBg = themed(light: "E5E5EA", dark: "2C2C2E")
+    static let assistantMessageBg = themed(light: "FFFFFF", dark: "1C1C1E")
 
     static func themed(light: String, dark: String) -> Color {
         Color(uiColor: UIColor { traits in

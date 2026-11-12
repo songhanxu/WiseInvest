@@ -1,7 +1,8 @@
+const { themedPage } = require('../../utils/theme');
 const { MARKETS } = require('../../utils/market');
 const { loadConversations, removeConversationById } = require('../../utils/storage');
 
-Page({
+Page(themedPage({
   data: {
     markets: MARKETS,
     recentConversations: [],
@@ -85,4 +86,4 @@ Page({
       },
     });
   },
-});
+}));

@@ -1157,35 +1157,13 @@ function HomePanel({
   onOpenConversation: (id: string) => void;
   onNeedToken: () => void;
 }) {
-  const leadingQuote = markets
-    .flatMap((market) => marketPulse.indices[market.id].map((quote) => ({ market, quote })))
-    .sort((a, b) => Math.abs(b.quote.change_percent) - Math.abs(a.quote.change_percent))[0];
-
   return (
     <section className="workspace home-workspace">
-      <div className="hero-panel">
-        <div>
-          <p className="eyebrow">市场 · 研究 · 决策</p>
-          <h2>看清市场，从容决策。</h2>
-          <p className="hero-copy">
-            关注你的市场、自选与持仓，让每一次研究更有依据。
-          </p>
-        </div>
-        <div className="hero-metrics">
-          <Metric label="覆盖市场" value="4" sub="A 股 / 美股 / 港股 / Crypto" />
-          <Metric label="分析会话" value={String(conversations.length)} sub="本地工作记录" />
-          <Metric
-            label="焦点波动"
-            value={leadingQuote ? `${formatPercent(leadingQuote.quote.change_percent)}` : "--"}
-            sub={leadingQuote ? `${leadingQuote.market.displayName} · ${leadingQuote.quote.short_name ?? leadingQuote.quote.name}` : "等待行情"}
-            negative={leadingQuote ? leadingQuote.quote.change_percent < 0 : false}
-          />
-        </div>
-      </div>
+      <div className="hero-panel"><div><p className="eyebrow">{new Date().toLocaleDateString("zh-CN", { month: "long", day: "numeric", weekday: "long" })}</p><h2>研究</h2></div></div>
 
       <div className="dashboard-grid">
         <div className="main-column">
-          <SectionHeader title="全球市场" subtitle="各市场代表标的与最新行情" />
+          <SectionHeader title="市场" />
           <div className="market-matrix">
             {markets.map((market) => (
               <MarketDeskCard
@@ -1199,7 +1177,7 @@ function HomePanel({
             ))}
           </div>
 
-          <SectionHeader title="自选列表" subtitle="点击个股直接进入个股分析页面" />
+          <SectionHeader title="自选" />
           {!token && (
             <div className="auth-callout">
               <KeyRound size={18} />
@@ -1223,22 +1201,8 @@ function HomePanel({
         </div>
 
         <aside className="insight-column">
-          <DecisionPanel leadingQuote={leadingQuote} conversations={conversations.length} />
-
           <section className="surface-card">
-            <SectionHeader title="快速研究" subtitle="选择一个市场，开始分析" compact />
-            <div className="prompt-stack">
-              {markets.map((market) => (
-                <button key={market.id} onClick={() => onOpenMarket(market)}>
-                  <MarketIcon market={market} small />
-                  <span>{market.displayName} 市场研究</span>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="surface-card">
-            <SectionHeader title="最近对话" subtitle="继续未完成的分析" compact />
+            <SectionHeader title="最近研究" compact />
             <RecentList conversations={conversations} onOpenConversation={onOpenConversation} />
           </section>
         </aside>

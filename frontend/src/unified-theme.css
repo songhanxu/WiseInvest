@@ -1,0 +1,80 @@
+/* Shared light/dark palettes for Web, iOS and the mini program. */
+:root, :root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f2f7; --panel: #fff; --panel-2: #f2f2f7; --panel-3: #e5e5ea;
+  --line: #e5e5ea; --line-strong: #c7c7cc;
+  --text: #1c1c1e; --muted: #636366; --faint: #8e8e93;
+  --blue: #007aff; --green: #328269; --red: #bb5a4b; --amber: #9a603d;
+  --accent-soft: #eef4ff; --warning-bg: #fbf1e8;
+  color: var(--text); background: var(--bg);
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #000; --panel: #1c1c1e; --panel-2: #2c2c2e; --panel-3: #3a3a3c;
+  --line: #38383a; --line-strong: #545458;
+  --text: #f2f2f7; --muted: #aeaeb2; --faint: #98989d;
+  --blue: #0a84ff; --green: #70c99c; --red: #ff8982; --amber: #efb782;
+  --accent-soft: #17283c; --warning-bg: #30251c;
+  color: var(--text); background: var(--bg);
+}
+.surface-card, .market-desk-card, .watch-panel, .settings-card, .decision-card, .context-panel, .conversation-rail, .chat-main, .index-card { border: 0; border-radius: 14px; background: var(--panel); box-shadow: none; }
+.sidebar, .topbar, :root[data-theme="dark"] .sidebar, :root[data-theme="dark"] .topbar { background: var(--panel); }
+.brand-mark { background: var(--blue); color: #fff; }
+.market-icon, :root[data-theme="dark"] .market-icon { color: var(--muted); background: var(--panel-2); }
+.nav-list button.active, .mobile-tabs button.active, :root[data-theme="dark"] .nav-list button.active, :root[data-theme="dark"] .mobile-tabs button.active { color: var(--blue); background: var(--accent-soft); }
+.primary-action, .login-submit, .account-submit, :root[data-theme="dark"] .primary-action, :root[data-theme="dark"] .login-submit { background: var(--blue); color: #fff; border-color: transparent; }
+.theme-toggle, .login-theme-toggle { border: 0; border-radius: 50%; background: var(--panel-2); color: var(--text); }
+.home-workspace .hero-panel { display: block; padding: 0 0 30px; }
+.home-workspace .hero-panel h2 { font-size: 34px; font-weight: 700; letter-spacing: -.045em; }
+.home-workspace .dashboard-grid { grid-template-columns: minmax(0,1fr) 280px; }
+.home-workspace .market-desk-card { min-height: 180px; border-radius: 16px; }
+.market-card-head h3 { font-size: 16px; font-weight: 500; }
+.home-workspace .hero-copy { display: none; }
+.chat-main .message.assistant, :root[data-theme="dark"] .message.assistant { background: transparent; color: var(--text); border: 0; box-shadow: none; }
+.message.user, :root[data-theme="dark"] .message.user { background: var(--panel-2); color: var(--text); }
+.login-card, .filing-dialog { border: 0; border-radius: 16px; background: var(--panel); }
+.login-page { background: var(--bg); }.login-stage { background: transparent; }
+.login-submit { border-radius: 12px; }.login-brand-mark { background: var(--blue); }
+input, textarea, select { color: var(--text); }
+@media (max-width: 920px) {
+  .workspace { padding: 24px 20px 106px; }
+  .home-workspace .dashboard-grid { grid-template-columns: minmax(0,1fr); }
+  .home-workspace .market-matrix { grid-template-columns: minmax(0,1fr); gap: 0; overflow: hidden; border-radius: 16px; background: var(--panel); }
+  .home-workspace .market-desk-card { min-height: 132px; border-radius: 0; border-bottom: 1px solid var(--line); padding: 20px; }
+  .home-workspace .market-desk-card:last-child { border-bottom: 0; }
+  .home-workspace .insight-column { display: block; }
+  .mobile-tabs, :root[data-theme="dark"] .mobile-tabs { background: var(--panel); border-top: 1px solid var(--line); border-radius: 0; box-shadow: none; }
+  .mobile-tabs button { border-radius: 12px; }.topbar { background: var(--bg); border-bottom: 0; }
+  .theme-toggle { min-width: 44px; min-height: 44px; }
+  .surface-card, .watch-panel, .settings-card { border-radius: 16px; }.login-card { padding: 24px; }
+}
+/* A single form replaces the promotional split screen in either appearance. */
+.login-layout { display: flex; flex-direction: column; min-height: 100vh; }
+.login-intro { min-height: 0; padding: 24px 32px 0; background: transparent; }
+.login-intro-copy, .login-intro-foot, .login-kicker { display: none; }
+.login-content { flex: 1; min-height: 0; padding: 16px 32px 32px; background: transparent; }
+.login-card { width: min(100%, 420px); margin: 24px auto 36px; padding: 32px; }
+.login-card h2 { margin-top: 0; font-weight: 650; }
+.login-input { border: 0; border-radius: 10px; background: var(--panel-2); }
+.login-input:focus-within { box-shadow: 0 0 0 2px var(--blue); }
+.login-form label { font-size: 13px; }
+@media (max-width: 820px) {
+  .login-intro { min-height: 0; padding: 20px 20px 0; }
+  .login-content { min-height: 0; padding: 12px 20px 28px; }
+  .login-card { padding: 24px; margin: 24px auto; }
+  .login-input input { font-size: 16px; }
+}
+:root[data-theme="dark"] .login-intro, :root[data-theme="dark"] .login-content { background: transparent; }
+.login-input input:-webkit-autofill { -webkit-text-fill-color: var(--text); box-shadow: 0 0 0 1000px var(--panel-2) inset; }
+.kline-canvas .grid-line, .kline-canvas .volume-separator { stroke: var(--line); }
+.kline-canvas .crosshair line { stroke: var(--muted); }
+.kline-canvas text { fill: var(--muted); text-shadow: none; }
+@media (max-width: 920px) {
+  .home-workspace .market-desk-card { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; min-height: 96px; gap: 8px 12px; }
+  .home-workspace .market-card-head > svg { display: none; }
+  .home-workspace .quote-strip { display: block; text-align: right; }
+  .home-workspace .quote-strip strong { font-size: 21px; }
+  .home-workspace .quote-strip .change-pill { display: inline-flex; margin-top: 5px; }
+  .home-workspace .sparkline, .home-workspace .sparkline-empty, .home-workspace .market-chart-skeleton { display: none; }
+  .home-workspace .market-quote-note { grid-column: 1 / -1; font-size: 9px; }
+}

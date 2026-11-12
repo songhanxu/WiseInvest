@@ -1,3 +1,4 @@
+const { themedPage } = require('../../utils/theme');
 const { getMarketById } = require('../../utils/market');
 const { loadConversations, upsertConversation, removeConversationById } = require('../../utils/storage');
 const { createConversation, sendStreamMessage } = require('../../utils/conversation-service');
@@ -36,7 +37,7 @@ function generateTitle(firstUserMessage) {
   return msg || '新对话';
 }
 
-Page({
+Page(themedPage({
   data: {
     market: getMarketById('a_share'),
     conversationId: '',
@@ -383,4 +384,4 @@ Page({
       this.setData({ scrollIntoView: 'msg-bottom' });
     });
   },
-});
+}));

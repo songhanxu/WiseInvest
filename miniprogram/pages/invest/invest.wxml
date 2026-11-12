@@ -1,3 +1,4 @@
+<view class="theme-root theme-{{theme}}">
 <view class="invest safe-area-bottom">
   <view class="intro"><view class="title">我的投资</view></view>
   <view class="tabs"><button class="{{mode === 'watchlist' ? 'active' : ''}}" data-mode="watchlist" bindtap="setMode">自选研究</button><button class="{{mode === 'accounts' ? 'active' : ''}}" data-mode="accounts" bindtap="setMode">账户持仓</button></view>
@@ -21,4 +22,6 @@
     <view class="settings card"><view class="label">价格提醒邮箱</view><input type="text" value="{{alertEmail}}" bindinput="onEmail" placeholder="输入接收提醒的邮箱" /><button bindtap="saveEmail">保存邮箱</button><view wx:if="{{!mailerConfigured}}" class="muted">邮件服务尚未配置，提醒暂不会发送。</view></view>
   </view>
   </block>
+</view>
+
 </view>

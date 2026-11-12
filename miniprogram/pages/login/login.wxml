@@ -1,5 +1,6 @@
+<view class="theme-root theme-{{theme}}">
 <view class="login-page">
-  <view class="content safe-area-bottom">
+  <view class="content safe-area-bottom"><view class="appearance-row"><button class="theme-switch" bindtap="toggleTheme" aria-label="切换外观">{{theme === 'dark' ? '浅色' : '深色'}}</button></view>
     <view class="login-intro"><view class="intro-title">欢迎使用慧投</view><view class="brand-desc">登录后同步自选与研究记录。</view></view>
     <view class="login-card">
       <block wx:if="{{mode === 'wechat'}}">
@@ -16,4 +17,6 @@
     </view>
 
   </view>
+</view>
+
 </view>

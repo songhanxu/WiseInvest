@@ -1,3 +1,4 @@
+<view class="theme-root theme-{{theme}}">
 <view class="research safe-area-bottom"><view class="heading"><view class="eyebrow">{{marketLabel}} · {{symbol}}</view><view class="title">{{name}}</view></view>
   <view wx:if="{{error}}" class="error">{{error}}</view>
   <view wx:if="{{quote}}" class="card quote-card"><view class="section-title">实时行情</view><view class="quote-line"><view class="quote-value">{{quote.current_price}} <text>{{quote.currency}}</text></view><view class="quote-change {{quote.change_percent >= 0 ? 'positive' : 'negative'}}">{{quote.change_percent}}%</view></view><view class="muted">{{quote.source}} · {{quote.quote_time || '报价时间未提供'}}</view><button wx:if="{{!watched}}" class="action" bindtap="addToWatchlist">{{guest ? '登录后加入自选' : '加入自选'}}</button></view>
@@ -9,4 +10,6 @@
   <view class="card"><view class="section-title">价格提醒</view><view wx:if="{{guest}}" class="muted">登录后才能设置价格提醒。<button class="action" bindtap="goLogin">登录账户</button></view><block wx:else><view class="muted">达到目标价后发送邮件。先在「我的投资」中设置邮箱。</view><view class="alert-row"><input type="digit" value="{{targetPrice}}" bindinput="onTargetPrice" placeholder="目标价格" /><button bindtap="saveAlert">保存</button><button wx:if="{{alert}}" bindtap="removeAlert">删除</button></view></block></view>
   <view class="card disclosure"><button class="section-toggle" bindtap="toggleNews"><text>最新资讯</text><text class="toggle-chevron">{{showNews ? '−' : '+'}}</text></button><block wx:if="{{showNews}}"><view wx:if="{{!news.length}}" class="muted">暂无资讯</view><view wx:for="{{news}}" wx:key="id" class="news"><view class="news-title">{{item.title}}</view><view class="muted">{{item.source}} · {{item.time}}</view><view wx:if="{{item.summary}}" class="news-summary">{{item.summary}}</view><button wx:if="{{item.url}}" class="source" data-url="{{item.url}}" bindtap="copySource">复制原文链接 ↗</button></view></block></view>
   <view class="research-actions"><button bindtap="openAgent">问 AI Agent ›</button><button bindtap="openRoundtable">交给圆桌讨论 ›</button></view>
+</view>
+
 </view>

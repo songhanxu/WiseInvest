@@ -14,7 +14,6 @@ struct ProfileView: View {
                     VStack(spacing: 20) {
                         if authState.isAuthenticated {
                             avatarSection
-                            infoSection
                         } else {
                             SignInGate(feature: "个人账户")
                                 .padding(.horizontal, 20)
@@ -53,18 +52,6 @@ struct ProfileView: View {
             }
             .frame(width: 80, height: 80)
             .clipShape(Circle())
-            .overlay(
-                Circle()
-                    .stroke(
-                        LinearGradient(
-                            colors: [.accentBlue, .accentPurple],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 2.5
-                    )
-            )
-            .shadow(color: .accentBlue.opacity(0.4), radius: 12)
 
             VStack(spacing: 4) {
                 Text(authState.currentUser?.effectiveName ?? "投资者")
@@ -83,29 +70,12 @@ struct ProfileView: View {
 
     private var defaultAvatar: some View {
         Circle()
-            .fill(
-                LinearGradient(
-                    colors: [Color(hex: "1A237E"), Color.accentBlue],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+            .fill(Color.subtleBackground)
             .overlay(
                 Image(systemName: "person.fill")
                     .font(.system(size: 34))
-                    .foregroundColor(.white.opacity(0.8))
+                    .foregroundColor(.textSecondary)
             )
-    }
-
-    // MARK: - Info Cards
-
-    private var infoSection: some View {
-        HStack(spacing: 12) {
-            StatCard(title: "对话记录", value: "—", icon: "bubble.left.and.bubble.right", color: .accentBlue)
-            StatCard(title: "分析报告", value: "—", icon: "doc.text.magnifyingglass", color: .accentGreen)
-            StatCard(title: "关注股票", value: "—", icon: "star", color: Color(hex: "F59E0B"))
-        }
-        .padding(.horizontal, 20)
     }
 
     // MARK: - Settings Section
@@ -129,14 +99,14 @@ struct ProfileView: View {
 
             settingsGroup(items: [
                 SettingsItem(icon: "person.crop.circle", iconColor: .accentBlue, title: "账号信息"),
-                SettingsItem(icon: "bell", iconColor: .accentGreen, title: "消息通知"),
-                SettingsItem(icon: "shield.checkerboard", iconColor: Color(hex: "F59E0B"), title: "隐私与安全"),
+                SettingsItem(icon: "bell", iconColor: .textSecondary, title: "消息通知"),
+                SettingsItem(icon: "shield.checkerboard", iconColor: .textSecondary, title: "隐私与安全"),
             ])
 
             Spacer().frame(height: 16)
 
             settingsGroup(items: [
-                SettingsItem(icon: "questionmark.circle", iconColor: Color(hex: "8B5CF6"), title: "帮助与反馈"),
+                SettingsItem(icon: "questionmark.circle", iconColor: .textSecondary, title: "帮助与反馈"),
                 SettingsItem(icon: "info.circle", iconColor: .textSecondary, title: "关于慧投"),
             ])
         }

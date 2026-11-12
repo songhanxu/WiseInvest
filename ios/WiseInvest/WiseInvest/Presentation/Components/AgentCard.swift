@@ -12,23 +12,20 @@ struct MarketCard: View {
             HStack(alignment: .center, spacing: 16) {
                 Image(systemName: market.icon)
                     .font(.system(size: 22, weight: .regular))
-                    .foregroundColor(.accentBlue)
-                    .frame(width: 48, height: 48)
+                    .foregroundColor(.textSecondary)
+                    .frame(width: 36, height: 36)
                     .background(Color.marketIconBackground, in: RoundedRectangle(cornerRadius: 12))
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(market.displayName)
-                        .font(.system(size: 19, weight: .semibold))
+                        .font(.system(size: 17, weight: .medium))
                         .foregroundColor(.textPrimary)
 
                     Text(market.subtitle)
                         .font(.system(size: 12))
                         .foregroundColor(.textSecondary)
 
-                    Text(market.description)
-                        .font(.system(size: 12))
-                        .foregroundColor(.textTertiary)
-                        .lineLimit(1)
+
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
@@ -37,7 +34,7 @@ struct MarketCard: View {
             }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.secondaryBackground, in: RoundedRectangle(cornerRadius: 16))
+            .background(Color.secondaryBackground)
         }
         .buttonStyle(ScaleButtonStyle())
     }
@@ -53,17 +50,14 @@ struct AgentCard: View {
         Button(action: onTap) {
             HStack(spacing: 16) {
                 ZStack {
-                    LinearGradient(
-                        colors: agentType.gradientColors.map { Color(hex: $0) },
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.marketIconBackground)
                     .frame(width: 60, height: 60)
                     .cornerRadius(16)
 
                     Image(systemName: agentType.icon)
                         .font(.system(size: 28))
-                        .foregroundColor(.white)
+                        .foregroundColor(.textSecondary)
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -86,7 +80,7 @@ struct AgentCard: View {
             .padding(20)
             .background(Color.secondaryBackground)
             .cornerRadius(16)
-            .shadow(color: Color.black.opacity(0.2), radius: 10, x: 0, y: 4)
+
         }
         .buttonStyle(ScaleButtonStyle())
     }

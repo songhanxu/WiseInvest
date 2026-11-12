@@ -20,10 +20,10 @@ struct GroupMessageBubble: View {
             VStack(alignment: .trailing, spacing: 4) {
                 Text(message.content)
                     .font(.system(size: 15))
-                    .foregroundColor(.white)
+                    .foregroundColor(.textPrimary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(Color.accentBlue)
+                    .background(Color.userMessageBg)
                     .clipShape(BubbleShape(isFromUser: true))
 
                 Text(formattedTime)
@@ -45,18 +45,18 @@ struct GroupMessageBubble: View {
                 // Agent avatar
                 ZStack {
                     Circle()
-                        .fill(agent.color.opacity(0.85))
+                        .fill(Color.marketIconBackground)
                         .frame(width: 36, height: 36)
                     Image(systemName: agent.icon)
                         .font(.system(size: 15))
-                        .foregroundColor(.white)
+                        .foregroundColor(.textSecondary)
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
                     // Agent name
                     Text(agent.name)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(agent.color)
+                        .foregroundColor(.textSecondary)
 
                     // Bubble content
                     Group {

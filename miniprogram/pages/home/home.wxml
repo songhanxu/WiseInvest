@@ -1,6 +1,7 @@
+<view class="theme-root theme-{{theme}}">
 <view class="home-page safe-area-bottom">
   <view class="content">
-    <view class="header"><view><view class="eyebrow">{{todayLabel}}</view><view class="page-title">研究</view></view><button class="account-button" bindtap="openAccountMenu" hover-class="is-pressed" aria-label="账户选项">{{guest ? '登录' : '账户'}}</button></view>
+    <view class="header"><view><view class="eyebrow">{{todayLabel}}</view><view class="page-title">研究</view></view><view class="header-actions"><button class="theme-switch" bindtap="toggleTheme" aria-label="切换外观">{{theme === 'dark' ? '浅色' : '深色'}}</button><button class="account-button" bindtap="openAccountMenu" hover-class="is-pressed" aria-label="账户选项">{{guest ? '登录' : '账户'}}</button></view></view>
     <view class="quick-actions">
       <view class="quick-action" bindtap="openInvest" hover-class="is-pressed" role="button" aria-label="进入我的投资"><view class="quick-action-copy"><view class="quick-action-title">我的投资</view><view class="quick-action-note">自选与账户持仓</view></view><text class="chevron">›</text></view>
       <view class="quick-action" bindtap="openRoundtable" hover-class="is-pressed" role="button" aria-label="进入慧投圆桌"><view class="quick-action-copy"><view class="quick-action-title">慧投圆桌</view><view class="quick-action-note">一起听听不同观点</view></view><text class="chevron">›</text></view>
@@ -10,4 +11,6 @@
     <block wx:if="{{recentConversations.length}}"><view class="section-heading recent-heading"><view class="section-title">最近研究</view></view><view class="recent-list"><recent-row wx:for="{{recentConversations}}" wx:key="id" conversation="{{item}}" bindtaprow="onTapRecentConversation" binddelete="onDeleteRecentConversation"></recent-row></view></block>
     <view wx:else class="page-note">选择一个市场，开始新的研究。</view>
   </view>
+</view>
+
 </view>

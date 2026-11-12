@@ -1,4 +1,4 @@
-/* Light keeps the existing web palette. Dark follows the iOS navy surfaces. */
+/* Component appearance rules; shared neutral palettes are defined in unified-theme.css. */
 .theme-toggle,
 .login-theme-toggle {
   display: inline-flex;
@@ -19,8 +19,8 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  color: #f2f5fc;
-  background: #0a0e27;
+  color: var(--faint);
+  background: var(--bg);
   --bg: #0a0e27;
   --panel: #1a1f3a;
   --panel-2: #232a47;
@@ -71,13 +71,13 @@
   border-color: var(--line);
 }
 :root[data-theme="dark"] .sidebar,
-:root[data-theme="dark"] .topbar { background: #111831; }
+:root[data-theme="dark"] .topbar { background: var(--panel-2); }
 :root[data-theme="dark"] .brand-mark,
 :root[data-theme="dark"] .primary-action,
 :root[data-theme="dark"] .settings-card .account-submit,
-:root[data-theme="dark"] .auth-callout button { background: #416eab; color: #fff; }
+:root[data-theme="dark"] .auth-callout button { background: var(--blue); color: #fff; }
 :root[data-theme="dark"] .nav-list button.active,
-:root[data-theme="dark"] .mobile-tabs button.active { background: #263755; color: #a9ceff; }
+:root[data-theme="dark"] .mobile-tabs button.active { background: var(--accent-soft); color: var(--blue); }
 :root[data-theme="dark"] .nav-list button:not(.active):hover,
 :root[data-theme="dark"] .home-workspace .market-desk-card:hover,
 :root[data-theme="dark"] .home-workspace .recent-list button:hover,
@@ -110,7 +110,7 @@
 :root[data-theme="dark"] .chat-markdown code,
 :root[data-theme="dark"] .chat-markdown th,
 :root[data-theme="dark"] .chat-markdown tbody tr:nth-child(even) { background: var(--panel-2); color: var(--text); border-color: var(--line); }
-:root[data-theme="dark"] .market-icon { color: #accdf6; background: #283552; }
+:root[data-theme="dark"] .market-icon { color: var(--blue); background: var(--panel-2); }
 :root[data-theme="dark"] .watchlist-filters button.active { color: var(--blue); border-bottom-color: var(--blue); }
 :root[data-theme="dark"] .watchlist-filters button span,
 :root[data-theme="dark"] .watchlist-update-button,
@@ -149,10 +149,10 @@
 :root[data-theme="dark"] .unified-watchlist-table tbody tr:not(.research-expanded-row):hover { background: var(--panel-2); }
 :root[data-theme="dark"] .badge.green,
 :root[data-theme="dark"] .change-pill.positive,
-:root[data-theme="dark"] .account-connection-status.ready { background: #1d4038; color: var(--green); }
+:root[data-theme="dark"] .account-connection-status.ready { background: var(--panel-2); color: var(--green); }
 :root[data-theme="dark"] .badge.red,
 :root[data-theme="dark"] .change-pill.negative,
-:root[data-theme="dark"] .account-connection-status.failed { background: #49303e; color: var(--red); }
+:root[data-theme="dark"] .account-connection-status.failed { background: var(--panel-2); color: var(--red); }
 :root[data-theme="dark"] .account-connection-status,
 :root[data-theme="dark"] .badge.blue,
 :root[data-theme="dark"] .auth-callout,
@@ -168,7 +168,7 @@
 :root[data-theme="dark"] .roundtable-speaker > span,
 :root[data-theme="dark"] .roundtable-mentions button > span,
 :root[data-theme="dark"] .roundtable-role-list > div > span { background: var(--accent-soft); border-color: var(--line); color: var(--blue); }
-:root[data-theme="dark"] .skeleton-block { background-image: linear-gradient(90deg, #293350, #394562, #293350); }
+:root[data-theme="dark"] .skeleton-block { background-image: linear-gradient(90deg, var(--panel-2), var(--panel-2), var(--panel-2)); }
 :root[data-theme="dark"] .decision-verdict p { color: var(--muted); }
 :root[data-theme="dark"] .kline-canvas .grid-line,
 :root[data-theme="dark"] .kline-canvas .volume-separator { stroke: var(--line); }
@@ -177,7 +177,7 @@
 /* Login uses the same selected palette even before the workspace opens. */
 :root[data-theme="dark"] .login-page,
 :root[data-theme="dark"] .login-content { background: var(--bg); color: var(--text); }
-:root[data-theme="dark"] .login-intro { background: #151c37; }
+:root[data-theme="dark"] .login-intro { background: var(--panel-2); }
 :root[data-theme="dark"] .login-brand,
 :root[data-theme="dark"] .login-form label { color: var(--text); }
 :root[data-theme="dark"] .login-kicker,
@@ -201,10 +201,10 @@
 :root[data-theme="dark"] .login-methods button:not(.active),
 :root[data-theme="dark"] .login-method-inline button:not(.active) { color: var(--muted); }
 :root[data-theme="dark"] .login-submit,
-:root[data-theme="dark"] .login-brand-mark { background: #416eab; }
+:root[data-theme="dark"] .login-brand-mark { background: var(--blue); }
 :root[data-theme="dark"] .login-notice { background: var(--panel-2); color: var(--amber); border-color: var(--line); }
-:root[data-theme="dark"] .login-error { background: #49303e; color: var(--red); }
+:root[data-theme="dark"] .login-error { background: var(--warning-bg); color: var(--red); }
 @media (max-width: 920px) {
   .theme-toggle { width: 38px; height: 38px; }
-  :root[data-theme="dark"] .mobile-tabs { background: #151c37; }
+  :root[data-theme="dark"] .mobile-tabs { background: var(--panel-2); }
 }

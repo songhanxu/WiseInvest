@@ -6,6 +6,7 @@ import "./design-system.css";
 import "./research.css";
 import "./login.css";
 import "./theme.css";
+import "./unified-theme.css";
 
 document.documentElement.dataset.theme = localStorage.getItem("wiseinvest.theme") === "dark" ? "dark" : "light";
 

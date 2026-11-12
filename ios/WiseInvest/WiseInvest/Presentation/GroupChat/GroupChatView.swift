@@ -89,7 +89,7 @@ struct GroupChatView: View {
                 ForEach(agents.prefix(4)) { agent in
                     ZStack {
                         Circle()
-                            .fill(agent.color.opacity(0.85))
+                            .fill(Color.textSecondary.opacity(0.7))
                         Image(systemName: agent.icon)
                             .font(.system(size: 7))
                             .foregroundColor(.white)

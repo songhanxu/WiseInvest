@@ -1,10 +1,11 @@
+const { themedPage } = require('../../utils/theme');
 const { request } = require('../../utils/api');
 const { getMarketById } = require('../../utils/market');
 const { renderMarkdown } = require('../../utils/markdown');
 
 const metricLabels = { revenue: '营业收入', net_income: '净利润', operating_income: '营业利润', assets: '总资产', liabilities: '总负债', operating_cash_flow: '经营现金流', diluted_eps: '摊薄每股收益' };
 
-Page({
+Page(themedPage({
   data: {
     market: '', code: '', name: '', symbol: '', fundamentals: null, reports: [], insight: null,
     insightHTML: '', insightCurrent: false, sources: [], targetPrice: '', alert: null, loading: true, error: '',
@@ -133,4 +134,4 @@ Page({
     const url = e.currentTarget.dataset.url;
     if (url && /^https?:\/\//.test(url)) wx.setClipboardData({ data: url });
   },
-});
+}));

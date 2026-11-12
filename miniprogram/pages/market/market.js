@@ -1,7 +1,8 @@
+const { themedPage } = require('../../utils/theme');
 const { request } = require('../../utils/api');
 const { getMarketById } = require('../../utils/market');
 
-Page({
+Page(themedPage({
   data: { market: getMarketById('a_share'), indices: [], stocks: [], results: [], query: '', loading: true, error: '', guest: true },
   searchTimer: null,
   onLoad(options) { this.setData({ market: getMarketById(options.market) }); this.refresh(); },
@@ -40,4 +41,4 @@ Page({
   openAgent() { wx.navigateTo({ url: `/pages/conversation/conversation?market=${this.data.market.id}` }); },
   openInvest() { wx.navigateTo({ url: '/pages/invest/invest' }); },
   goLogin() { wx.navigateTo({ url: '/pages/login/login' }); },
-});
+}));

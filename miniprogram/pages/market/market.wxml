@@ -1,3 +1,4 @@
+<view class="theme-root theme-{{theme}}">
 <view class="market-page safe-area-bottom">
   <view class="intro"><view class="title">{{market.displayName}}</view><view class="subtitle">{{market.subtitle}}</view></view>
   <view wx:if="{{error}}" class="error">{{error}}</view>
@@ -8,4 +9,6 @@
   <view wx:if="{{results.length}}" class="grouped-list"><view wx:for="{{results}}" wx:key="id" class="stock list-row" data-index="{{index}}" data-collection="results" bindtap="openStock"><view><view class="name">{{item.name}}</view><view class="muted">{{item.symbol}}</view></view><text class="chevron">›</text></view></view>
   <view class="section-title space">自选</view><view wx:if="{{guest}}" class="empty card">登录后查看你的自选。<button bindtap="goLogin">登录</button></view><view wx:elif="{{!stocks.length}}" class="empty card">还没有自选标的</view>
   <view wx:if="{{stocks.length}}" class="grouped-list"><view wx:for="{{stocks}}" wx:key="id" class="stock list-row" data-index="{{index}}" data-collection="stocks" bindtap="openStock"><view><view class="name">{{item.name}}</view><view class="muted">{{item.symbol}}</view></view><view class="right"><view class="value">{{item.current_price}}</view><view class="change {{item.change_percent >= 0 ? 'positive' : 'negative'}}">{{item.change_percent}}%</view></view></view></view>
+</view>
+
 </view>

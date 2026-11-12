@@ -85,7 +85,7 @@ struct InvestmentResearchView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 14) {
-                    Text("财报原文与指标").font(.headline)
+                    DisclosureGroup("财报原文与指标") {
                     if fundamentals?.financialReports?.isEmpty != false {
                         Text("暂无可核验的财报").font(.subheadline).foregroundStyle(.secondary)
                     }
@@ -111,6 +111,7 @@ struct InvestmentResearchView: View {
                             }
                         }
                         .padding(.vertical, 8)
+                    }
                     }
                 }.researchCard()
 

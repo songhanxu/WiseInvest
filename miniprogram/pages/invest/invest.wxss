@@ -1,36 +1,36 @@
 .invest { width: 100%; max-width: 1040rpx; margin: auto; padding: 28rpx 36rpx; padding-bottom: calc(32rpx + env(safe-area-inset-bottom)); }
-.tabs { display: flex; padding: 5rpx; margin-bottom: 28rpx; border-radius: 40rpx; background: #e5e5ea; }
-.tabs button { flex: 1; min-width: 0; min-height: 44px; padding: 16rpx 8rpx; border-radius: 36rpx; color: #8e8e93; font-size: 27rpx; }
-.tabs .active { color: #1c1c1e; background: #fff; font-weight: 600; }
+.tabs { display: flex; padding: 5rpx; margin-bottom: 28rpx; border-radius: 40rpx; background: var(--ui-fill); }
+.tabs button { flex: 1; min-width: 0; min-height: 44px; padding: 16rpx 8rpx; border-radius: 36rpx; color: var(--ui-muted); font-size: 27rpx; }
+.tabs .active { color: var(--ui-text); background: var(--ui-panel); font-weight: 600; }
 .search { margin-bottom: 24rpx; }
-.search input { width: 100%; height: 88rpx; padding: 0 26rpx; border: 0; border-radius: 14rpx; background: #fff; font-size: 27rpx; }
-.search-row { display: flex; align-items: center; padding: 22rpx 12rpx; border-bottom: 1rpx solid #e5e5ea; }
+.search input { width: 100%; height: 88rpx; padding: 0 26rpx; border: 0; border-radius: 14rpx; background: var(--ui-panel); font-size: 27rpx; }
+.search-row { display: flex; align-items: center; padding: 22rpx 12rpx; border-bottom: 1rpx solid var(--ui-fill); }
 .search-row > view { flex: 1; min-width: 0; }
-.search-row button { min-width: 44px; min-height: 44px; padding: 16rpx; color: #007aff; font-size: 25rpx; }
+.search-row button { min-width: 44px; min-height: 44px; padding: 16rpx; color: var(--ui-accent); font-size: 25rpx; }
 .filters { width: 100%; margin: 0 0 24rpx; white-space: nowrap; }
 .filter-inner { display: flex; }
-.filter { flex: none; min-width: 44px; min-height: 44px; margin-right: 12rpx; padding: 16rpx 24rpx; border-radius: 40rpx; background: #fff; color: #8e8e93; font-size: 25rpx; }
-.filter:last-child { margin-right: 0; }.selected { color: #fff; background: #007aff; }
+.filter { flex: none; min-width: 44px; min-height: 44px; margin-right: 12rpx; padding: 16rpx 24rpx; border-radius: 40rpx; background: var(--ui-panel); color: var(--ui-muted); font-size: 25rpx; }
+.filter:last-child { margin-right: 0; }.selected { color: var(--ui-on-accent); background: var(--ui-accent); }
 .row-title { font-size: 30rpx; font-weight: 600; line-height: 1.45; overflow-wrap: anywhere; }
-.code { display: block; margin: 6rpx 0; color: #8e8e93; font-size: 23rpx; font-weight: 400; }
+.code { display: block; margin: 6rpx 0; color: var(--ui-muted); font-size: 23rpx; font-weight: 400; }
 .stock-head, .stock-bottom { display: flex; align-items: center; }
 .stock-head { align-items: flex-start; margin-bottom: 18rpx; }.stock-head > view { flex: 1; min-width: 0; }
 .stock-bottom { flex-wrap: wrap; margin-top: 12rpx; }.stock-bottom > view { margin-right: 18rpx; }
 .price { min-width: 0; font-size: 36rpx; font-weight: 600; line-height: 1.4; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.price text { font-size: 23rpx; font-weight: 400; color: #8e8e93; }.change { font-size: 25rpx; }
-.arrow { margin-left: auto; color: #8e8e93; font-size: 32rpx; }
-.remove { flex: none; min-width: 44px; min-height: 44px; margin: -10rpx -14rpx 0 8rpx; padding: 18rpx 8rpx; color: #8e8e93; font-size: 23rpx; }
+.price text { font-size: 23rpx; font-weight: 400; color: var(--ui-muted); }.change { font-size: 25rpx; }
+.arrow { margin-left: auto; color: var(--ui-muted); font-size: 32rpx; }
+.remove { flex: none; min-width: 44px; min-height: 44px; margin: -10rpx -14rpx 0 8rpx; padding: 18rpx 8rpx; color: var(--ui-muted); font-size: 23rpx; }
 .account .muted, .equity .price { margin-top: 8rpx; }
-.holding-alert { display: flex; flex-wrap: wrap; align-items: center; margin-top: 22rpx; padding-top: 18rpx; border-top: 1rpx solid #f2f2f7; }
-.holding-alert input { flex: 1 1 100%; width: 100%; height: 80rpx; margin-bottom: 10rpx; background: #f2f2f7; border-radius: 12rpx; padding: 0 20rpx; font-size: 26rpx; }
-.holding-alert button { min-height: 44px; padding: 14rpx 18rpx; color: #007aff; font-size: 24rpx; }
-.settings input { width: 100%; height: 88rpx; padding: 0 22rpx; margin: 22rpx 0 16rpx; border-radius: 12rpx; background: #f2f2f7; font-size: 27rpx; }
-.settings button { width: 100%; min-height: 44px; margin-bottom: 16rpx; padding: 16rpx; border-radius: 12rpx; color: #fff; background: #007aff; font-size: 26rpx; }
-.sync-notice { padding: 20rpx 24rpx; margin-bottom: 20rpx; background: #f5eee4; border-radius: 14rpx; color: #8c6947; font-size: 24rpx; line-height: 1.6; }.sync-summary { display: flex; justify-content: space-between; min-height: 44px; align-items: center; }.sync-summary text { margin-left: 16rpx; flex: none; }.sync-detail { padding-top: 14rpx; overflow-wrap: anywhere; }
+.holding-alert { display: flex; flex-wrap: wrap; align-items: center; margin-top: 22rpx; padding-top: 18rpx; border-top: 1rpx solid var(--ui-bg); }
+.holding-alert input { flex: 1 1 100%; width: 100%; height: 80rpx; margin-bottom: 10rpx; background: var(--ui-bg); border-radius: 12rpx; padding: 0 20rpx; font-size: 26rpx; }
+.holding-alert button { min-height: 44px; padding: 14rpx 18rpx; color: var(--ui-accent); font-size: 24rpx; }
+.settings input { width: 100%; height: 88rpx; padding: 0 22rpx; margin: 22rpx 0 16rpx; border-radius: 12rpx; background: var(--ui-bg); font-size: 27rpx; }
+.settings button { width: 100%; min-height: 44px; margin-bottom: 16rpx; padding: 16rpx; border-radius: 12rpx; color: var(--ui-on-accent); background: var(--ui-accent); font-size: 26rpx; }
+.sync-notice { padding: 20rpx 24rpx; margin-bottom: 20rpx; background: var(--ui-warning-bg); border-radius: 14rpx; color: var(--ui-warning); font-size: 24rpx; line-height: 1.6; }.sync-summary { display: flex; justify-content: space-between; min-height: 44px; align-items: center; }.sync-summary text { margin-left: 16rpx; flex: none; }.sync-detail { padding-top: 14rpx; overflow-wrap: anywhere; }
 @media (max-width: 340px) { .invest { padding-left: 28rpx; padding-right: 28rpx; }.filter { padding-left: 20rpx; padding-right: 20rpx; } }
 
 .invest .intro { padding-bottom: 28rpx; }.invest .title { font-size: 60rpx; font-weight: 700; letter-spacing: -1.5rpx; }
-.search input { border: 0; background: #e9e9ee; }
-.tabs { background: #e3e3e8; }.tabs .active { color: #1c1c1e; box-shadow: 0 2rpx 6rpx rgba(0,0,0,.05); }
-.filter { background: transparent; color: #8e8e93; }.filter.selected { background: #fff; color: #1c1c1e; font-weight: 600; }
+.search input { border: 0; background: var(--ui-fill); }
+.tabs { background: var(--ui-fill); }.tabs .active { color: var(--ui-text); box-shadow: 0 2rpx 6rpx rgba(0,0,0,.05); }
+.filter { background: transparent; color: var(--ui-muted); }.filter.selected { background: var(--ui-panel); color: var(--ui-text); font-weight: 600; }
 .row-title { font-weight: 500; }.price { letter-spacing: -.6rpx; }.stock { margin-bottom: 16rpx; }

@@ -1,5 +1,5 @@
 :host { display: block; }
-.market-card { display: flex; align-items: center; width: 100%; min-height: 130rpx; margin: 0; padding: 24rpx 30rpx; border: 0; border-radius: 0; background: #fff; text-align: left; box-sizing: border-box; color: #1c1c1e; line-height: 1.4; }
+.market-card { display: flex; align-items: center; width: 100%; min-height: 130rpx; margin: 0; padding: 24rpx 30rpx; border: 0; border-radius: 0; background: var(--ui-panel); text-align: left; box-sizing: border-box; color: var(--ui-text); line-height: 1.4; }
 .market-card::after { border: 0; }
-.market-symbol { flex: none; display: flex; align-items: center; justify-content: center; width: 64rpx; height: 64rpx; margin-right: 24rpx; border-radius: 16rpx; color: #636366; background: #f2f2f7; font-size: 24rpx; font-weight: 600; }
-.market-content { flex: 1; min-width: 0; }.market-name { font-size: 31rpx; font-weight: 500; }.market-subtitle { margin-top: 5rpx; color: #8e8e93; font-size: 23rpx; }.market-arrow { flex: none; margin-left: 20rpx; color: #c7c7cc; font-size: 36rpx; font-weight: 300; }.market-card-pressed { background: #f9f9fb; }
+.market-symbol { flex: none; display: flex; align-items: center; justify-content: center; width: 64rpx; height: 64rpx; margin-right: 24rpx; border-radius: 16rpx; color: var(--ui-secondary); background: var(--ui-bg); font-size: 24rpx; font-weight: 600; }
+.market-content { flex: 1; min-width: 0; }.market-name { font-size: 31rpx; font-weight: 500; }.market-subtitle { margin-top: 5rpx; color: var(--ui-muted); font-size: 23rpx; }.market-arrow { flex: none; margin-left: 20rpx; color: var(--ui-faint); font-size: 36rpx; font-weight: 300; }.market-card-pressed { background: var(--ui-hover); }

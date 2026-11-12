@@ -1,11 +1,11 @@
 :host { display: block; }
-.row { width: 100%; min-height: 126rpx; padding: 22rpx 20rpx; margin: 0; border: 0; border-radius: 12rpx; background: #fff; color: #1c1c1e; text-align: left; display: flex; align-items: center; gap: 20rpx; box-sizing: border-box; }
-.row::after { border: 0; }.row-pressed { background: #f2f2f7; }
-.icon-box { width: 62rpx; height: 62rpx; flex-shrink: 0; border-radius: 12rpx; background: #f2f2f7; color: #48484a; display: flex; align-items: center; justify-content: center; font-size: 23rpx; font-weight: 500; }
+.row { width: 100%; min-height: 126rpx; padding: 22rpx 20rpx; margin: 0; border: 0; border-radius: 12rpx; background: var(--ui-panel); color: var(--ui-text); text-align: left; display: flex; align-items: center; gap: 20rpx; box-sizing: border-box; }
+.row::after { border: 0; }.row-pressed { background: var(--ui-bg); }
+.icon-box { width: 62rpx; height: 62rpx; flex-shrink: 0; border-radius: 12rpx; background: var(--ui-bg); color: var(--ui-secondary); display: flex; align-items: center; justify-content: center; font-size: 23rpx; font-weight: 500; }
 .meta { flex: 1; min-width: 0; }
-.title { color: #1c1c1e; font-size: 27rpx; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.description { margin-top: 8rpx; color: #8e8e93; font-size: 21rpx; }
-.meta-dot { padding: 0 10rpx; color: #8e8e93; }
-.arrow { color: #8e8e93; font-size: 34rpx; padding-left: 8rpx; }
+.title { color: var(--ui-text); font-size: 27rpx; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.description { margin-top: 8rpx; color: var(--ui-muted); font-size: 21rpx; }
+.meta-dot { padding: 0 10rpx; color: var(--ui-muted); }
+.arrow { color: var(--ui-muted); font-size: 34rpx; padding-left: 8rpx; }
 
-.row { min-height: 126rpx; padding-left: 28rpx; padding-right: 28rpx; border-radius: 0; }.icon-box { width: 52rpx; height: 52rpx; background: #f2f2f7; color: #8e8e93; }.title { font-weight: 500; color: #1c1c1e; }.arrow { color: #c7c7cc; }
+.row { min-height: 126rpx; padding-left: 28rpx; padding-right: 28rpx; border-radius: 0; }.icon-box { width: 52rpx; height: 52rpx; background: var(--ui-bg); color: var(--ui-muted); }.title { font-weight: 500; color: var(--ui-text); }.arrow { color: var(--ui-faint); }
